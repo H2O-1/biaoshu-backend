@@ -13,11 +13,15 @@ import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
+/**
+ * 用 JDBC 操作用户、角色相关表。
+ */
 @Repository
 public class JdbcUserRepository implements UserRepository {
 
@@ -35,64 +39,69 @@ public class JdbcUserRepository implements UserRepository {
             rs.getString("display_name"),
             rs.getString("status"),
             toInstant(rs.getTimestamp("created_at")),
-            Set.of()
+            new HashSet<>()
     );
 
     @Override
     public Optional<UserAccount> findByUsername(String username) {
         List<UserAccount> list = jdbcTemplate.query(
-                """
-                        SELECT id, org_id, username, password_hash, display_name, status, created_at
-                        FROM sys_user WHERE username = ?
-                        """,
+                "SELECT id, org_id, username, password_hash, display_name, status, created_at "
+                        + "FROM sys_user WHERE username = ?",
                 userRowMapper,
                 username
         );
-        return list.stream().findFirst().map(this::withRoles);
+        if (list.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(withRoles(list.get(0)));
     }
 
     @Override
     public Optional<UserAccount> findById(long userId) {
         List<UserAccount> list = jdbcTemplate.query(
-                """
-                        SELECT id, org_id, username, password_hash, display_name, status, created_at
-                        FROM sys_user WHERE id = ?
-                        """,
+                "SELECT id, org_id, username, password_hash, display_name, status, created_at "
+                        + "FROM sys_user WHERE id = ?",
                 userRowMapper,
                 userId
         );
-        return list.stream().findFirst().map(this::withRoles);
+        if (list.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(withRoles(list.get(0)));
     }
 
     @Override
     public List<UserAccount> search(String keyword, int offset, int limit) {
         String like = "%" + keyword + "%";
         List<UserAccount> users = jdbcTemplate.query(
-                """
-                        SELECT id, org_id, username, password_hash, display_name, status, created_at
-                        FROM sys_user
-                        WHERE (? = '' OR username LIKE ? OR display_name LIKE ?)
-                        ORDER BY id
-                        LIMIT ? OFFSET ?
-                        """,
+                "SELECT id, org_id, username, password_hash, display_name, status, created_at "
+                        + "FROM sys_user "
+                        + "WHERE (? = '' OR username LIKE ? OR display_name LIKE ?) "
+                        + "ORDER BY id LIMIT ? OFFSET ?",
                 userRowMapper,
                 keyword, like, like, limit, offset
         );
-        return users.stream().map(this::withRoles).toList();
+
+        List<UserAccount> result = new ArrayList<>();
+        for (UserAccount user : users) {
+            result.add(withRoles(user));
+        }
+        return result;
     }
 
     @Override
     public long countSearch(String keyword) {
         String like = "%" + keyword + "%";
         Long count = jdbcTemplate.queryForObject(
-                """
-                        SELECT COUNT(1) FROM sys_user
-                        WHERE (? = '' OR username LIKE ? OR display_name LIKE ?)
-                        """,
+                "SELECT COUNT(1) FROM sys_user "
+                        + "WHERE (? = '' OR username LIKE ? OR display_name LIKE ?)",
                 Long.class,
                 keyword, like, like
         );
-        return count == null ? 0 : count;
+        if (count == null) {
+            return 0;
+        }
+        return count;
     }
 
     @Override
@@ -101,7 +110,8 @@ public class JdbcUserRepository implements UserRepository {
         for (String roleCode : roleCodes) {
             jdbcTemplate.update(
                     "INSERT INTO sys_user_role(user_id, role_code) VALUES (?, ?)",
-                    userId, roleCode
+                    userId,
+                    roleCode
             );
         }
     }
@@ -113,7 +123,10 @@ public class JdbcUserRepository implements UserRepository {
                 Long.class,
                 roleCode
         );
-        return count == null ? 0 : count;
+        if (count == null) {
+            return 0;
+        }
+        return count;
     }
 
     @Override
@@ -131,10 +144,8 @@ public class JdbcUserRepository implements UserRepository {
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(con -> {
             PreparedStatement ps = con.prepareStatement(
-                    """
-                            INSERT INTO sys_user(org_id, username, password_hash, display_name, status, created_at, updated_at)
-                            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                            """,
+                    "INSERT INTO sys_user(org_id, username, password_hash, display_name, status, created_at, updated_at) "
+                            + "VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
                     Statement.RETURN_GENERATED_KEYS
             );
             ps.setLong(1, orgId);
@@ -144,7 +155,11 @@ public class JdbcUserRepository implements UserRepository {
             ps.setString(5, status);
             return ps;
         }, keyHolder);
-        Number key = keyHolder.getKeys() == null ? null : (Number) keyHolder.getKeys().get("id");
+
+        Number key = null;
+        if (keyHolder.getKeys() != null && keyHolder.getKeys().get("id") != null) {
+            key = (Number) keyHolder.getKeys().get("id");
+        }
         if (key == null) {
             key = keyHolder.getKey();
         }
@@ -160,7 +175,10 @@ public class JdbcUserRepository implements UserRepository {
                 "SELECT id FROM sys_org WHERE code = 'SYSTEM' LIMIT 1",
                 (rs, rowNum) -> rs.getLong(1)
         );
-        return ids.stream().findFirst();
+        if (ids.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(ids.get(0));
     }
 
     @Override
@@ -171,25 +189,29 @@ public class JdbcUserRepository implements UserRepository {
         );
     }
 
+    /** 把用户的角色查出来，填进 UserAccount */
     private UserAccount withRoles(UserAccount user) {
         List<String> roles = jdbcTemplate.query(
                 "SELECT role_code FROM sys_user_role WHERE user_id = ? ORDER BY role_code",
                 (rs, rowNum) -> rs.getString(1),
-                user.id()
+                user.getId()
         );
         return new UserAccount(
-                user.id(),
-                user.orgId(),
-                user.username(),
-                user.passwordHash(),
-                user.displayName(),
-                user.status(),
-                user.createdAt(),
+                user.getId(),
+                user.getOrgId(),
+                user.getUsername(),
+                user.getPasswordHash(),
+                user.getDisplayName(),
+                user.getStatus(),
+                user.getCreatedAt(),
                 new HashSet<>(roles)
         );
     }
 
     private static Instant toInstant(Timestamp ts) {
-        return ts == null ? null : ts.toInstant();
+        if (ts == null) {
+            return null;
+        }
+        return ts.toInstant();
     }
 }

@@ -11,10 +11,13 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.HashSet;
+import java.util.Optional;
 import java.util.Set;
 
 /**
- * 首次启动时若无平台管理员，则用环境变量创建引导账号。密码不进 Flyway。
+ * 启动时检查：如果还没有平台管理员，就自动创建一个。
+ * 密码从配置读取，不写进 SQL 文件。
  */
 @Component
 public class BootstrapAdminRunner implements ApplicationRunner {
@@ -49,27 +52,35 @@ public class BootstrapAdminRunner implements ApplicationRunner {
         if (!enabled) {
             return;
         }
+
         long adminCount = userRepository.countUsersWithRole(RoleCode.PLATFORM_ADMIN.name());
         if (adminCount > 0) {
+            // 已经有管理员了，什么都不做
             return;
         }
-        if (password == null || password.isBlank()) {
+
+        if (password == null || password.trim().isEmpty()) {
             throw new IllegalStateException(
                     "系统无平台管理员，请设置环境变量 BOOTSTRAP_ADMIN_PASSWORD 后启动");
         }
-        long orgId = userRepository.findSystemOrgId()
-                .orElseThrow(() -> new IllegalStateException("缺少系统组织种子数据"));
+
+        Optional<Long> optionalOrgId = userRepository.findSystemOrgId();
+        if (optionalOrgId.isEmpty()) {
+            throw new IllegalStateException("缺少系统组织种子数据");
+        }
+        long orgId = optionalOrgId.get();
+
         if (userRepository.existsByUsername(username)) {
             throw new IllegalStateException("引导用户名已存在但无平台管理员角色: " + username);
         }
-        long userId = userRepository.insert(
-                orgId,
-                username,
-                passwordEncoder.encode(password),
-                displayName,
-                "ACTIVE"
-        );
-        userRepository.replaceRoles(userId, Set.of(RoleCode.PLATFORM_ADMIN.name()));
+
+        String passwordHash = passwordEncoder.encode(password);
+        long userId = userRepository.insert(orgId, username, passwordHash, displayName, "ACTIVE");
+
+        Set<String> roles = new HashSet<>();
+        roles.add(RoleCode.PLATFORM_ADMIN.name());
+        userRepository.replaceRoles(userId, roles);
+
         log.warn("已创建引导平台管理员账号 username={}，请尽快修改密码", username);
     }
 }

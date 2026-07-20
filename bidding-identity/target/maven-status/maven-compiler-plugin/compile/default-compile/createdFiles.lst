@@ -5,7 +5,6 @@ com\bidding\identity\infrastructure\security\JwtTokenService.class
 com\bidding\identity\adapter\web\AuthController$LoginRequest.class
 com\bidding\identity\application\BootstrapAdminRunner.class
 com\bidding\identity\domain\model\Role.class
-com\bidding\identity\adapter\web\IdentityExceptionHandler$1.class
 com\bidding\identity\infrastructure\persistence\JdbcUserRepository.class
 com\bidding\identity\adapter\web\AdminUserController$ReplaceRolesRequest.class
 com\bidding\identity\adapter\web\AuthController.class

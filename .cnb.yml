@@ -1,0 +1,23 @@
+# CNB 云原生构建：推送 / PR 时自动编译测试
+# 文档：https://docs.cnb.cool/zh/build/quick-start.md
+
+main:
+  push:
+    - name: build-and-test
+      docker:
+        image: maven:3.9.6-eclipse-temurin-17
+      stages:
+        - name: test
+          script: mvn -B -pl bidding-api -am test -Dsurefire.failIfNoSpecifiedTests=false
+        - name: package
+          script: mvn -B -pl bidding-api -am package -DskipTests
+
+  pull_request:
+    - name: pr-check
+      docker:
+        image: maven:3.9.6-eclipse-temurin-17
+      stages:
+        - name: test
+          script: mvn -B -pl bidding-api -am test -Dsurefire.failIfNoSpecifiedTests=false
+        - name: package
+          script: mvn -B -pl bidding-api -am package -DskipTests

@@ -1,11 +1,8 @@
 package com.bidding.identity.domain.model;
 
-import java.util.Arrays;
-import java.util.Locale;
-import java.util.Optional;
-
 /**
- * 平台级角色（挂在账号上，与项目成员角色分离）。
+ * 平台角色。
+ * 注意：这是账号上的角色，不是项目里的成员角色。
  */
 public enum RoleCode {
     PLATFORM_ADMIN("平台管理员"),
@@ -19,22 +16,23 @@ public enum RoleCode {
         this.displayName = displayName;
     }
 
-    public String displayName() {
+    public String getDisplayName() {
         return displayName;
     }
 
-    public static Optional<RoleCode> tryParse(String raw) {
-        if (raw == null || raw.isBlank()) {
-            return Optional.empty();
+    /**
+     * 把字符串转成角色。转不了返回 null。
+     */
+    public static RoleCode tryParse(String raw) {
+        if (raw == null || raw.trim().isEmpty()) {
+            return null;
         }
-        String normalized = raw.trim().toUpperCase(Locale.ROOT);
-        return Arrays.stream(values())
-                .filter(r -> r.name().equals(normalized))
-                .findFirst();
-    }
-
-    public static RoleCode parse(String raw) {
-        return tryParse(raw)
-                .orElseThrow(() -> new IllegalArgumentException("未知角色: " + raw));
+        String name = raw.trim().toUpperCase();
+        for (RoleCode role : RoleCode.values()) {
+            if (role.name().equals(name)) {
+                return role;
+            }
+        }
+        return null;
     }
 }

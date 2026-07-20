@@ -17,6 +17,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -42,7 +43,9 @@ class AdminUserAppServiceTest {
 
     @BeforeEach
     void setUp() {
-        UserContext.set(new CurrentUser(1L, 1L, "admin", Set.of(RoleCode.PLATFORM_ADMIN.name())));
+        Set<String> roles = new HashSet<>();
+        roles.add(RoleCode.PLATFORM_ADMIN.name());
+        UserContext.set(new CurrentUser(1L, 1L, "admin", roles));
     }
 
     @AfterEach
@@ -52,14 +55,20 @@ class AdminUserAppServiceTest {
 
     @Test
     void nonAdminForbidden() {
-        UserContext.set(new CurrentUser(2L, 1L, "bidder", Set.of(RoleCode.BIDDER.name())));
+        Set<String> roles = new HashSet<>();
+        roles.add(RoleCode.BIDDER.name());
+        UserContext.set(new CurrentUser(2L, 1L, "bidder", roles));
+
         BizException ex = assertThrows(BizException.class, () -> adminUserAppService.listRoles());
         assertEquals(ErrorCode.FORBIDDEN, ex.errorCode());
     }
 
     @Test
     void rejectUnknownRole() {
-        when(userRepository.findById(9L)).thenReturn(Optional.of(user(9L, Set.of(RoleCode.BIDDER.name()))));
+        Set<String> roles = new HashSet<>();
+        roles.add(RoleCode.BIDDER.name());
+        when(userRepository.findById(9L)).thenReturn(Optional.of(user(9L, roles)));
+
         BizException ex = assertThrows(BizException.class,
                 () -> adminUserAppService.replaceRoles(9L, List.of("NOT_A_ROLE")));
         assertEquals(ErrorCode.BAD_REQUEST, ex.errorCode());
@@ -68,7 +77,9 @@ class AdminUserAppServiceTest {
 
     @Test
     void keepAtLeastOnePlatformAdmin() {
-        when(userRepository.findById(1L)).thenReturn(Optional.of(user(1L, Set.of(RoleCode.PLATFORM_ADMIN.name()))));
+        Set<String> roles = new HashSet<>();
+        roles.add(RoleCode.PLATFORM_ADMIN.name());
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user(1L, roles)));
         when(userRepository.countUsersWithRole(RoleCode.PLATFORM_ADMIN.name())).thenReturn(1L);
 
         BizException ex = assertThrows(BizException.class,
@@ -79,14 +90,23 @@ class AdminUserAppServiceTest {
 
     @Test
     void replaceRolesSuccess() {
-        when(userRepository.findById(9L))
-                .thenReturn(Optional.of(user(9L, Set.of(RoleCode.BIDDER.name()))))
-                .thenReturn(Optional.of(user(9L, Set.of(RoleCode.TENDERER.name(), RoleCode.EXPERT.name()))));
+        Set<String> oldRoles = new HashSet<>();
+        oldRoles.add(RoleCode.BIDDER.name());
 
-        var result = adminUserAppService.replaceRoles(9L, List.of("TENDERER", "EXPERT"));
-        assertTrue(result.roleCodes().contains("TENDERER"));
-        assertTrue(result.roleCodes().contains("EXPERT"));
-        verify(userRepository).replaceRoles(eq(9L), eq(Set.of("TENDERER", "EXPERT")));
+        Set<String> newRoles = new HashSet<>();
+        newRoles.add(RoleCode.TENDERER.name());
+        newRoles.add(RoleCode.EXPERT.name());
+
+        when(userRepository.findById(9L))
+                .thenReturn(Optional.of(user(9L, oldRoles)))
+                .thenReturn(Optional.of(user(9L, newRoles)));
+
+        AdminUserAppService.UserSummary result =
+                adminUserAppService.replaceRoles(9L, List.of("TENDERER", "EXPERT"));
+
+        assertTrue(result.getRoleCodes().contains("TENDERER"));
+        assertTrue(result.getRoleCodes().contains("EXPERT"));
+        verify(userRepository).replaceRoles(eq(9L), eq(newRoles));
     }
 
     @Test

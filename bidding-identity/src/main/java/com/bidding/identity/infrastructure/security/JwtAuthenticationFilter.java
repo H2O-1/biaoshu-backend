@@ -14,8 +14,13 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * 每个请求都会经过这里。
+ * 如果带了 Bearer Token，就解析出当前用户。
+ */
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
@@ -37,19 +42,24 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     try {
                         CurrentUser user = jwtTokenService.parse(token);
                         UserContext.set(user);
-                        List<SimpleGrantedAuthority> authorities = user.roleCodes().stream()
-                                .map(code -> new SimpleGrantedAuthority("ROLE_" + code))
-                                .toList();
-                        var authentication = new UsernamePasswordAuthenticationToken(
-                                user, null, authorities);
+
+                        // Spring Security 要求权限名是 ROLE_xxx
+                        List<SimpleGrantedAuthority> authorities = new ArrayList<>();
+                        for (String roleCode : user.getRoleCodes()) {
+                            authorities.add(new SimpleGrantedAuthority("ROLE_" + roleCode));
+                        }
+
+                        UsernamePasswordAuthenticationToken authentication =
+                                new UsernamePasswordAuthenticationToken(user, null, authorities);
                         SecurityContextHolder.getContext().setAuthentication(authentication);
                     } catch (Exception ignored) {
-                        // 无效 token 按未登录处理，由后续鉴权返回 401
+                        // token 坏了就当没登录
                     }
                 }
             }
             filterChain.doFilter(request, response);
         } finally {
+            // 请求结束一定要清掉，防止线程复用时串号
             UserContext.clear();
             SecurityContextHolder.clearContext();
         }

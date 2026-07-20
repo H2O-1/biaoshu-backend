@@ -12,6 +12,9 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+/**
+ * 统一处理异常，转成 ApiResponse 返回给前端。
+ */
 @RestControllerAdvice
 public class IdentityExceptionHandler {
 
@@ -33,8 +36,11 @@ public class IdentityExceptionHandler {
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiResponse<Void>> handleValidation(MethodArgumentNotValidException ex) {
+        String message = ErrorCode.BAD_REQUEST.defaultMessage();
         FieldError fieldError = ex.getBindingResult().getFieldError();
-        String message = fieldError == null ? ErrorCode.BAD_REQUEST.defaultMessage() : fieldError.getDefaultMessage();
+        if (fieldError != null && fieldError.getDefaultMessage() != null) {
+            message = fieldError.getDefaultMessage();
+        }
         return ResponseEntity.badRequest()
                 .body(ApiResponse.fail(ErrorCode.BAD_REQUEST.code(), message));
     }

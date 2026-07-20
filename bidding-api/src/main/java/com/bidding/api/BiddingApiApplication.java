@@ -3,6 +3,12 @@ package com.bidding.api;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
+/**
+ * HTTP 入口启动类。
+ * <p>
+ * scanBasePackages 扫到 com.bidding，从而加载 identity 等业务模块的 Bean。
+ * 排除默认 UserDetailsService：本系统用 JWT，不走 Spring Security 内存用户。
+ */
 @SpringBootApplication(scanBasePackages = "com.bidding", exclude = {
         org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration.class
 })

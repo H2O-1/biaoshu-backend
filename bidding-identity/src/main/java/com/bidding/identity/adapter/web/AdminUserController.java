@@ -16,6 +16,9 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
+/**
+ * 平台管理接口（只有平台管理员能调用）。
+ */
 @RestController
 @RequestMapping("/api/admin")
 public class AdminUserController {
@@ -44,13 +47,27 @@ public class AdminUserController {
         return ApiResponse.ok(adminUserAppService.getUser(userId));
     }
 
+    /**
+     * 全量设置用户角色。
+     * 例子：{"roleCodes":["TENDERER","EXPERT"]}
+     */
     @PutMapping("/users/{userId}/roles")
     public ApiResponse<AdminUserAppService.UserSummary> replaceRoles(
             @PathVariable long userId,
             @Valid @RequestBody ReplaceRolesRequest request) {
-        return ApiResponse.ok(adminUserAppService.replaceRoles(userId, request.roleCodes()));
+        return ApiResponse.ok(adminUserAppService.replaceRoles(userId, request.getRoleCodes()));
     }
 
-    public record ReplaceRolesRequest(@NotEmpty List<String> roleCodes) {
+    public static class ReplaceRolesRequest {
+        @NotEmpty
+        private List<String> roleCodes;
+
+        public List<String> getRoleCodes() {
+            return roleCodes;
+        }
+
+        public void setRoleCodes(List<String> roleCodes) {
+            this.roleCodes = roleCodes;
+        }
     }
 }

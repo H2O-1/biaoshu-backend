@@ -7,6 +7,10 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
+/**
+ * 用户和角色的数据库操作接口。
+ * 具体怎么查库，看 JdbcUserRepository。
+ */
 public interface UserRepository {
 
     Optional<UserAccount> findByUsername(String username);
@@ -17,6 +21,7 @@ public interface UserRepository {
 
     long countSearch(String keyword);
 
+    /** 覆盖写入用户的全部角色 */
     void replaceRoles(long userId, Set<String> roleCodes);
 
     long countUsersWithRole(String roleCode);
@@ -25,6 +30,7 @@ public interface UserRepository {
 
     long insert(long orgId, String username, String passwordHash, String displayName, String status);
 
+    /** 查找系统组织 id（code = SYSTEM） */
     Optional<Long> findSystemOrgId();
 
     List<Role> listRoles();

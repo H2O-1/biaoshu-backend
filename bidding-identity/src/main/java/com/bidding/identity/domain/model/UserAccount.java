@@ -1,19 +1,77 @@
 package com.bidding.identity.domain.model;
 
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.Set;
 
-public record UserAccount(
-        long id,
-        long orgId,
-        String username,
-        String passwordHash,
-        String displayName,
-        String status,
-        Instant createdAt,
-        Set<String> roleCodes
-) {
-    public boolean enabled() {
+/** 用户账号 */
+public class UserAccount {
+
+    private final long id;
+    private final long orgId;
+    private final String username;
+    private final String passwordHash;
+    private final String displayName;
+    private final String status;
+    private final Instant createdAt;
+    private final Set<String> roleCodes;
+
+    public UserAccount(long id,
+                       long orgId,
+                       String username,
+                       String passwordHash,
+                       String displayName,
+                       String status,
+                       Instant createdAt,
+                       Set<String> roleCodes) {
+        this.id = id;
+        this.orgId = orgId;
+        this.username = username;
+        this.passwordHash = passwordHash;
+        this.displayName = displayName;
+        this.status = status;
+        this.createdAt = createdAt;
+        if (roleCodes == null) {
+            this.roleCodes = new HashSet<>();
+        } else {
+            this.roleCodes = new HashSet<>(roleCodes);
+        }
+    }
+
+    public long getId() {
+        return id;
+    }
+
+    public long getOrgId() {
+        return orgId;
+    }
+
+    public String getUsername() {
+        return username;
+    }
+
+    public String getPasswordHash() {
+        return passwordHash;
+    }
+
+    public String getDisplayName() {
+        return displayName;
+    }
+
+    public String getStatus() {
+        return status;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public Set<String> getRoleCodes() {
+        return roleCodes;
+    }
+
+    /** 是否允许登录 */
+    public boolean isEnabled() {
         return "ACTIVE".equalsIgnoreCase(status);
     }
 }
