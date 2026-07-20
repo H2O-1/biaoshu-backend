@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="CompilerConfiguration">
+    <annotationProcessing>
+      <profile name="Maven default annotation processors profile" enabled="true">
+        <sourceOutputDir name="target/generated-sources/annotations" />
+        <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
+        <outputRelativeToContentRoot value="true" />
+        <module name="bidding-identity" />
+        <module name="bidding-project" />
+        <module name="bidding-ai" />
+        <module name="bidding-api" />
+        <module name="bidding-common" />
+        <module name="bidding-worker" />
+        <module name="bidding-review" />
+        <module name="bidding-file" />
+      </profile>
+    </annotationProcessing>
+  </component>
+</project>

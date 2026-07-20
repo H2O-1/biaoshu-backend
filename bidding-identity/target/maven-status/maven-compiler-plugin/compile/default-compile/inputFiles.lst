@@ -1,0 +1,15 @@
+D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\adapter\web\AdminUserController.java
+D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\adapter\web\AuthController.java
+D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\adapter\web\IdentityExceptionHandler.java
+D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\application\AdminUserAppService.java
+D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\application\AuthAppService.java
+D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\application\BootstrapAdminRunner.java
+D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\domain\model\Role.java
+D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\domain\model\RoleCode.java
+D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\domain\model\UserAccount.java
+D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\domain\port\UserRepository.java
+D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\infrastructure\persistence\JdbcUserRepository.java
+D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\infrastructure\security\JwtAuthenticationFilter.java
+D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\infrastructure\security\JwtTokenService.java
+D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\infrastructure\security\SecurityConfig.java
+D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\package-info.java

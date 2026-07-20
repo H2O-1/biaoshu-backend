@@ -1,0 +1,14 @@
+spring:
+  datasource:
+    url: "jdbc:postgresql://localhost:5432/bidding_dev"
+    username: bidding
+    password: ${DB_PASSWORD:bidding123}
+
+bidding:
+  jwt:
+    secret: ${JWT_SECRET:dev-only-jwt-secret-at-least-32-bytes}
+  bootstrap-admin:
+    enabled: true
+    username: admin
+    password: ${BOOTSTRAP_ADMIN_PASSWORD:ChangeMe@123}
+    display-name: 平台管理员

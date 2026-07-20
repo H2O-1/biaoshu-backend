@@ -1,0 +1,8 @@
+com\bidding\common\api\PageResult.class
+com\bidding\common\package-info.class
+com\bidding\common\port\package-info.class
+com\bidding\common\security\UserContext.class
+com\bidding\common\security\CurrentUser.class
+com\bidding\common\error\ErrorCode.class
+com\bidding\common\error\BizException.class
+com\bidding\common\api\ApiResponse.class
