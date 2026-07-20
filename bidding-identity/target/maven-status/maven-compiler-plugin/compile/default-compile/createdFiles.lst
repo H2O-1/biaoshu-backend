@@ -14,6 +14,7 @@ com\bidding\identity\application\AuthAppService.class
 com\bidding\identity\application\AdminUserAppService$UserSummary.class
 com\bidding\identity\application\AdminUserAppService.class
 com\bidding\identity\package-info.class
+com\bidding\identity\adapter\web\AdminUserController$CreateUserRequest.class
 com\bidding\identity\adapter\web\AdminUserController.class
 com\bidding\identity\application\AuthAppService$LoginResult.class
 com\bidding\identity\infrastructure\security\JwtAuthenticationFilter.class

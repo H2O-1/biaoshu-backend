@@ -15,6 +15,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.time.Instant;
 import java.util.HashSet;
@@ -27,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anySet;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -37,6 +39,9 @@ class AdminUserAppServiceTest {
 
     @Mock
     private UserRepository userRepository;
+
+    @Mock
+    private PasswordEncoder passwordEncoder;
 
     @InjectMocks
     private AdminUserAppService adminUserAppService;
@@ -113,6 +118,50 @@ class AdminUserAppServiceTest {
     void listRolesOk() {
         when(userRepository.listRoles()).thenReturn(List.of(new Role("BIDDER", "投标方")));
         assertEquals(1, adminUserAppService.listRoles().size());
+    }
+
+    @Test
+    void createUserSuccess() {
+        when(userRepository.existsOrgById(1L)).thenReturn(true);
+        when(userRepository.existsByUsername("zhangsan")).thenReturn(false);
+        when(passwordEncoder.encode("Passw0rd!")).thenReturn("hashed");
+        when(userRepository.insert(eq(1L), eq("zhangsan"), eq("hashed"), eq("张三"), eq("ACTIVE")))
+                .thenReturn(10L);
+
+        Set<String> roles = new HashSet<>();
+        roles.add(RoleCode.TENDERER.name());
+        when(userRepository.findById(10L)).thenReturn(Optional.of(
+                new UserAccount(10L, 1L, "zhangsan", "hashed", "张三", "ACTIVE", Instant.now(), roles)
+        ));
+
+        AdminUserAppService.UserSummary summary = adminUserAppService.createUser(
+                1L, "zhangsan", "Passw0rd!", "张三", List.of("TENDERER")
+        );
+
+        assertEquals("zhangsan", summary.getUsername());
+        assertTrue(summary.getRoleCodes().contains("TENDERER"));
+        verify(userRepository).replaceRoles(eq(10L), eq(roles));
+    }
+
+    @Test
+    void createUserRejectShortPassword() {
+        when(userRepository.existsOrgById(1L)).thenReturn(true);
+        when(userRepository.existsByUsername("zhangsan")).thenReturn(false);
+
+        BizException ex = assertThrows(BizException.class,
+                () -> adminUserAppService.createUser(1L, "zhangsan", "1234567", "张三", List.of("BIDDER")));
+        assertEquals(ErrorCode.BAD_REQUEST, ex.errorCode());
+        verify(userRepository, never()).insert(anyLong(), anyString(), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void createUserRejectBadUsername() {
+        when(userRepository.existsOrgById(1L)).thenReturn(true);
+
+        BizException ex = assertThrows(BizException.class,
+                () -> adminUserAppService.createUser(
+                        1L, "zhang; drop", "Passw0rd!", "张三", List.of("BIDDER")));
+        assertEquals(ErrorCode.BAD_REQUEST, ex.errorCode());
     }
 
     private static UserAccount user(long id, Set<String> roles) {

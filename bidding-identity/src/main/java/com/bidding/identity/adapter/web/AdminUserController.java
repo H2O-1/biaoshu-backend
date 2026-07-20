@@ -5,9 +5,14 @@ import com.bidding.common.api.PageResult;
 import com.bidding.identity.application.AdminUserAppService;
 import com.bidding.identity.domain.model.Role;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -48,6 +53,22 @@ public class AdminUserController {
     }
 
     /**
+     * 创建用户。
+     * 例子：{"orgId":1,"username":"zhangsan","password":"Passw0rd!","displayName":"张三","roleCodes":["TENDERER"]}
+     */
+    @PostMapping("/users")
+    public ApiResponse<AdminUserAppService.UserSummary> createUser(
+            @Valid @RequestBody CreateUserRequest request) {
+        return ApiResponse.ok(adminUserAppService.createUser(
+                request.getOrgId(),
+                request.getUsername(),
+                request.getPassword(),
+                request.getDisplayName(),
+                request.getRoleCodes()
+        ));
+    }
+
+    /**
      * 全量设置用户角色。
      * 例子：{"roleCodes":["TENDERER","EXPERT"]}
      */
@@ -56,6 +77,67 @@ public class AdminUserController {
             @PathVariable long userId,
             @Valid @RequestBody ReplaceRolesRequest request) {
         return ApiResponse.ok(adminUserAppService.replaceRoles(userId, request.getRoleCodes()));
+    }
+
+    public static class CreateUserRequest {
+        @NotNull
+        @Positive
+        private Long orgId;
+
+        @NotBlank
+        @Size(min = 3, max = 64)
+        private String username;
+
+        @NotBlank
+        @Size(min = 8, max = 72)
+        private String password;
+
+        @NotBlank
+        @Size(max = 128)
+        private String displayName;
+
+        @NotEmpty
+        private List<String> roleCodes;
+
+        public Long getOrgId() {
+            return orgId;
+        }
+
+        public void setOrgId(Long orgId) {
+            this.orgId = orgId;
+        }
+
+        public String getUsername() {
+            return username;
+        }
+
+        public void setUsername(String username) {
+            this.username = username;
+        }
+
+        public String getPassword() {
+            return password;
+        }
+
+        public void setPassword(String password) {
+            this.password = password;
+        }
+
+        public String getDisplayName() {
+            return displayName;
+        }
+
+        public void setDisplayName(String displayName) {
+            this.displayName = displayName;
+        }
+
+        public List<String> getRoleCodes() {
+            return roleCodes;
+        }
+
+        public void setRoleCodes(List<String> roleCodes) {
+            this.roleCodes = roleCodes;
+        }
     }
 
     public static class ReplaceRolesRequest {

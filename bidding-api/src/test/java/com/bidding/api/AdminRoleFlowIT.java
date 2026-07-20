@@ -55,4 +55,34 @@ class AdminRoleFlowIT {
                                 """))
                 .andExpect(status().isUnauthorized());
     }
+
+    @Test
+    void adminCanCreateUser() throws Exception {
+        MvcResult login = mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"username":"admin","password":"ChangeMe@123"}
+                                """))
+                .andExpect(status().isOk())
+                .andReturn();
+        String token = login.getResponse().getContentAsString()
+                .replaceAll("(?s).*\"accessToken\"\\s*:\\s*\"([^\"]+)\".*", "$1");
+
+        mockMvc.perform(post("/api/admin/users")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "orgId": 1,
+                                  "username": "bidder01",
+                                  "password": "Passw0rd!",
+                                  "displayName": "投标用户01",
+                                  "roleCodes": ["BIDDER"]
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.username").value("bidder01"))
+                .andExpect(jsonPath("$.data.roleCodes[0]").value("BIDDER"));
+    }
 }

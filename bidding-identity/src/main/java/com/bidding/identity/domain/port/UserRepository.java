@@ -28,6 +28,9 @@ public interface UserRepository {
 
     boolean existsByUsername(String username);
 
+    /** 组织是否存在（创建用户时校验 orgId） */
+    boolean existsOrgById(long orgId);
+
     long insert(long orgId, String username, String passwordHash, String displayName, String status);
 
     /** 查找系统组织 id（code = SYSTEM） */

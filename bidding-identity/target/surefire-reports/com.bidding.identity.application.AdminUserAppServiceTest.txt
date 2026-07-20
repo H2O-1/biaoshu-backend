@@ -1,4 +1,4 @@
 -------------------------------------------------------------------------------
 Test set: com.bidding.identity.application.AdminUserAppServiceTest
 -------------------------------------------------------------------------------
-Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.197 s -- in com.bidding.identity.application.AdminUserAppServiceTest
+Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.004 s -- in com.bidding.identity.application.AdminUserAppServiceTest

@@ -218,7 +218,47 @@ Authorization: Bearer <accessToken>
 
 ---
 
-### 3.4 设置用户角色（全量覆盖）
+### 3.4 创建用户
+
+`POST /api/admin/users`
+
+**请求体**
+
+```json
+{
+  "orgId": 1,
+  "username": "zhangsan",
+  "password": "Passw0rd!",
+  "displayName": "张三",
+  "roleCodes": ["TENDERER"]
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| orgId | number | 是 | 归属组织；平台管理员可跨组织创建 |
+| username | string | 是 | 仅字母/数字/下划线，长度 3~64 |
+| password | string | 是 | 至少 8 位（最长 72） |
+| displayName | string | 是 | 显示名，最长 128 |
+| roleCodes | string[] | 是 | 至少 1 个合法平台角色 |
+
+**成功响应**：`data` 为新建用户摘要（同 3.3，不含密码）。
+
+**常见失败**
+
+| code | 说明 |
+|------|------|
+| 40000 | 参数不合法 / 组织不存在 / 密码过短 / 角色为空或非法 |
+| 40900 | 用户名已存在 |
+
+**安全说明**
+
+- 数据库访问使用参数绑定，不拼接 SQL。  
+- 用户名白名单校验，降低注入与脏数据风险。
+
+---
+
+### 3.5 设置用户角色（全量覆盖）
 
 `PUT /api/admin/users/{userId}/roles`
 
@@ -258,6 +298,7 @@ Authorization: Bearer <accessToken>
 - [ ] `code !== 0` 时用 `message` 提示用户
 - [ ] 401 → 跳转登录；403 → 无权限提示
 - [ ] 角色多选提交时传完整 `roleCodes` 数组
+- [ ] 创建用户时校验密码至少 8 位、至少选 1 个角色
 
 ---
 
@@ -266,3 +307,4 @@ Authorization: Bearer <accessToken>
 | 日期 | 说明 |
 |------|------|
 | 2026-07-20 | 初版：登录 + 平台管理员角色/用户查询与角色设置 |
+| 2026-07-20 | 新增：平台管理员创建用户（跨组织 orgId、初始角色、密码≥8） |

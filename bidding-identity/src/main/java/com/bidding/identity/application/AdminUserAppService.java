@@ -9,6 +9,7 @@ import com.bidding.identity.domain.model.Role;
 import com.bidding.identity.domain.model.RoleCode;
 import com.bidding.identity.domain.model.UserAccount;
 import com.bidding.identity.domain.port.UserRepository;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,17 +19,26 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.regex.Pattern;
 
 /**
- * 平台管理员业务：查角色、查用户、改用户角色。
+ * 平台管理员业务：查角色、查用户、创建用户、改用户角色。
  */
 @Service
 public class AdminUserAppService {
 
-    private final UserRepository userRepository;
+    /** 用户名：字母数字下划线，3~64 位（降低注入与脏数据风险） */
+    private static final Pattern USERNAME_PATTERN = Pattern.compile("^[a-zA-Z0-9_]{3,64}$");
 
-    public AdminUserAppService(UserRepository userRepository) {
+    private static final int MIN_PASSWORD_LENGTH = 8;
+    private static final int MAX_DISPLAY_NAME_LENGTH = 128;
+
+    private final UserRepository userRepository;
+    private final PasswordEncoder passwordEncoder;
+
+    public AdminUserAppService(UserRepository userRepository, PasswordEncoder passwordEncoder) {
         this.userRepository = userRepository;
+        this.passwordEncoder = passwordEncoder;
     }
 
     @Transactional(readOnly = true)
@@ -66,6 +76,45 @@ public class AdminUserAppService {
     }
 
     /**
+     * 创建用户：指定组织、初始角色；密码至少 8 位。
+     * SQL 使用参数绑定；用户名等字段再做格式校验，降低注入与脏数据风险。
+     */
+    @Transactional
+    public UserSummary createUser(long orgId,
+                                  String username,
+                                  String password,
+                                  String displayName,
+                                  List<String> roleCodes) {
+        checkPlatformAdmin();
+
+        if (orgId <= 0) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "orgId 不合法");
+        }
+        if (!userRepository.existsOrgById(orgId)) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "组织不存在");
+        }
+
+        String safeUsername = normalizeUsername(username);
+        if (userRepository.existsByUsername(safeUsername)) {
+            throw new BizException(ErrorCode.CONFLICT, "用户名已存在");
+        }
+
+        String safeDisplayName = normalizeDisplayName(displayName);
+        checkPassword(password);
+        Set<String> roles = checkAndNormalizeRoles(roleCodes);
+
+        String passwordHash = passwordEncoder.encode(password);
+        long userId = userRepository.insert(orgId, safeUsername, passwordHash, safeDisplayName, "ACTIVE");
+        userRepository.replaceRoles(userId, roles);
+
+        Optional<UserAccount> created = userRepository.findById(userId);
+        if (created.isEmpty()) {
+            throw new BizException(ErrorCode.INTERNAL, "创建用户失败");
+        }
+        return UserSummary.from(created.get());
+    }
+
+    /**
      * 设置用户角色（全量覆盖：最终就是这次传来的列表）。
      * 系统至少要留下一名平台管理员。
      */
@@ -100,6 +149,41 @@ public class AdminUserAppService {
             throw new BizException(ErrorCode.NOT_FOUND, "用户不存在");
         }
         return UserSummary.from(afterUpdate.get());
+    }
+
+    private String normalizeUsername(String username) {
+        if (username == null || username.trim().isEmpty()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "用户名不能为空");
+        }
+        String trimmed = username.trim();
+        if (!USERNAME_PATTERN.matcher(trimmed).matches()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "用户名仅允许字母、数字、下划线，长度 3~64");
+        }
+        return trimmed;
+    }
+
+    private String normalizeDisplayName(String displayName) {
+        if (displayName == null || displayName.trim().isEmpty()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "显示名不能为空");
+        }
+        String trimmed = displayName.trim();
+        if (trimmed.length() > MAX_DISPLAY_NAME_LENGTH) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "显示名过长");
+        }
+        // 拒绝控制字符，避免奇怪注入/展示问题
+        for (int i = 0; i < trimmed.length(); i++) {
+            char c = trimmed.charAt(i);
+            if (Character.isISOControl(c)) {
+                throw new BizException(ErrorCode.BAD_REQUEST, "显示名包含非法字符");
+            }
+        }
+        return trimmed;
+    }
+
+    private void checkPassword(String password) {
+        if (password == null || password.length() < MIN_PASSWORD_LENGTH) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "密码至少 " + MIN_PASSWORD_LENGTH + " 位");
+        }
     }
 
     /** 检查角色码是否合法，并转成 Set */
@@ -146,7 +230,6 @@ public class AdminUserAppService {
             summary.username = account.getUsername();
             summary.displayName = account.getDisplayName();
             summary.status = account.getStatus();
-            // TreeSet 让角色按字母排序，前端看起来整齐一点
             summary.roleCodes = new TreeSet<>(account.getRoleCodes());
             return summary;
         }

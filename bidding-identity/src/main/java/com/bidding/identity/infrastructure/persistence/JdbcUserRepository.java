@@ -140,6 +140,16 @@ public class JdbcUserRepository implements UserRepository {
     }
 
     @Override
+    public boolean existsOrgById(long orgId) {
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM sys_org WHERE id = ?",
+                Long.class,
+                orgId
+        );
+        return count != null && count > 0;
+    }
+
+    @Override
     public long insert(long orgId, String username, String passwordHash, String displayName, String status) {
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(con -> {
