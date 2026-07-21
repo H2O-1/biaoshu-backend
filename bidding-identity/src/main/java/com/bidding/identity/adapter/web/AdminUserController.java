@@ -62,6 +62,7 @@ public class AdminUserController {
                 request.getPassword(),
                 request.getDisplayName(),
                 request.getPhone(),
+                request.getEmail(),
                 request.getRoleCodes()
         ));
     }
@@ -118,6 +119,10 @@ public class AdminUserController {
         @Size(min = 11, max = 11)
         private String phone;
 
+        @NotBlank
+        @Size(max = 128)
+        private String email;
+
         @NotEmpty
         private List<String> roleCodes;
 
@@ -159,6 +164,14 @@ public class AdminUserController {
 
         public void setPhone(String phone) {
             this.phone = phone;
+        }
+
+        public String getEmail() {
+            return email;
+        }
+
+        public void setEmail(String email) {
+            this.email = email;
         }
 
         public List<String> getRoleCodes() {

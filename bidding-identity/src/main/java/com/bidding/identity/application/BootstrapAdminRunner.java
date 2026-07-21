@@ -76,7 +76,8 @@ public class BootstrapAdminRunner implements ApplicationRunner {
 
         String passwordHash = passwordEncoder.encode(password);
         // 引导管理员不强制改密，避免本地首次启动就被拦住
-        long userId = userRepository.insert(orgId, username, passwordHash, displayName, null, "ACTIVE", false);
+        long userId = userRepository.insert(
+                orgId, username, passwordHash, displayName, null, null, "ACTIVE", false);
 
         Set<String> roles = new HashSet<>();
         roles.add(RoleCode.PLATFORM_ADMIN.name());

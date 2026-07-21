@@ -129,6 +129,7 @@ public class AuthAppService {
         result.setUsername(user.getUsername());
         result.setDisplayName(user.getDisplayName());
         result.setPhone(user.getPhone());
+        result.setEmail(user.getEmail());
         result.setRoleCodes(user.getRoleCodes());
         result.setMustChangePassword(user.isMustChangePassword());
         return result;
@@ -144,6 +145,7 @@ public class AuthAppService {
         result.setUsername(user.getUsername());
         result.setDisplayName(user.getDisplayName());
         result.setPhone(user.getPhone());
+        result.setEmail(user.getEmail());
         result.setRoleCodes(user.getRoleCodes());
         result.setMustChangePassword(user.isMustChangePassword());
         return result;
@@ -179,6 +181,7 @@ public class AuthAppService {
         private String username;
         private String displayName;
         private String phone;
+        private String email;
         private Set<String> roleCodes;
         private boolean mustChangePassword;
 
@@ -246,6 +249,14 @@ public class AuthAppService {
             this.phone = phone;
         }
 
+        public String getEmail() {
+            return email;
+        }
+
+        public void setEmail(String email) {
+            this.email = email;
+        }
+
         public Set<String> getRoleCodes() {
             return roleCodes;
         }
@@ -272,6 +283,7 @@ public class AuthAppService {
         private String username;
         private String displayName;
         private String phone;
+        private String email;
         private Set<String> roleCodes;
         private boolean mustChangePassword;
 
@@ -329,6 +341,14 @@ public class AuthAppService {
 
         public void setPhone(String phone) {
             this.phone = phone;
+        }
+
+        public String getEmail() {
+            return email;
+        }
+
+        public void setEmail(String email) {
+            this.email = email;
         }
 
         public Set<String> getRoleCodes() {

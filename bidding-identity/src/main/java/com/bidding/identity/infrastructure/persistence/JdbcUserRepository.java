@@ -27,7 +27,7 @@ import java.util.Set;
 public class JdbcUserRepository implements UserRepository {
 
     private static final String USER_COLUMNS =
-            "id, org_id, username, password_hash, display_name, phone, status, "
+            "id, org_id, username, password_hash, display_name, phone, email, status, "
                     + "must_change_password, token_version, created_at";
 
     private final JdbcTemplate jdbcTemplate;
@@ -43,6 +43,7 @@ public class JdbcUserRepository implements UserRepository {
             rs.getString("password_hash"),
             rs.getString("display_name"),
             rs.getString("phone"),
+            rs.getString("email"),
             rs.getString("status"),
             rs.getBoolean("must_change_password"),
             rs.getInt("token_version"),
@@ -81,10 +82,11 @@ public class JdbcUserRepository implements UserRepository {
         String like = "%" + keyword + "%";
         List<UserAccount> users = jdbcTemplate.query(
                 "SELECT " + USER_COLUMNS + " FROM sys_user "
-                        + "WHERE (? = '' OR username LIKE ? OR display_name LIKE ? OR phone LIKE ?) "
+                        + "WHERE (? = '' OR username LIKE ? OR display_name LIKE ? "
+                        + "OR phone LIKE ? OR email LIKE ?) "
                         + "ORDER BY id LIMIT ? OFFSET ?",
                 userRowMapper,
-                keyword, like, like, like, limit, offset
+                keyword, like, like, like, like, limit, offset
         );
         List<UserAccount> result = new ArrayList<>();
         for (UserAccount user : users) {
@@ -98,9 +100,10 @@ public class JdbcUserRepository implements UserRepository {
         String like = "%" + keyword + "%";
         Long count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(1) FROM sys_user "
-                        + "WHERE (? = '' OR username LIKE ? OR display_name LIKE ? OR phone LIKE ?)",
+                        + "WHERE (? = '' OR username LIKE ? OR display_name LIKE ? "
+                        + "OR phone LIKE ? OR email LIKE ?)",
                 Long.class,
-                keyword, like, like, like
+                keyword, like, like, like, like
         );
         return count == null ? 0 : count;
     }
@@ -148,6 +151,16 @@ public class JdbcUserRepository implements UserRepository {
     }
 
     @Override
+    public boolean existsByEmail(String email) {
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM sys_user WHERE email = ?",
+                Long.class,
+                email
+        );
+        return count != null && count > 0;
+    }
+
+    @Override
     public boolean existsOrgById(long orgId) {
         Long count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(1) FROM sys_org WHERE id = ?",
@@ -181,14 +194,15 @@ public class JdbcUserRepository implements UserRepository {
                        String passwordHash,
                        String displayName,
                        String phone,
+                       String email,
                        String status,
                        boolean mustChangePassword) {
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(con -> {
             PreparedStatement ps = con.prepareStatement(
-                    "INSERT INTO sys_user(org_id, username, password_hash, display_name, phone, status, "
+                    "INSERT INTO sys_user(org_id, username, password_hash, display_name, phone, email, status, "
                             + "must_change_password, token_version, created_at, updated_at) "
-                            + "VALUES (?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
                     Statement.RETURN_GENERATED_KEYS
             );
             ps.setLong(1, orgId);
@@ -196,8 +210,9 @@ public class JdbcUserRepository implements UserRepository {
             ps.setString(3, passwordHash);
             ps.setString(4, displayName);
             ps.setString(5, phone);
-            ps.setString(6, status);
-            ps.setBoolean(7, mustChangePassword);
+            ps.setString(6, email);
+            ps.setString(7, status);
+            ps.setBoolean(8, mustChangePassword);
             return ps;
         }, keyHolder);
 
@@ -276,6 +291,7 @@ public class JdbcUserRepository implements UserRepository {
                 user.getPasswordHash(),
                 user.getDisplayName(),
                 user.getPhone(),
+                user.getEmail(),
                 user.getStatus(),
                 user.isMustChangePassword(),
                 user.getTokenVersion(),

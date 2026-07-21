@@ -13,6 +13,7 @@ public class UserAccount {
     private final String passwordHash;
     private final String displayName;
     private final String phone;
+    private final String email;
     private final String status;
     private final boolean mustChangePassword;
     private final int tokenVersion;
@@ -25,6 +26,7 @@ public class UserAccount {
                        String passwordHash,
                        String displayName,
                        String phone,
+                       String email,
                        String status,
                        boolean mustChangePassword,
                        int tokenVersion,
@@ -36,6 +38,7 @@ public class UserAccount {
         this.passwordHash = passwordHash;
         this.displayName = displayName;
         this.phone = phone;
+        this.email = email;
         this.status = status;
         this.mustChangePassword = mustChangePassword;
         this.tokenVersion = tokenVersion;
@@ -69,6 +72,10 @@ public class UserAccount {
 
     public String getPhone() {
         return phone;
+    }
+
+    public String getEmail() {
+        return email;
     }
 
     public String getStatus() {

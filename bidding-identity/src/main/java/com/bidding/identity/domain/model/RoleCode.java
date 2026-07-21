@@ -1,8 +1,7 @@
 package com.bidding.identity.domain.model;
 
 /**
- * 平台角色。
- * 注意：这是账号上的角色，不是项目里的成员角色。
+ * 平台角色：挂在账号上，如平台管理员、招标方、投标方、专家。
  */
 public enum RoleCode {
     PLATFORM_ADMIN("平台管理员"),

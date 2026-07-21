@@ -129,24 +129,28 @@ class AdminUserAppServiceTest {
         when(userRepository.existsOrgById(1L)).thenReturn(true);
         when(userRepository.existsByUsername("zhangsan")).thenReturn(false);
         when(userRepository.existsByPhone("13800138000")).thenReturn(false);
+        when(userRepository.existsByEmail("zhangsan@example.com")).thenReturn(false);
         when(passwordEncoder.encode("Passw0rd!")).thenReturn("hashed");
         when(userRepository.insert(eq(1L), eq("zhangsan"), eq("hashed"), eq("张三"),
-                eq("13800138000"), eq("ACTIVE"), eq(true)))
+                eq("13800138000"), eq("zhangsan@example.com"), eq("ACTIVE"), eq(true)))
                 .thenReturn(10L);
 
         Set<String> roles = new HashSet<>();
         roles.add(RoleCode.TENDERER.name());
         when(userRepository.findById(10L)).thenReturn(Optional.of(
-                new UserAccount(10L, 1L, "zhangsan", "hashed", "张三", "13800138000", "ACTIVE",
+                new UserAccount(10L, 1L, "zhangsan", "hashed", "张三",
+                        "13800138000", "zhangsan@example.com", "ACTIVE",
                         true, 0, Instant.now(), roles)
         ));
 
         AdminUserAppService.UserSummary summary = adminUserAppService.createUser(
-                1L, "zhangsan", "Passw0rd!", "张三", "13800138000", List.of("TENDERER")
+                1L, "zhangsan", "Passw0rd!", "张三", "13800138000",
+                "zhangsan@example.com", List.of("TENDERER")
         );
 
         assertEquals("zhangsan", summary.getUsername());
         assertEquals("13800138000", summary.getPhone());
+        assertEquals("zhangsan@example.com", summary.getEmail());
         assertTrue(summary.isMustChangePassword());
         assertTrue(summary.getRoleCodes().contains("TENDERER"));
         verify(userRepository).replaceRoles(eq(10L), eq(roles));
@@ -157,13 +161,16 @@ class AdminUserAppServiceTest {
         when(userRepository.existsOrgById(1L)).thenReturn(true);
         when(userRepository.existsByUsername("zhangsan")).thenReturn(false);
         when(userRepository.existsByPhone("13800138000")).thenReturn(false);
+        when(userRepository.existsByEmail("zhangsan@example.com")).thenReturn(false);
 
         BizException ex = assertThrows(BizException.class,
                 () -> adminUserAppService.createUser(
-                        1L, "zhangsan", "1234567", "张三", "13800138000", List.of("BIDDER")));
+                        1L, "zhangsan", "1234567", "张三", "13800138000",
+                        "zhangsan@example.com", List.of("BIDDER")));
         assertEquals(ErrorCode.BAD_REQUEST, ex.errorCode());
         verify(userRepository, never()).insert(
-                anyLong(), anyString(), anyString(), anyString(), anyString(), anyString(), anyBoolean());
+                anyLong(), anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), anyBoolean());
     }
 
     @Test
@@ -173,7 +180,21 @@ class AdminUserAppServiceTest {
 
         BizException ex = assertThrows(BizException.class,
                 () -> adminUserAppService.createUser(
-                        1L, "zhangsan", "Passw0rd!", "张三", "12345", List.of("BIDDER")));
+                        1L, "zhangsan", "Passw0rd!", "张三", "12345",
+                        "zhangsan@example.com", List.of("BIDDER")));
+        assertEquals(ErrorCode.BAD_REQUEST, ex.errorCode());
+    }
+
+    @Test
+    void createUserRejectBadEmail() {
+        when(userRepository.existsOrgById(1L)).thenReturn(true);
+        when(userRepository.existsByUsername("zhangsan")).thenReturn(false);
+        when(userRepository.existsByPhone("13800138000")).thenReturn(false);
+
+        BizException ex = assertThrows(BizException.class,
+                () -> adminUserAppService.createUser(
+                        1L, "zhangsan", "Passw0rd!", "张三", "13800138000",
+                        "not-an-email", List.of("BIDDER")));
         assertEquals(ErrorCode.BAD_REQUEST, ex.errorCode());
     }
 
@@ -182,10 +203,12 @@ class AdminUserAppServiceTest {
         when(userRepository.existsOrgById(1L)).thenReturn(true);
         when(userRepository.existsByUsername("zhangsan")).thenReturn(false);
         when(userRepository.existsByPhone("13800138000")).thenReturn(false);
+        when(userRepository.existsByEmail("zhangsan@example.com")).thenReturn(false);
 
         BizException ex = assertThrows(BizException.class,
                 () -> adminUserAppService.createUser(
-                        1L, "zhangsan", "12345678", "张三", "13800138000", List.of("BIDDER")));
+                        1L, "zhangsan", "12345678", "张三", "13800138000",
+                        "zhangsan@example.com", List.of("BIDDER")));
         assertEquals(ErrorCode.BAD_REQUEST, ex.errorCode());
     }
 
@@ -195,7 +218,8 @@ class AdminUserAppServiceTest {
 
         BizException ex = assertThrows(BizException.class,
                 () -> adminUserAppService.createUser(
-                        1L, "zhang; drop", "Passw0rd!", "张三", "13800138000", List.of("BIDDER")));
+                        1L, "zhang; drop", "Passw0rd!", "张三", "13800138000",
+                        "zhangsan@example.com", List.of("BIDDER")));
         assertEquals(ErrorCode.BAD_REQUEST, ex.errorCode());
     }
 
@@ -224,8 +248,8 @@ class AdminUserAppServiceTest {
         when(userRepository.findById(9L))
                 .thenReturn(Optional.of(user(9L, roles)))
                 .thenReturn(Optional.of(new UserAccount(
-                        9L, 1L, "u9", "hash", "用户9", "13900139000", "DISABLED",
-                        false, 1, Instant.now(), roles)));
+                        9L, 1L, "u9", "hash", "用户9", "13900139000", "u9@example.com",
+                        "DISABLED", false, 1, Instant.now(), roles)));
 
         AdminUserAppService.UserSummary summary = adminUserAppService.updateStatus(9L, "DISABLED");
 
@@ -235,7 +259,8 @@ class AdminUserAppServiceTest {
     }
 
     private static UserAccount user(long id, Set<String> roles) {
-        return new UserAccount(id, 1L, "u" + id, "hash", "用户" + id, "1390000000" + (id % 10),
+        return new UserAccount(id, 1L, "u" + id, "hash", "用户" + id,
+                "1390000000" + (id % 10), "u" + id + "@example.com",
                 "ACTIVE", false, 0, Instant.now(), roles);
     }
 }

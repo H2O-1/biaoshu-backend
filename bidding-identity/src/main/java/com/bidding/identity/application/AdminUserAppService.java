@@ -34,7 +34,12 @@ public class AdminUserAppService {
     /** 中国大陆手机号：1 开头共 11 位数字 */
     private static final Pattern PHONE_PATTERN = Pattern.compile("^1[3-9]\\d{9}$");
 
+    /** 邮箱：简单格式校验 */
+    private static final Pattern EMAIL_PATTERN =
+            Pattern.compile("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$");
+
     private static final int MAX_DISPLAY_NAME_LENGTH = 128;
+    private static final int MAX_EMAIL_LENGTH = 128;
     private static final String STATUS_ACTIVE = "ACTIVE";
     private static final String STATUS_DISABLED = "DISABLED";
     private static final String STATUS_DELETED = "DELETED";
@@ -86,6 +91,7 @@ public class AdminUserAppService {
                                   String password,
                                   String displayName,
                                   String phone,
+                                  String email,
                                   List<String> roleCodes) {
         checkPlatformAdmin();
 
@@ -106,6 +112,11 @@ public class AdminUserAppService {
             throw new BizException(ErrorCode.CONFLICT, "手机号已存在");
         }
 
+        String safeEmail = normalizeEmail(email);
+        if (userRepository.existsByEmail(safeEmail)) {
+            throw new BizException(ErrorCode.CONFLICT, "邮箱已存在");
+        }
+
         String safeDisplayName = normalizeDisplayName(displayName);
         PasswordPolicy.validateNewPassword(password);
         Set<String> roles = checkAndNormalizeRoles(roleCodes);
@@ -113,7 +124,8 @@ public class AdminUserAppService {
         String passwordHash = passwordEncoder.encode(password);
         // 新建账号一律强制首次改密
         long userId = userRepository.insert(
-                orgId, safeUsername, passwordHash, safeDisplayName, safePhone, STATUS_ACTIVE, true);
+                orgId, safeUsername, passwordHash, safeDisplayName, safePhone, safeEmail,
+                STATUS_ACTIVE, true);
         userRepository.replaceRoles(userId, roles);
 
         return UserSummary.from(requireUser(userId));
@@ -277,6 +289,21 @@ public class AdminUserAppService {
         return trimmed;
     }
 
+    /** 校验并规范化邮箱（统一转小写，避免大小写重复） */
+    private String normalizeEmail(String email) {
+        if (email == null || email.trim().isEmpty()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "邮箱不能为空");
+        }
+        String trimmed = email.trim().toLowerCase(Locale.ROOT);
+        if (trimmed.length() > MAX_EMAIL_LENGTH) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "邮箱过长");
+        }
+        if (!EMAIL_PATTERN.matcher(trimmed).matches()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "邮箱格式不正确");
+        }
+        return trimmed;
+    }
+
     private String normalizeActiveOrDisabled(String status) {
         if (status == null || status.trim().isEmpty()) {
             throw new BizException(ErrorCode.BAD_REQUEST, "status 不能为空");
@@ -321,6 +348,7 @@ public class AdminUserAppService {
         private String username;
         private String displayName;
         private String phone;
+        private String email;
         private String status;
         private boolean mustChangePassword;
         private Set<String> roleCodes;
@@ -332,6 +360,7 @@ public class AdminUserAppService {
             summary.username = account.getUsername();
             summary.displayName = account.getDisplayName();
             summary.phone = account.getPhone();
+            summary.email = account.getEmail();
             summary.status = account.getStatus();
             summary.mustChangePassword = account.isMustChangePassword();
             summary.roleCodes = new TreeSet<>(account.getRoleCodes());
@@ -356,6 +385,10 @@ public class AdminUserAppService {
 
         public String getPhone() {
             return phone;
+        }
+
+        public String getEmail() {
+            return email;
         }
 
         public String getStatus() {

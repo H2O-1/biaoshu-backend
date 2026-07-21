@@ -14,6 +14,7 @@ com\bidding\identity\application\BootstrapAdminRunner.class
 com\bidding\identity\application\PasswordPolicy.class
 com\bidding\identity\domain\model\Role.class
 com\bidding\identity\adapter\web\AuthController$ChangePasswordRequest.class
+com\bidding\identity\adapter\web\IdentityExceptionHandler$1.class
 com\bidding\identity\application\AdminUserAppService$ResetPasswordResult.class
 com\bidding\identity\adapter\web\AdminUserController$ReplaceRolesRequest.class
 com\bidding\identity\adapter\web\AuthController.class

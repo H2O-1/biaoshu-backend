@@ -29,6 +29,8 @@ public interface UserRepository {
 
     boolean existsByPhone(String phone);
 
+    boolean existsByEmail(String email);
+
     boolean existsOrgById(long orgId);
 
     /** 按 ID 查组织（登录 / 当前用户展示用） */
@@ -39,6 +41,7 @@ public interface UserRepository {
                 String passwordHash,
                 String displayName,
                 String phone,
+                String email,
                 String status,
                 boolean mustChangePassword);
 

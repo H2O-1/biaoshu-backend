@@ -80,6 +80,7 @@ class AdminRoleFlowIT {
                                   "password": "Passw0rd!",
                                   "displayName": "投标用户01",
                                   "phone": "13800138001",
+                                  "email": "bidder01@example.com",
                                   "roleCodes": ["BIDDER"]
                                 }
                                 """))
@@ -87,6 +88,7 @@ class AdminRoleFlowIT {
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.username").value("bidder01"))
                 .andExpect(jsonPath("$.data.phone").value("13800138001"))
+                .andExpect(jsonPath("$.data.email").value("bidder01@example.com"))
                 .andExpect(jsonPath("$.data.roleCodes[0]").value("BIDDER"))
                 .andExpect(jsonPath("$.data.mustChangePassword").value(true));
     }
@@ -105,6 +107,7 @@ class AdminRoleFlowIT {
                                   "password": "InitPass1",
                                   "displayName": "强制改密用户",
                                   "phone": "13800138002",
+                                  "email": "force@example.com",
                                   "roleCodes": ["BIDDER"]
                                 }
                                 """))
@@ -163,6 +166,7 @@ class AdminRoleFlowIT {
                                   "password": "InitPass1",
                                   "displayName": "重置用户",
                                   "phone": "13800138003",
+                                  "email": "reset@example.com",
                                   "roleCodes": ["BIDDER"]
                                 }
                                 """))
