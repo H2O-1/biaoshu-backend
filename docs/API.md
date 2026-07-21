@@ -124,6 +124,7 @@
     "orgName": "系统组织",
     "username": "admin",
     "displayName": "平台管理员",
+    "phone": null,
     "roleCodes": ["PLATFORM_ADMIN"],
     "mustChangePassword": false
   }
@@ -134,6 +135,7 @@
 |------|------|
 | accessToken | 后续请求放在 `Authorization: Bearer ...` |
 | orgId / orgCode / orgName | 所属组织；前端展示用 `orgName` |
+| phone | 手机号；引导管理员可能为空 |
 | roleCodes | 当前账号平台角色列表 |
 | mustChangePassword | `true` 时前端应强制进入改密页，不可进业务页 |
 
@@ -165,6 +167,7 @@
     "orgName": "系统组织",
     "username": "admin",
     "displayName": "平台管理员",
+    "phone": null,
     "roleCodes": ["PLATFORM_ADMIN"],
     "mustChangePassword": false
   }
@@ -257,6 +260,7 @@ Authorization: Bearer <accessToken>
         "orgId": 1,
         "username": "admin",
         "displayName": "平台管理员",
+        "phone": null,
         "status": "ACTIVE",
         "mustChangePassword": false,
         "roleCodes": ["PLATFORM_ADMIN"]
@@ -304,6 +308,7 @@ Authorization: Bearer <accessToken>
   "username": "zhangsan",
   "password": "Passw0rd!",
   "displayName": "张三",
+  "phone": "13800138000",
   "roleCodes": ["TENDERER"]
 }
 ```
@@ -314,16 +319,17 @@ Authorization: Bearer <accessToken>
 | username | string | 是 | 仅字母/数字/下划线，长度 3~64 |
 | password | string | 是 | ≥8，且含字母+数字（最长 72） |
 | displayName | string | 是 | 显示名，最长 128 |
+| phone | string | 是 | 中国大陆 11 位手机号，全局唯一 |
 | roleCodes | string[] | 是 | 至少 1 个合法平台角色 |
 
-**成功响应**：`data` 为新建用户摘要（含 `mustChangePassword: true`，不含密码）。
+**成功响应**：`data` 为新建用户摘要（含 `mustChangePassword: true`、`phone`，不含密码）。
 
 **常见失败**
 
 | code | 说明 |
 |------|------|
-| 40000 | 参数不合法 / 组织不存在 / 密码不符合规则 / 角色为空或非法 |
-| 40900 | 用户名已存在 |
+| 40000 | 参数不合法 / 组织不存在 / 密码或手机号不符合规则 / 角色为空或非法 |
+| 40900 | 用户名或手机号已存在 |
 
 **安全说明**
 
@@ -442,3 +448,4 @@ Authorization: Bearer <accessToken>
 | 2026-07-20 | 新增：平台管理员创建用户（跨组织 orgId、初始角色、密码≥8） |
 | 2026-07-20 | 密码与会话闭环：`mustChangePassword` + `token_version`；改密/退出/重置/停用/删除 |
 | 2026-07-21 | 登录与 `/api/auth/me` 返回 `orgCode` / `orgName`，便于展示所属组织 |
+| 2026-07-21 | 用户增加手机号：创建必填、唯一；登录/me/用户列表返回 |

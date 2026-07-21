@@ -12,6 +12,7 @@ public class UserAccount {
     private final String username;
     private final String passwordHash;
     private final String displayName;
+    private final String phone;
     private final String status;
     private final boolean mustChangePassword;
     private final int tokenVersion;
@@ -23,6 +24,7 @@ public class UserAccount {
                        String username,
                        String passwordHash,
                        String displayName,
+                       String phone,
                        String status,
                        boolean mustChangePassword,
                        int tokenVersion,
@@ -33,6 +35,7 @@ public class UserAccount {
         this.username = username;
         this.passwordHash = passwordHash;
         this.displayName = displayName;
+        this.phone = phone;
         this.status = status;
         this.mustChangePassword = mustChangePassword;
         this.tokenVersion = tokenVersion;
@@ -62,6 +65,10 @@ public class UserAccount {
 
     public String getDisplayName() {
         return displayName;
+    }
+
+    public String getPhone() {
+        return phone;
     }
 
     public String getStatus() {

@@ -128,6 +128,7 @@ public class AuthAppService {
         result.setOrgName(org.name);
         result.setUsername(user.getUsername());
         result.setDisplayName(user.getDisplayName());
+        result.setPhone(user.getPhone());
         result.setRoleCodes(user.getRoleCodes());
         result.setMustChangePassword(user.isMustChangePassword());
         return result;
@@ -142,6 +143,7 @@ public class AuthAppService {
         result.setOrgName(org.name);
         result.setUsername(user.getUsername());
         result.setDisplayName(user.getDisplayName());
+        result.setPhone(user.getPhone());
         result.setRoleCodes(user.getRoleCodes());
         result.setMustChangePassword(user.isMustChangePassword());
         return result;
@@ -176,6 +178,7 @@ public class AuthAppService {
         private String orgName;
         private String username;
         private String displayName;
+        private String phone;
         private Set<String> roleCodes;
         private boolean mustChangePassword;
 
@@ -235,6 +238,14 @@ public class AuthAppService {
             this.displayName = displayName;
         }
 
+        public String getPhone() {
+            return phone;
+        }
+
+        public void setPhone(String phone) {
+            this.phone = phone;
+        }
+
         public Set<String> getRoleCodes() {
             return roleCodes;
         }
@@ -260,6 +271,7 @@ public class AuthAppService {
         private String orgName;
         private String username;
         private String displayName;
+        private String phone;
         private Set<String> roleCodes;
         private boolean mustChangePassword;
 
@@ -309,6 +321,14 @@ public class AuthAppService {
 
         public void setDisplayName(String displayName) {
             this.displayName = displayName;
+        }
+
+        public String getPhone() {
+            return phone;
+        }
+
+        public void setPhone(String phone) {
+            this.phone = phone;
         }
 
         public Set<String> getRoleCodes() {

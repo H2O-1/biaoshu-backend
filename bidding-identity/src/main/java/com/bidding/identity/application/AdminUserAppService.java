@@ -31,6 +31,9 @@ public class AdminUserAppService {
     /** 用户名：字母数字下划线，3~64 位（降低注入与脏数据风险） */
     private static final Pattern USERNAME_PATTERN = Pattern.compile("^[a-zA-Z0-9_]{3,64}$");
 
+    /** 中国大陆手机号：1 开头共 11 位数字 */
+    private static final Pattern PHONE_PATTERN = Pattern.compile("^1[3-9]\\d{9}$");
+
     private static final int MAX_DISPLAY_NAME_LENGTH = 128;
     private static final String STATUS_ACTIVE = "ACTIVE";
     private static final String STATUS_DISABLED = "DISABLED";
@@ -75,13 +78,14 @@ public class AdminUserAppService {
     }
 
     /**
-     * 创建用户：指定组织、初始角色；创建后必须首次改密。
+     * 创建用户：指定组织、手机号、初始角色；创建后必须首次改密。
      */
     @Transactional
     public UserSummary createUser(long orgId,
                                   String username,
                                   String password,
                                   String displayName,
+                                  String phone,
                                   List<String> roleCodes) {
         checkPlatformAdmin();
 
@@ -97,6 +101,11 @@ public class AdminUserAppService {
             throw new BizException(ErrorCode.CONFLICT, "用户名已存在");
         }
 
+        String safePhone = normalizePhone(phone);
+        if (userRepository.existsByPhone(safePhone)) {
+            throw new BizException(ErrorCode.CONFLICT, "手机号已存在");
+        }
+
         String safeDisplayName = normalizeDisplayName(displayName);
         PasswordPolicy.validateNewPassword(password);
         Set<String> roles = checkAndNormalizeRoles(roleCodes);
@@ -104,7 +113,7 @@ public class AdminUserAppService {
         String passwordHash = passwordEncoder.encode(password);
         // 新建账号一律强制首次改密
         long userId = userRepository.insert(
-                orgId, safeUsername, passwordHash, safeDisplayName, STATUS_ACTIVE, true);
+                orgId, safeUsername, passwordHash, safeDisplayName, safePhone, STATUS_ACTIVE, true);
         userRepository.replaceRoles(userId, roles);
 
         return UserSummary.from(requireUser(userId));
@@ -256,6 +265,18 @@ public class AdminUserAppService {
         return trimmed;
     }
 
+    /** 校验并规范化手机号 */
+    private String normalizePhone(String phone) {
+        if (phone == null || phone.trim().isEmpty()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "手机号不能为空");
+        }
+        String trimmed = phone.trim();
+        if (!PHONE_PATTERN.matcher(trimmed).matches()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "手机号格式不正确，须为 11 位中国大陆手机号");
+        }
+        return trimmed;
+    }
+
     private String normalizeActiveOrDisabled(String status) {
         if (status == null || status.trim().isEmpty()) {
             throw new BizException(ErrorCode.BAD_REQUEST, "status 不能为空");
@@ -299,6 +320,7 @@ public class AdminUserAppService {
         private long orgId;
         private String username;
         private String displayName;
+        private String phone;
         private String status;
         private boolean mustChangePassword;
         private Set<String> roleCodes;
@@ -309,6 +331,7 @@ public class AdminUserAppService {
             summary.orgId = account.getOrgId();
             summary.username = account.getUsername();
             summary.displayName = account.getDisplayName();
+            summary.phone = account.getPhone();
             summary.status = account.getStatus();
             summary.mustChangePassword = account.isMustChangePassword();
             summary.roleCodes = new TreeSet<>(account.getRoleCodes());
@@ -329,6 +352,10 @@ public class AdminUserAppService {
 
         public String getDisplayName() {
             return displayName;
+        }
+
+        public String getPhone() {
+            return phone;
         }
 
         public String getStatus() {
