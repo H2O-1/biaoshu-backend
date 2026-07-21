@@ -10,6 +10,7 @@ import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -48,14 +49,10 @@ public class AdminUserController {
     }
 
     @GetMapping("/users/{userId}")
-    public ApiResponse<AdminUserAppService.UserSummary> getUser(@PathVariable long userId) {
+    public ApiResponse<AdminUserAppService.UserSummary> getUser(@PathVariable("userId") long userId) {
         return ApiResponse.ok(adminUserAppService.getUser(userId));
     }
 
-    /**
-     * 创建用户。
-     * 例子：{"orgId":1,"username":"zhangsan","password":"Passw0rd!","displayName":"张三","roleCodes":["TENDERER"]}
-     */
     @PostMapping("/users")
     public ApiResponse<AdminUserAppService.UserSummary> createUser(
             @Valid @RequestBody CreateUserRequest request) {
@@ -68,15 +65,35 @@ public class AdminUserController {
         ));
     }
 
-    /**
-     * 全量设置用户角色。
-     * 例子：{"roleCodes":["TENDERER","EXPERT"]}
-     */
     @PutMapping("/users/{userId}/roles")
     public ApiResponse<AdminUserAppService.UserSummary> replaceRoles(
-            @PathVariable long userId,
+            @PathVariable("userId") long userId,
             @Valid @RequestBody ReplaceRolesRequest request) {
         return ApiResponse.ok(adminUserAppService.replaceRoles(userId, request.getRoleCodes()));
+    }
+
+    /**
+     * 重置密码：返回临时密码，仅本次可见。
+     */
+    @PostMapping("/users/{userId}/reset-password")
+    public ApiResponse<AdminUserAppService.ResetPasswordResult> resetPassword(
+            @PathVariable("userId") long userId) {
+        return ApiResponse.ok(adminUserAppService.resetPassword(userId));
+    }
+
+    /** 启用 / 停用账号 */
+    @PutMapping("/users/{userId}/status")
+    public ApiResponse<AdminUserAppService.UserSummary> updateStatus(
+            @PathVariable("userId") long userId,
+            @Valid @RequestBody UpdateStatusRequest request) {
+        return ApiResponse.ok(adminUserAppService.updateStatus(userId, request.getStatus()));
+    }
+
+    /** 逻辑删除账号 */
+    @DeleteMapping("/users/{userId}")
+    public ApiResponse<Void> deleteUser(@PathVariable("userId") long userId) {
+        adminUserAppService.deleteUser(userId);
+        return ApiResponse.ok(null);
     }
 
     public static class CreateUserRequest {
@@ -150,6 +167,19 @@ public class AdminUserController {
 
         public void setRoleCodes(List<String> roleCodes) {
             this.roleCodes = roleCodes;
+        }
+    }
+
+    public static class UpdateStatusRequest {
+        @NotBlank
+        private String status;
+
+        public String getStatus() {
+            return status;
+        }
+
+        public void setStatus(String status) {
+            this.status = status;
         }
     }
 }

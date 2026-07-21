@@ -101,6 +101,8 @@
                     <version>3.13.0</version>
                     <configuration>
                         <release>${maven.compiler.release}</release>
+                        <!-- Spring MVC @PathVariable / @RequestParam 需要参数名 -->
+                        <parameters>true</parameters>
                     </configuration>
                 </plugin>
                 <plugin>

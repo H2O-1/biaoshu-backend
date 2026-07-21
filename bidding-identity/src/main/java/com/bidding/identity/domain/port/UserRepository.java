@@ -1,5 +1,6 @@
 package com.bidding.identity.domain.port;
 
+import com.bidding.identity.domain.model.Org;
 import com.bidding.identity.domain.model.Role;
 import com.bidding.identity.domain.model.UserAccount;
 
@@ -9,7 +10,6 @@ import java.util.Set;
 
 /**
  * 用户和角色的数据库操作接口。
- * 具体怎么查库，看 JdbcUserRepository。
  */
 public interface UserRepository {
 
@@ -21,19 +21,30 @@ public interface UserRepository {
 
     long countSearch(String keyword);
 
-    /** 覆盖写入用户的全部角色 */
     void replaceRoles(long userId, Set<String> roleCodes);
 
     long countUsersWithRole(String roleCode);
 
     boolean existsByUsername(String username);
 
-    /** 组织是否存在（创建用户时校验 orgId） */
     boolean existsOrgById(long orgId);
 
-    long insert(long orgId, String username, String passwordHash, String displayName, String status);
+    /** 按 ID 查组织（登录 / 当前用户展示用） */
+    Optional<Org> findOrgById(long orgId);
 
-    /** 查找系统组织 id（code = SYSTEM） */
+    long insert(long orgId,
+                String username,
+                String passwordHash,
+                String displayName,
+                String status,
+                boolean mustChangePassword);
+
+    void updatePassword(long userId, String passwordHash, boolean mustChangePassword);
+
+    void bumpTokenVersion(long userId);
+
+    void updateStatus(long userId, String status);
+
     Optional<Long> findSystemOrgId();
 
     List<Role> listRoles();

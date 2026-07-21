@@ -1,5 +1,6 @@
 package com.bidding.identity.infrastructure.persistence;
 
+import com.bidding.identity.domain.model.Org;
 import com.bidding.identity.domain.model.Role;
 import com.bidding.identity.domain.model.UserAccount;
 import com.bidding.identity.domain.port.UserRepository;
@@ -25,6 +26,10 @@ import java.util.Set;
 @Repository
 public class JdbcUserRepository implements UserRepository {
 
+    private static final String USER_COLUMNS =
+            "id, org_id, username, password_hash, display_name, status, "
+                    + "must_change_password, token_version, created_at";
+
     private final JdbcTemplate jdbcTemplate;
 
     public JdbcUserRepository(JdbcTemplate jdbcTemplate) {
@@ -38,6 +43,8 @@ public class JdbcUserRepository implements UserRepository {
             rs.getString("password_hash"),
             rs.getString("display_name"),
             rs.getString("status"),
+            rs.getBoolean("must_change_password"),
+            rs.getInt("token_version"),
             toInstant(rs.getTimestamp("created_at")),
             new HashSet<>()
     );
@@ -45,8 +52,7 @@ public class JdbcUserRepository implements UserRepository {
     @Override
     public Optional<UserAccount> findByUsername(String username) {
         List<UserAccount> list = jdbcTemplate.query(
-                "SELECT id, org_id, username, password_hash, display_name, status, created_at "
-                        + "FROM sys_user WHERE username = ?",
+                "SELECT " + USER_COLUMNS + " FROM sys_user WHERE username = ?",
                 userRowMapper,
                 username
         );
@@ -59,8 +65,7 @@ public class JdbcUserRepository implements UserRepository {
     @Override
     public Optional<UserAccount> findById(long userId) {
         List<UserAccount> list = jdbcTemplate.query(
-                "SELECT id, org_id, username, password_hash, display_name, status, created_at "
-                        + "FROM sys_user WHERE id = ?",
+                "SELECT " + USER_COLUMNS + " FROM sys_user WHERE id = ?",
                 userRowMapper,
                 userId
         );
@@ -74,14 +79,12 @@ public class JdbcUserRepository implements UserRepository {
     public List<UserAccount> search(String keyword, int offset, int limit) {
         String like = "%" + keyword + "%";
         List<UserAccount> users = jdbcTemplate.query(
-                "SELECT id, org_id, username, password_hash, display_name, status, created_at "
-                        + "FROM sys_user "
+                "SELECT " + USER_COLUMNS + " FROM sys_user "
                         + "WHERE (? = '' OR username LIKE ? OR display_name LIKE ?) "
                         + "ORDER BY id LIMIT ? OFFSET ?",
                 userRowMapper,
                 keyword, like, like, limit, offset
         );
-
         List<UserAccount> result = new ArrayList<>();
         for (UserAccount user : users) {
             result.add(withRoles(user));
@@ -98,10 +101,7 @@ public class JdbcUserRepository implements UserRepository {
                 Long.class,
                 keyword, like, like
         );
-        if (count == null) {
-            return 0;
-        }
-        return count;
+        return count == null ? 0 : count;
     }
 
     @Override
@@ -123,10 +123,7 @@ public class JdbcUserRepository implements UserRepository {
                 Long.class,
                 roleCode
         );
-        if (count == null) {
-            return 0;
-        }
-        return count;
+        return count == null ? 0 : count;
     }
 
     @Override
@@ -150,12 +147,36 @@ public class JdbcUserRepository implements UserRepository {
     }
 
     @Override
-    public long insert(long orgId, String username, String passwordHash, String displayName, String status) {
+    public Optional<Org> findOrgById(long orgId) {
+        List<Org> list = jdbcTemplate.query(
+                "SELECT id, code, name, status FROM sys_org WHERE id = ?",
+                (rs, rowNum) -> new Org(
+                        rs.getLong("id"),
+                        rs.getString("code"),
+                        rs.getString("name"),
+                        rs.getString("status")
+                ),
+                orgId
+        );
+        if (list.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(list.get(0));
+    }
+
+    @Override
+    public long insert(long orgId,
+                       String username,
+                       String passwordHash,
+                       String displayName,
+                       String status,
+                       boolean mustChangePassword) {
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(con -> {
             PreparedStatement ps = con.prepareStatement(
-                    "INSERT INTO sys_user(org_id, username, password_hash, display_name, status, created_at, updated_at) "
-                            + "VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                    "INSERT INTO sys_user(org_id, username, password_hash, display_name, status, "
+                            + "must_change_password, token_version, created_at, updated_at) "
+                            + "VALUES (?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
                     Statement.RETURN_GENERATED_KEYS
             );
             ps.setLong(1, orgId);
@@ -163,6 +184,7 @@ public class JdbcUserRepository implements UserRepository {
             ps.setString(3, passwordHash);
             ps.setString(4, displayName);
             ps.setString(5, status);
+            ps.setBoolean(6, mustChangePassword);
             return ps;
         }, keyHolder);
 
@@ -177,6 +199,35 @@ public class JdbcUserRepository implements UserRepository {
             throw new IllegalStateException("插入用户未返回主键");
         }
         return key.longValue();
+    }
+
+    @Override
+    public void updatePassword(long userId, String passwordHash, boolean mustChangePassword) {
+        jdbcTemplate.update(
+                "UPDATE sys_user SET password_hash = ?, must_change_password = ?, "
+                        + "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                passwordHash,
+                mustChangePassword,
+                userId
+        );
+    }
+
+    @Override
+    public void bumpTokenVersion(long userId) {
+        jdbcTemplate.update(
+                "UPDATE sys_user SET token_version = token_version + 1, "
+                        + "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                userId
+        );
+    }
+
+    @Override
+    public void updateStatus(long userId, String status) {
+        jdbcTemplate.update(
+                "UPDATE sys_user SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                status,
+                userId
+        );
     }
 
     @Override
@@ -199,7 +250,6 @@ public class JdbcUserRepository implements UserRepository {
         );
     }
 
-    /** 把用户的角色查出来，填进 UserAccount */
     private UserAccount withRoles(UserAccount user) {
         List<String> roles = jdbcTemplate.query(
                 "SELECT role_code FROM sys_user_role WHERE user_id = ? ORDER BY role_code",
@@ -213,15 +263,14 @@ public class JdbcUserRepository implements UserRepository {
                 user.getPasswordHash(),
                 user.getDisplayName(),
                 user.getStatus(),
+                user.isMustChangePassword(),
+                user.getTokenVersion(),
                 user.getCreatedAt(),
                 new HashSet<>(roles)
         );
     }
 
     private static Instant toInstant(Timestamp ts) {
-        if (ts == null) {
-            return null;
-        }
-        return ts.toInstant();
+        return ts == null ? null : ts.toInstant();
     }
 }

@@ -16,13 +16,14 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
 
 /**
- * 平台管理员业务：查角色、查用户、创建用户、改用户角色。
+ * 平台管理员业务：查角色、查用户、创建用户、改角色、重置密码、停用/删除。
  */
 @Service
 public class AdminUserAppService {
@@ -30,8 +31,10 @@ public class AdminUserAppService {
     /** 用户名：字母数字下划线，3~64 位（降低注入与脏数据风险） */
     private static final Pattern USERNAME_PATTERN = Pattern.compile("^[a-zA-Z0-9_]{3,64}$");
 
-    private static final int MIN_PASSWORD_LENGTH = 8;
     private static final int MAX_DISPLAY_NAME_LENGTH = 128;
+    private static final String STATUS_ACTIVE = "ACTIVE";
+    private static final String STATUS_DISABLED = "DISABLED";
+    private static final String STATUS_DELETED = "DELETED";
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
@@ -68,16 +71,11 @@ public class AdminUserAppService {
     @Transactional(readOnly = true)
     public UserSummary getUser(long userId) {
         checkPlatformAdmin();
-        Optional<UserAccount> optionalUser = userRepository.findById(userId);
-        if (optionalUser.isEmpty()) {
-            throw new BizException(ErrorCode.NOT_FOUND, "用户不存在");
-        }
-        return UserSummary.from(optionalUser.get());
+        return UserSummary.from(requireUser(userId));
     }
 
     /**
-     * 创建用户：指定组织、初始角色；密码至少 8 位。
-     * SQL 使用参数绑定；用户名等字段再做格式校验，降低注入与脏数据风险。
+     * 创建用户：指定组织、初始角色；创建后必须首次改密。
      */
     @Transactional
     public UserSummary createUser(long orgId,
@@ -100,34 +98,26 @@ public class AdminUserAppService {
         }
 
         String safeDisplayName = normalizeDisplayName(displayName);
-        checkPassword(password);
+        PasswordPolicy.validateNewPassword(password);
         Set<String> roles = checkAndNormalizeRoles(roleCodes);
 
         String passwordHash = passwordEncoder.encode(password);
-        long userId = userRepository.insert(orgId, safeUsername, passwordHash, safeDisplayName, "ACTIVE");
+        // 新建账号一律强制首次改密
+        long userId = userRepository.insert(
+                orgId, safeUsername, passwordHash, safeDisplayName, STATUS_ACTIVE, true);
         userRepository.replaceRoles(userId, roles);
 
-        Optional<UserAccount> created = userRepository.findById(userId);
-        if (created.isEmpty()) {
-            throw new BizException(ErrorCode.INTERNAL, "创建用户失败");
-        }
-        return UserSummary.from(created.get());
+        return UserSummary.from(requireUser(userId));
     }
 
     /**
-     * 设置用户角色（全量覆盖：最终就是这次传来的列表）。
-     * 系统至少要留下一名平台管理员。
+     * 设置用户角色（全量覆盖），并吊销对方旧会话。
      */
     @Transactional
     public UserSummary replaceRoles(long userId, List<String> roleCodes) {
         CurrentUser operator = checkPlatformAdmin();
 
-        Optional<UserAccount> optionalTarget = userRepository.findById(userId);
-        if (optionalTarget.isEmpty()) {
-            throw new BizException(ErrorCode.NOT_FOUND, "用户不存在");
-        }
-        UserAccount target = optionalTarget.get();
-
+        UserAccount target = requireUser(userId);
         Set<String> nextRoles = checkAndNormalizeRoles(roleCodes);
 
         boolean removingOwnAdmin = operator.getUserId() == userId
@@ -136,19 +126,106 @@ public class AdminUserAppService {
         boolean wasAdmin = target.getRoleCodes().contains(RoleCode.PLATFORM_ADMIN.name());
         boolean willBeAdmin = nextRoles.contains(RoleCode.PLATFORM_ADMIN.name());
 
-        // 不能删掉系统里最后一个平台管理员
         if ((removingOwnAdmin || (wasAdmin && !willBeAdmin))
                 && userRepository.countUsersWithRole(RoleCode.PLATFORM_ADMIN.name()) <= 1) {
             throw new BizException(ErrorCode.CONFLICT, "系统至少保留一名平台管理员");
         }
 
         userRepository.replaceRoles(userId, nextRoles);
+        // 角色变化后旧 Token 立即失效
+        userRepository.bumpTokenVersion(userId);
 
-        Optional<UserAccount> afterUpdate = userRepository.findById(userId);
-        if (afterUpdate.isEmpty()) {
+        return UserSummary.from(requireUser(userId));
+    }
+
+    /**
+     * 重置密码：生成临时密码，强制改密，并吊销旧会话。
+     * 临时密码明文仅本次响应返回，供管理员页面一次性展示。
+     */
+    @Transactional
+    public ResetPasswordResult resetPassword(long userId) {
+        checkPlatformAdmin();
+
+        UserAccount target = requireUser(userId);
+        if (STATUS_DELETED.equalsIgnoreCase(target.getStatus())) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "已删除账号不能重置密码");
+        }
+
+        String temporaryPassword = TemporaryPasswordGenerator.generate();
+        String hash = passwordEncoder.encode(temporaryPassword);
+        userRepository.updatePassword(userId, hash, true);
+        userRepository.bumpTokenVersion(userId);
+
+        ResetPasswordResult result = new ResetPasswordResult();
+        result.setUserId(userId);
+        result.setReset(true);
+        result.setTemporaryPassword(temporaryPassword);
+        result.setMessage("临时密码已生成，请立即复制保存，关闭后不可再查看");
+        return result;
+    }
+
+    /**
+     * 更新账号状态：ACTIVE / DISABLED。停用时吊销会话。
+     */
+    @Transactional
+    public UserSummary updateStatus(long userId, String status) {
+        CurrentUser operator = checkPlatformAdmin();
+        UserAccount target = requireUser(userId);
+
+        String next = normalizeActiveOrDisabled(status);
+        if (STATUS_DELETED.equalsIgnoreCase(target.getStatus())) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "已删除账号不能改状态");
+        }
+
+        if (STATUS_DISABLED.equals(next)) {
+            ensureNotLastPlatformAdmin(operator, target);
+        }
+
+        userRepository.updateStatus(userId, next);
+        if (STATUS_DISABLED.equals(next)) {
+            userRepository.bumpTokenVersion(userId);
+        }
+        return UserSummary.from(requireUser(userId));
+    }
+
+    /**
+     * 逻辑删除：status=DELETED，并吊销会话。
+     */
+    @Transactional
+    public void deleteUser(long userId) {
+        CurrentUser operator = checkPlatformAdmin();
+        UserAccount target = requireUser(userId);
+
+        if (STATUS_DELETED.equalsIgnoreCase(target.getStatus())) {
+            return;
+        }
+        ensureNotLastPlatformAdmin(operator, target);
+
+        userRepository.updateStatus(userId, STATUS_DELETED);
+        userRepository.bumpTokenVersion(userId);
+    }
+
+    private void ensureNotLastPlatformAdmin(CurrentUser operator, UserAccount target) {
+        boolean isAdmin = target.getRoleCodes().contains(RoleCode.PLATFORM_ADMIN.name());
+        if (!isAdmin) {
+            return;
+        }
+        if (userRepository.countUsersWithRole(RoleCode.PLATFORM_ADMIN.name()) <= 1) {
+            throw new BizException(ErrorCode.CONFLICT, "系统至少保留一名平台管理员");
+        }
+        // 不允许把自己停用/删掉导致无人可管（上面已拦最后一个；这里再拦「操作自己且只剩自己」已覆盖）
+        if (operator.getUserId() == target.getId()
+                && userRepository.countUsersWithRole(RoleCode.PLATFORM_ADMIN.name()) <= 1) {
+            throw new BizException(ErrorCode.CONFLICT, "系统至少保留一名平台管理员");
+        }
+    }
+
+    private UserAccount requireUser(long userId) {
+        Optional<UserAccount> optionalUser = userRepository.findById(userId);
+        if (optionalUser.isEmpty()) {
             throw new BizException(ErrorCode.NOT_FOUND, "用户不存在");
         }
-        return UserSummary.from(afterUpdate.get());
+        return optionalUser.get();
     }
 
     private String normalizeUsername(String username) {
@@ -170,7 +247,6 @@ public class AdminUserAppService {
         if (trimmed.length() > MAX_DISPLAY_NAME_LENGTH) {
             throw new BizException(ErrorCode.BAD_REQUEST, "显示名过长");
         }
-        // 拒绝控制字符，避免奇怪注入/展示问题
         for (int i = 0; i < trimmed.length(); i++) {
             char c = trimmed.charAt(i);
             if (Character.isISOControl(c)) {
@@ -180,13 +256,17 @@ public class AdminUserAppService {
         return trimmed;
     }
 
-    private void checkPassword(String password) {
-        if (password == null || password.length() < MIN_PASSWORD_LENGTH) {
-            throw new BizException(ErrorCode.BAD_REQUEST, "密码至少 " + MIN_PASSWORD_LENGTH + " 位");
+    private String normalizeActiveOrDisabled(String status) {
+        if (status == null || status.trim().isEmpty()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "status 不能为空");
         }
+        String normalized = status.trim().toUpperCase(Locale.ROOT);
+        if (!STATUS_ACTIVE.equals(normalized) && !STATUS_DISABLED.equals(normalized)) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "status 仅支持 ACTIVE 或 DISABLED");
+        }
+        return normalized;
     }
 
-    /** 检查角色码是否合法，并转成 Set */
     private Set<String> checkAndNormalizeRoles(List<String> roleCodes) {
         if (roleCodes == null || roleCodes.isEmpty()) {
             throw new BizException(ErrorCode.BAD_REQUEST, "至少指定一个角色");
@@ -202,7 +282,6 @@ public class AdminUserAppService {
         return result;
     }
 
-    /** 当前登录人必须是平台管理员 */
     private CurrentUser checkPlatformAdmin() {
         CurrentUser user = UserContext.get();
         if (user == null) {
@@ -221,6 +300,7 @@ public class AdminUserAppService {
         private String username;
         private String displayName;
         private String status;
+        private boolean mustChangePassword;
         private Set<String> roleCodes;
 
         public static UserSummary from(UserAccount account) {
@@ -230,6 +310,7 @@ public class AdminUserAppService {
             summary.username = account.getUsername();
             summary.displayName = account.getDisplayName();
             summary.status = account.getStatus();
+            summary.mustChangePassword = account.isMustChangePassword();
             summary.roleCodes = new TreeSet<>(account.getRoleCodes());
             return summary;
         }
@@ -254,8 +335,52 @@ public class AdminUserAppService {
             return status;
         }
 
+        public boolean isMustChangePassword() {
+            return mustChangePassword;
+        }
+
         public Set<String> getRoleCodes() {
             return roleCodes;
+        }
+    }
+
+    /** 重置密码一次性结果（含明文临时密码） */
+    public static class ResetPasswordResult {
+        private long userId;
+        private boolean reset;
+        private String temporaryPassword;
+        private String message;
+
+        public long getUserId() {
+            return userId;
+        }
+
+        public void setUserId(long userId) {
+            this.userId = userId;
+        }
+
+        public boolean isReset() {
+            return reset;
+        }
+
+        public void setReset(boolean reset) {
+            this.reset = reset;
+        }
+
+        public String getTemporaryPassword() {
+            return temporaryPassword;
+        }
+
+        public void setTemporaryPassword(String temporaryPassword) {
+            this.temporaryPassword = temporaryPassword;
+        }
+
+        public String getMessage() {
+            return message;
+        }
+
+        public void setMessage(String message) {
+            this.message = message;
         }
     }
 }

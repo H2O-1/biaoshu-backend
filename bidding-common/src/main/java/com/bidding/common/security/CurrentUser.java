@@ -4,8 +4,7 @@ import java.util.HashSet;
 import java.util.Set;
 
 /**
- * 当前登录用户（从 JWT 里解析出来）。
- * roleCodes：平台角色，例如 PLATFORM_ADMIN。
+ * 当前登录用户（从 JWT 解析，并可能用库中的最新状态补齐）。
  */
 public class CurrentUser {
 
@@ -13,12 +12,20 @@ public class CurrentUser {
     private final long orgId;
     private final String username;
     private final Set<String> roleCodes;
+    private final int tokenVersion;
+    private final boolean mustChangePassword;
 
-    public CurrentUser(long userId, long orgId, String username, Set<String> roleCodes) {
+    public CurrentUser(long userId,
+                       long orgId,
+                       String username,
+                       Set<String> roleCodes,
+                       int tokenVersion,
+                       boolean mustChangePassword) {
         this.userId = userId;
         this.orgId = orgId;
         this.username = username;
-        // 复制一份，避免外面改到内部集合
+        this.tokenVersion = tokenVersion;
+        this.mustChangePassword = mustChangePassword;
         if (roleCodes == null) {
             this.roleCodes = new HashSet<>();
         } else {
@@ -42,11 +49,18 @@ public class CurrentUser {
         return roleCodes;
     }
 
+    public int getTokenVersion() {
+        return tokenVersion;
+    }
+
+    public boolean isMustChangePassword() {
+        return mustChangePassword;
+    }
+
     public boolean hasRole(String roleCode) {
         return roleCodes.contains(roleCode);
     }
 
-    /** 是不是平台管理员 */
     public boolean isPlatformAdmin() {
         return hasRole("PLATFORM_ADMIN");
     }

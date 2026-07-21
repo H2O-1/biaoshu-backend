@@ -13,6 +13,8 @@ public class UserAccount {
     private final String passwordHash;
     private final String displayName;
     private final String status;
+    private final boolean mustChangePassword;
+    private final int tokenVersion;
     private final Instant createdAt;
     private final Set<String> roleCodes;
 
@@ -22,6 +24,8 @@ public class UserAccount {
                        String passwordHash,
                        String displayName,
                        String status,
+                       boolean mustChangePassword,
+                       int tokenVersion,
                        Instant createdAt,
                        Set<String> roleCodes) {
         this.id = id;
@@ -30,6 +34,8 @@ public class UserAccount {
         this.passwordHash = passwordHash;
         this.displayName = displayName;
         this.status = status;
+        this.mustChangePassword = mustChangePassword;
+        this.tokenVersion = tokenVersion;
         this.createdAt = createdAt;
         if (roleCodes == null) {
             this.roleCodes = new HashSet<>();
@@ -62,6 +68,14 @@ public class UserAccount {
         return status;
     }
 
+    public boolean isMustChangePassword() {
+        return mustChangePassword;
+    }
+
+    public int getTokenVersion() {
+        return tokenVersion;
+    }
+
     public Instant getCreatedAt() {
         return createdAt;
     }
@@ -70,7 +84,7 @@ public class UserAccount {
         return roleCodes;
     }
 
-    /** 是否允许登录 */
+    /** 是否允许登录（仅 ACTIVE） */
     public boolean isEnabled() {
         return "ACTIVE".equalsIgnoreCase(status);
     }

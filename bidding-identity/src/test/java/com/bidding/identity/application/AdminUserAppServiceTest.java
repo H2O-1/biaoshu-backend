@@ -24,8 +24,11 @@ import java.util.Optional;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -50,7 +53,7 @@ class AdminUserAppServiceTest {
     void setUp() {
         Set<String> roles = new HashSet<>();
         roles.add(RoleCode.PLATFORM_ADMIN.name());
-        UserContext.set(new CurrentUser(1L, 1L, "admin", roles));
+        UserContext.set(new CurrentUser(1L, 1L, "admin", roles, 0, false));
     }
 
     @AfterEach
@@ -62,7 +65,7 @@ class AdminUserAppServiceTest {
     void nonAdminForbidden() {
         Set<String> roles = new HashSet<>();
         roles.add(RoleCode.BIDDER.name());
-        UserContext.set(new CurrentUser(2L, 1L, "bidder", roles));
+        UserContext.set(new CurrentUser(2L, 1L, "bidder", roles, 0, false));
 
         BizException ex = assertThrows(BizException.class, () -> adminUserAppService.listRoles());
         assertEquals(ErrorCode.FORBIDDEN, ex.errorCode());
@@ -112,6 +115,7 @@ class AdminUserAppServiceTest {
         assertTrue(result.getRoleCodes().contains("TENDERER"));
         assertTrue(result.getRoleCodes().contains("EXPERT"));
         verify(userRepository).replaceRoles(eq(9L), eq(newRoles));
+        verify(userRepository).bumpTokenVersion(9L);
     }
 
     @Test
@@ -125,13 +129,14 @@ class AdminUserAppServiceTest {
         when(userRepository.existsOrgById(1L)).thenReturn(true);
         when(userRepository.existsByUsername("zhangsan")).thenReturn(false);
         when(passwordEncoder.encode("Passw0rd!")).thenReturn("hashed");
-        when(userRepository.insert(eq(1L), eq("zhangsan"), eq("hashed"), eq("张三"), eq("ACTIVE")))
+        when(userRepository.insert(eq(1L), eq("zhangsan"), eq("hashed"), eq("张三"), eq("ACTIVE"), eq(true)))
                 .thenReturn(10L);
 
         Set<String> roles = new HashSet<>();
         roles.add(RoleCode.TENDERER.name());
         when(userRepository.findById(10L)).thenReturn(Optional.of(
-                new UserAccount(10L, 1L, "zhangsan", "hashed", "张三", "ACTIVE", Instant.now(), roles)
+                new UserAccount(10L, 1L, "zhangsan", "hashed", "张三", "ACTIVE",
+                        true, 0, Instant.now(), roles)
         ));
 
         AdminUserAppService.UserSummary summary = adminUserAppService.createUser(
@@ -139,6 +144,7 @@ class AdminUserAppServiceTest {
         );
 
         assertEquals("zhangsan", summary.getUsername());
+        assertTrue(summary.isMustChangePassword());
         assertTrue(summary.getRoleCodes().contains("TENDERER"));
         verify(userRepository).replaceRoles(eq(10L), eq(roles));
     }
@@ -151,7 +157,18 @@ class AdminUserAppServiceTest {
         BizException ex = assertThrows(BizException.class,
                 () -> adminUserAppService.createUser(1L, "zhangsan", "1234567", "张三", List.of("BIDDER")));
         assertEquals(ErrorCode.BAD_REQUEST, ex.errorCode());
-        verify(userRepository, never()).insert(anyLong(), anyString(), anyString(), anyString(), anyString());
+        verify(userRepository, never()).insert(
+                anyLong(), anyString(), anyString(), anyString(), anyString(), anyBoolean());
+    }
+
+    @Test
+    void createUserRejectPasswordWithoutLetter() {
+        when(userRepository.existsOrgById(1L)).thenReturn(true);
+        when(userRepository.existsByUsername("zhangsan")).thenReturn(false);
+
+        BizException ex = assertThrows(BizException.class,
+                () -> adminUserAppService.createUser(1L, "zhangsan", "12345678", "张三", List.of("BIDDER")));
+        assertEquals(ErrorCode.BAD_REQUEST, ex.errorCode());
     }
 
     @Test
@@ -164,7 +181,43 @@ class AdminUserAppServiceTest {
         assertEquals(ErrorCode.BAD_REQUEST, ex.errorCode());
     }
 
+    @Test
+    void resetPasswordReturnsTemporaryPasswordOnce() {
+        Set<String> roles = new HashSet<>();
+        roles.add(RoleCode.BIDDER.name());
+        when(userRepository.findById(9L)).thenReturn(Optional.of(user(9L, roles)));
+        when(passwordEncoder.encode(anyString())).thenReturn("new-hash");
+
+        AdminUserAppService.ResetPasswordResult result = adminUserAppService.resetPassword(9L);
+
+        assertEquals(9L, result.getUserId());
+        assertTrue(result.isReset());
+        assertNotNull(result.getTemporaryPassword());
+        assertFalse(result.getTemporaryPassword().isBlank());
+        assertTrue(result.getMessage().contains("临时密码"));
+        verify(userRepository).updatePassword(eq(9L), eq("new-hash"), eq(true));
+        verify(userRepository).bumpTokenVersion(9L);
+    }
+
+    @Test
+    void disableUserBumpsTokenVersion() {
+        Set<String> roles = new HashSet<>();
+        roles.add(RoleCode.BIDDER.name());
+        when(userRepository.findById(9L))
+                .thenReturn(Optional.of(user(9L, roles)))
+                .thenReturn(Optional.of(new UserAccount(
+                        9L, 1L, "u9", "hash", "用户9", "DISABLED",
+                        false, 1, Instant.now(), roles)));
+
+        AdminUserAppService.UserSummary summary = adminUserAppService.updateStatus(9L, "DISABLED");
+
+        assertEquals("DISABLED", summary.getStatus());
+        verify(userRepository).updateStatus(9L, "DISABLED");
+        verify(userRepository).bumpTokenVersion(9L);
+    }
+
     private static UserAccount user(long id, Set<String> roles) {
-        return new UserAccount(id, 1L, "u" + id, "hash", "用户" + id, "ACTIVE", Instant.now(), roles);
+        return new UserAccount(id, 1L, "u" + id, "hash", "用户" + id, "ACTIVE",
+                false, 0, Instant.now(), roles);
     }
 }

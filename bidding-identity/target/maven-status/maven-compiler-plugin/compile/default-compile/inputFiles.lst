@@ -4,6 +4,9 @@ D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\
 D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\application\AdminUserAppService.java
 D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\application\AuthAppService.java
 D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\application\BootstrapAdminRunner.java
+D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\application\PasswordPolicy.java
+D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\application\TemporaryPasswordGenerator.java
+D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\domain\model\Org.java
 D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\domain\model\Role.java
 D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\domain\model\RoleCode.java
 D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\domain\model\UserAccount.java
