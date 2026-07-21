@@ -5,9 +5,11 @@ import com.bidding.common.error.BizException;
 import com.bidding.common.error.ErrorCode;
 import com.bidding.common.security.CurrentUser;
 import com.bidding.common.security.UserContext;
+import com.bidding.identity.domain.model.Org;
 import com.bidding.identity.domain.model.Role;
 import com.bidding.identity.domain.model.RoleCode;
 import com.bidding.identity.domain.model.UserAccount;
+import com.bidding.identity.domain.port.OrgRepository;
 import com.bidding.identity.domain.port.UserRepository;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -45,10 +47,14 @@ public class AdminUserAppService {
     private static final String STATUS_DELETED = "DELETED";
 
     private final UserRepository userRepository;
+    private final OrgRepository orgRepository;
     private final PasswordEncoder passwordEncoder;
 
-    public AdminUserAppService(UserRepository userRepository, PasswordEncoder passwordEncoder) {
+    public AdminUserAppService(UserRepository userRepository,
+                               OrgRepository orgRepository,
+                               PasswordEncoder passwordEncoder) {
         this.userRepository = userRepository;
+        this.orgRepository = orgRepository;
         this.passwordEncoder = passwordEncoder;
     }
 
@@ -98,8 +104,12 @@ public class AdminUserAppService {
         if (orgId <= 0) {
             throw new BizException(ErrorCode.BAD_REQUEST, "orgId 不合法");
         }
-        if (!userRepository.existsOrgById(orgId)) {
+        Optional<Org> optionalOrg = orgRepository.findById(orgId);
+        if (optionalOrg.isEmpty()) {
             throw new BizException(ErrorCode.BAD_REQUEST, "组织不存在");
+        }
+        if (!optionalOrg.get().isActive()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "组织已停用，不能创建用户");
         }
 
         String safeUsername = normalizeUsername(username);

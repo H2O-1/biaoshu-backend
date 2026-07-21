@@ -1,6 +1,5 @@
 package com.bidding.identity.domain.port;
 
-import com.bidding.identity.domain.model.Org;
 import com.bidding.identity.domain.model.Role;
 import com.bidding.identity.domain.model.UserAccount;
 
@@ -21,6 +20,13 @@ public interface UserRepository {
 
     long countSearch(String keyword);
 
+    /**
+     * 按组织查用户（排除已删除），支持关键字模糊搜。
+     */
+    List<UserAccount> searchByOrgId(long orgId, String keyword, int offset, int limit);
+
+    long countSearchByOrgId(long orgId, String keyword);
+
     void replaceRoles(long userId, Set<String> roleCodes);
 
     long countUsersWithRole(String roleCode);
@@ -30,11 +36,6 @@ public interface UserRepository {
     boolean existsByPhone(String phone);
 
     boolean existsByEmail(String email);
-
-    boolean existsOrgById(long orgId);
-
-    /** 按 ID 查组织（登录 / 当前用户展示用） */
-    Optional<Org> findOrgById(long orgId);
 
     long insert(long orgId,
                 String username,
@@ -49,9 +50,13 @@ public interface UserRepository {
 
     void bumpTokenVersion(long userId);
 
-    void updateStatus(long userId, String status);
+    /**
+     * 吊销某组织下全部未删除用户的会话（token_version + 1）。
+     * 用于组织停用时立刻踢下线；不修改用户 status。
+     */
+    int bumpTokenVersionByOrgId(long orgId);
 
-    Optional<Long> findSystemOrgId();
+    void updateStatus(long userId, String status);
 
     List<Role> listRoles();
 }

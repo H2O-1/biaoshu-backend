@@ -1,6 +1,7 @@
 package com.bidding.identity.application;
 
 import com.bidding.identity.domain.model.RoleCode;
+import com.bidding.identity.domain.port.OrgRepository;
 import com.bidding.identity.domain.port.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,6 +26,7 @@ public class BootstrapAdminRunner implements ApplicationRunner {
     private static final Logger log = LoggerFactory.getLogger(BootstrapAdminRunner.class);
 
     private final UserRepository userRepository;
+    private final OrgRepository orgRepository;
     private final PasswordEncoder passwordEncoder;
     private final boolean enabled;
     private final String username;
@@ -33,12 +35,14 @@ public class BootstrapAdminRunner implements ApplicationRunner {
 
     public BootstrapAdminRunner(
             UserRepository userRepository,
+            OrgRepository orgRepository,
             PasswordEncoder passwordEncoder,
             @Value("${bidding.bootstrap-admin.enabled:true}") boolean enabled,
             @Value("${bidding.bootstrap-admin.username:admin}") String username,
             @Value("${bidding.bootstrap-admin.password:}") String password,
             @Value("${bidding.bootstrap-admin.display-name:平台管理员}") String displayName) {
         this.userRepository = userRepository;
+        this.orgRepository = orgRepository;
         this.passwordEncoder = passwordEncoder;
         this.enabled = enabled;
         this.username = username;
@@ -64,7 +68,7 @@ public class BootstrapAdminRunner implements ApplicationRunner {
                     "系统无平台管理员，请设置环境变量 BOOTSTRAP_ADMIN_PASSWORD 后启动");
         }
 
-        Optional<Long> optionalOrgId = userRepository.findSystemOrgId();
+        Optional<Long> optionalOrgId = orgRepository.findSystemOrgId();
         if (optionalOrgId.isEmpty()) {
             throw new IllegalStateException("缺少系统组织种子数据");
         }

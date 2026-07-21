@@ -1,7 +1,7 @@
 # 招投标后端 · 接口文档（前端联调）
 
 > 维护约定：**每新增/变更接口，同步更新本文档**。  
-> 更新：2026-07-20  
+> 更新：2026-07-21  
 > Base URL（本地）：`http://localhost:8080`
 
 ---
@@ -333,7 +333,7 @@ Authorization: Bearer <accessToken>
 
 | code | 说明 |
 |------|------|
-| 40000 | 参数不合法 / 组织不存在 / 密码、手机号或邮箱不符合规则 / 角色为空或非法 |
+| 40000 | 参数不合法 / 组织不存在或已停用 / 密码、手机号或邮箱不符合规则 / 角色为空或非法 |
 | 40900 | 用户名、手机号或邮箱已存在 |
 
 **安全说明**
@@ -429,7 +429,241 @@ Authorization: Bearer <accessToken>
 
 ---
 
-## 4. 联调检查清单（前端）
+## 4. 组织管理 Orgs（M1）
+
+> 仅 `PLATFORM_ADMIN`（平台管理员，即原「超级管理员」口径）。  
+> **公司名称 `name`、编码 `code` 创建后绝对不可改**；本期不提供删除、不提供改名接口。  
+> **两级列表**：一级看组织；二级 `GET /api/admin/orgs/{orgId}/users` 看该组织下全部用户（组织与账号分开创建，可先建空组织）。  
+> 组织状态仅 `ACTIVE` / `DISABLED`。系统组织列表可见、可点进看用户，但不可停用。  
+> **所在城市**：创建时必须从全国地级市词典中选择（正式名，如「深圳市」，不可手填「深圳」）。
+
+### 4.0 城市选项（创建组织下拉）
+
+#### 4.0.1 省份列表
+
+`GET /api/admin/cities/provinces`
+
+**成功响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "items": ["北京市", "天津市", "河北省", "山西省"],
+    "total": 34
+  }
+}
+```
+
+#### 4.0.2 地级市列表
+
+`GET /api/admin/cities`
+
+**Query**
+
+| 参数 | 类型 | 必填 | 默认 | 说明 |
+|------|------|------|------|------|
+| province | string | 否 | `""` | 按省精确筛（传省份正式名，如 `广东省`） |
+| keyword | string | 否 | `""` | 按城市名模糊搜 |
+
+示例：`GET /api/admin/cities?province=广东省&keyword=深圳`
+
+**成功响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "items": [
+      {
+        "code": "440300",
+        "name": "深圳市",
+        "province": "广东省",
+        "provinceCode": "440000"
+      }
+    ],
+    "total": 1
+  }
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| code | 行政区划代码 |
+| name | 城市正式名；**创建组织时 `city` 必须传此值** |
+| province / provinceCode | 所属省（直辖市） |
+
+> 词典含直辖市、地级市、自治州/地区/盟，以及部分省直管/兵团师市等常用选项；数据来自 classpath 静态 JSON，不建表。
+
+---
+
+### 4.1 组织分页列表
+
+`GET /api/admin/orgs`
+
+**Query**
+
+| 参数 | 类型 | 必填 | 默认 | 说明 |
+|------|------|------|------|------|
+| name | string | 否 | `""` | 公司名称模糊搜 |
+| city | string | 否 | `""` | 所在城市模糊搜 |
+| status | string | 否 | `""` | `ACTIVE` / `DISABLED`；空=全部 |
+| page | number | 否 | 1 | 页码，从 1 起 |
+| size | number | 否 | 20 | 每页条数，最大 100 |
+
+**成功响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "items": [
+      {
+        "id": 2,
+        "code": "ORG_A1B2C3D4E5F6",
+        "name": "华能招标有限公司",
+        "city": "北京市",
+        "status": "ACTIVE",
+        "userCount": 0,
+        "projectCount": 0,
+        "createdBy": 1,
+        "createdByName": "平台管理员",
+        "createdAt": "2026-07-21T03:00:00Z",
+        "updatedAt": "2026-07-21T03:00:00Z"
+      }
+    ],
+    "total": 1,
+    "page": 1,
+    "size": 20
+  }
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| code | 系统自动生成，创建后不可改 |
+| name | 公司名称，创建后不可改 |
+| status | 库内仅 `ACTIVE` / `DISABLED` |
+| userCount | 组织下未删除用户数 |
+| projectCount | 项目模块未建，当前固定 `0` |
+
+---
+
+### 4.2 创建组织
+
+`POST /api/admin/orgs`
+
+```json
+{
+  "name": "华能招标有限公司",
+  "city": "北京市"
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| name | string | 是 | 公司名称，全局唯一，最长 128；创建后不可改 |
+| city | string | 是 | 所在城市，必须为 `GET /api/admin/cities` 返回的 `name`（精确匹配） |
+
+**成功响应**：`data` 为新建组织摘要（含自动生成的 `code`，`status=ACTIVE`，`userCount=0`）。
+
+**常见失败**
+
+| code | 说明 |
+|------|------|
+| 40000 | 名称/城市为空，或城市不在地级市词典中 |
+| 40900 | 公司名称已存在 |
+
+允许先建空组织（无账号）。
+
+---
+
+### 4.3 组织详情
+
+`GET /api/admin/orgs/{orgId}`
+
+**成功响应**：`data` 结构同列表单条。
+
+**失败**：不存在 → `40400`
+
+---
+
+### 4.4 组织下用户（二级列表）
+
+`GET /api/admin/orgs/{orgId}/users`
+
+点进某一组织后，查看该组织下全部账号。系统组织也可查询。
+
+**Query**
+
+| 参数 | 类型 | 必填 | 默认 | 说明 |
+|------|------|------|------|------|
+| keyword | string | 否 | `""` | 按用户名 / 显示名 / 手机 / 邮箱模糊搜 |
+| page | number | 否 | 1 | 页码，从 1 起 |
+| size | number | 否 | 20 | 每页条数，最大 100 |
+
+**成功响应**：分页结构同用户列表；`items` 为用户摘要（与 `GET /api/admin/users` 单条字段一致）。  
+**不含** `DELETED` 用户。
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "items": [
+      {
+        "id": 1,
+        "orgId": 1,
+        "username": "admin",
+        "displayName": "平台管理员",
+        "phone": null,
+        "email": null,
+        "status": "ACTIVE",
+        "mustChangePassword": false,
+        "roleCodes": ["PLATFORM_ADMIN"]
+      }
+    ],
+    "total": 1,
+    "page": 1,
+    "size": 20
+  }
+}
+```
+
+**失败**：组织不存在 → `40400`
+
+往组织下挂账号：继续用 `POST /api/admin/users`，传对应 `orgId`。
+
+---
+
+### 4.5 启用 / 停用组织
+
+`PUT /api/admin/orgs/{orgId}/status`
+
+```json
+{
+  "status": "DISABLED"
+}
+```
+
+| status | 说明 |
+|--------|------|
+| ACTIVE | 启用；**不**吊销会话 |
+| DISABLED | 停用；该组织下用户无法登录，也不能再往该组织创建用户；并对组织下未删除用户批量 `token_version + 1`，旧 Token **立即失效** |
+
+系统组织（`code=SYSTEM`）不允许变更状态。  
+说明：
+
+- 只吊销会话，**不改**用户自身 `status`（组织启停与账号启停分开）
+- 已是 `DISABLED` 再停用一次：幂等更新，**不再**重复 bump
+- 重新启用：不 bump，用户需重新登录
+
+---
+
+## 5. 联调检查清单（前端）
 
 - [ ] 登录拿到 `accessToken`，本地存储；同时保存 `orgName` / `roleCodes` 用于顶栏展示
 - [ ] 刷新页面可调 `GET /api/auth/me` 恢复当前用户与组织信息
@@ -442,10 +676,14 @@ Authorization: Bearer <accessToken>
 - [ ] 退出登录调 `/api/auth/logout` 并清本地 Token；浏览器返回也不能进业务页
 - [ ] 角色多选提交时传完整 `roleCodes` 数组
 - [ ] 创建用户密码：≥8 且含字母+数字
+- [ ] 组织：创建后不可改公司名称；停用组织后不可再往该组织建用户
+- [ ] 创建组织：城市从 `GET /api/admin/cities` 选择，传正式名（如「深圳市」）
+- [ ] 组织二级：点进组织调 `GET /api/admin/orgs/{orgId}/users` 看该组织账号（含系统组织）
+- [ ] 停用组织后：该组织用户旧 Token 立即 401，需重新登录（组织启用后）
 
 ---
 
-## 5. 变更记录
+## 6. 变更记录
 
 | 日期 | 说明 |
 |------|------|
@@ -455,3 +693,7 @@ Authorization: Bearer <accessToken>
 | 2026-07-21 | 登录与 `/api/auth/me` 返回 `orgCode` / `orgName`，便于展示所属组织 |
 | 2026-07-21 | 用户增加手机号：创建必填、唯一；登录/me/用户列表返回 |
 | 2026-07-21 | 用户增加邮箱：创建必填、唯一；登录/me/用户列表返回 |
+| 2026-07-21 | M1 组织主数据：创建/列表/详情/启停；名称与编码创建后不可改；无删除 |
+| 2026-07-21 | 全国地级市词典：`GET /api/admin/cities`；创建组织 city 必须精确匹配词典 |
+| 2026-07-21 | M2 组织二级列表：`GET /api/admin/orgs/{orgId}/users`；排除 DELETED；复用用户摘要 |
+| 2026-07-21 | M3 停用组织批量吊销会话：`token_version + 1`；启用不 bump；不改用户 status |

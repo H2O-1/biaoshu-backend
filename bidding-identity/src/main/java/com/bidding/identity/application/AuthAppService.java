@@ -6,6 +6,7 @@ import com.bidding.common.security.CurrentUser;
 import com.bidding.common.security.UserContext;
 import com.bidding.identity.domain.model.Org;
 import com.bidding.identity.domain.model.UserAccount;
+import com.bidding.identity.domain.port.OrgRepository;
 import com.bidding.identity.domain.port.UserRepository;
 import com.bidding.identity.infrastructure.security.JwtTokenService;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -22,13 +23,16 @@ import java.util.Set;
 public class AuthAppService {
 
     private final UserRepository userRepository;
+    private final OrgRepository orgRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenService jwtTokenService;
 
     public AuthAppService(UserRepository userRepository,
+                          OrgRepository orgRepository,
                           PasswordEncoder passwordEncoder,
                           JwtTokenService jwtTokenService) {
         this.userRepository = userRepository;
+        this.orgRepository = orgRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtTokenService = jwtTokenService;
     }
@@ -43,6 +47,11 @@ public class AuthAppService {
         UserAccount user = optionalUser.get();
         if (!user.isEnabled()) {
             throw new BizException(ErrorCode.FORBIDDEN, "账号已停用");
+        }
+
+        Optional<Org> optionalOrg = orgRepository.findById(user.getOrgId());
+        if (optionalOrg.isEmpty() || !optionalOrg.get().isActive()) {
+            throw new BizException(ErrorCode.FORBIDDEN, "所属组织已停用");
         }
 
         if (!passwordEncoder.matches(password, user.getPasswordHash())) {
@@ -152,7 +161,7 @@ public class AuthAppService {
     }
 
     private OrgInfo loadOrgInfo(long orgId) {
-        Optional<Org> optionalOrg = userRepository.findOrgById(orgId);
+        Optional<Org> optionalOrg = orgRepository.findById(orgId);
         if (optionalOrg.isEmpty()) {
             // 数据异常：用户挂了不存在的组织，仍返回登录能力，名称留空避免整单失败
             return new OrgInfo("", "");

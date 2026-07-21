@@ -4,9 +4,11 @@ import com.bidding.common.error.BizException;
 import com.bidding.common.error.ErrorCode;
 import com.bidding.common.security.CurrentUser;
 import com.bidding.common.security.UserContext;
+import com.bidding.identity.domain.model.Org;
 import com.bidding.identity.domain.model.Role;
 import com.bidding.identity.domain.model.RoleCode;
 import com.bidding.identity.domain.model.UserAccount;
+import com.bidding.identity.domain.port.OrgRepository;
 import com.bidding.identity.domain.port.UserRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -42,6 +44,9 @@ class AdminUserAppServiceTest {
 
     @Mock
     private UserRepository userRepository;
+
+    @Mock
+    private OrgRepository orgRepository;
 
     @Mock
     private PasswordEncoder passwordEncoder;
@@ -126,7 +131,7 @@ class AdminUserAppServiceTest {
 
     @Test
     void createUserSuccess() {
-        when(userRepository.existsOrgById(1L)).thenReturn(true);
+        when(orgRepository.findById(1L)).thenReturn(Optional.of(activeOrg(1L)));
         when(userRepository.existsByUsername("zhangsan")).thenReturn(false);
         when(userRepository.existsByPhone("13800138000")).thenReturn(false);
         when(userRepository.existsByEmail("zhangsan@example.com")).thenReturn(false);
@@ -158,7 +163,7 @@ class AdminUserAppServiceTest {
 
     @Test
     void createUserRejectShortPassword() {
-        when(userRepository.existsOrgById(1L)).thenReturn(true);
+        when(orgRepository.findById(1L)).thenReturn(Optional.of(activeOrg(1L)));
         when(userRepository.existsByUsername("zhangsan")).thenReturn(false);
         when(userRepository.existsByPhone("13800138000")).thenReturn(false);
         when(userRepository.existsByEmail("zhangsan@example.com")).thenReturn(false);
@@ -175,7 +180,7 @@ class AdminUserAppServiceTest {
 
     @Test
     void createUserRejectBadPhone() {
-        when(userRepository.existsOrgById(1L)).thenReturn(true);
+        when(orgRepository.findById(1L)).thenReturn(Optional.of(activeOrg(1L)));
         when(userRepository.existsByUsername("zhangsan")).thenReturn(false);
 
         BizException ex = assertThrows(BizException.class,
@@ -187,7 +192,7 @@ class AdminUserAppServiceTest {
 
     @Test
     void createUserRejectBadEmail() {
-        when(userRepository.existsOrgById(1L)).thenReturn(true);
+        when(orgRepository.findById(1L)).thenReturn(Optional.of(activeOrg(1L)));
         when(userRepository.existsByUsername("zhangsan")).thenReturn(false);
         when(userRepository.existsByPhone("13800138000")).thenReturn(false);
 
@@ -200,7 +205,7 @@ class AdminUserAppServiceTest {
 
     @Test
     void createUserRejectPasswordWithoutLetter() {
-        when(userRepository.existsOrgById(1L)).thenReturn(true);
+        when(orgRepository.findById(1L)).thenReturn(Optional.of(activeOrg(1L)));
         when(userRepository.existsByUsername("zhangsan")).thenReturn(false);
         when(userRepository.existsByPhone("13800138000")).thenReturn(false);
         when(userRepository.existsByEmail("zhangsan@example.com")).thenReturn(false);
@@ -214,13 +219,27 @@ class AdminUserAppServiceTest {
 
     @Test
     void createUserRejectBadUsername() {
-        when(userRepository.existsOrgById(1L)).thenReturn(true);
+        when(orgRepository.findById(1L)).thenReturn(Optional.of(activeOrg(1L)));
 
         BizException ex = assertThrows(BizException.class,
                 () -> adminUserAppService.createUser(
                         1L, "zhang; drop", "Passw0rd!", "张三", "13800138000",
                         "zhangsan@example.com", List.of("BIDDER")));
         assertEquals(ErrorCode.BAD_REQUEST, ex.errorCode());
+    }
+
+    @Test
+    void createUserRejectDisabledOrg() {
+        when(orgRepository.findById(2L)).thenReturn(Optional.of(disabledOrg(2L)));
+
+        BizException ex = assertThrows(BizException.class,
+                () -> adminUserAppService.createUser(
+                        2L, "zhangsan", "Passw0rd!", "张三", "13800138000",
+                        "zhangsan@example.com", List.of("BIDDER")));
+        assertEquals(ErrorCode.BAD_REQUEST, ex.errorCode());
+        verify(userRepository, never()).insert(
+                anyLong(), anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), anyBoolean());
     }
 
     @Test
@@ -262,5 +281,15 @@ class AdminUserAppServiceTest {
         return new UserAccount(id, 1L, "u" + id, "hash", "用户" + id,
                 "1390000000" + (id % 10), "u" + id + "@example.com",
                 "ACTIVE", false, 0, Instant.now(), roles);
+    }
+
+    private static Org activeOrg(long id) {
+        return new Org(id, "ORG_" + id, "组织" + id, "北京", "ACTIVE",
+                1L, Instant.now(), Instant.now());
+    }
+
+    private static Org disabledOrg(long id) {
+        return new Org(id, "ORG_" + id, "组织" + id, "北京", "DISABLED",
+                1L, Instant.now(), Instant.now());
     }
 }

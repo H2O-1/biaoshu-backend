@@ -1,6 +1,5 @@
 package com.bidding.identity.infrastructure.persistence;
 
-import com.bidding.identity.domain.model.Org;
 import com.bidding.identity.domain.model.Role;
 import com.bidding.identity.domain.model.UserAccount;
 import com.bidding.identity.domain.port.UserRepository;
@@ -109,6 +108,40 @@ public class JdbcUserRepository implements UserRepository {
     }
 
     @Override
+    public List<UserAccount> searchByOrgId(long orgId, String keyword, int offset, int limit) {
+        String like = "%" + keyword + "%";
+        // 二级列表：只看该组织下、未删除的账号
+        List<UserAccount> users = jdbcTemplate.query(
+                "SELECT " + USER_COLUMNS + " FROM sys_user "
+                        + "WHERE org_id = ? AND status <> 'DELETED' "
+                        + "AND (? = '' OR username LIKE ? OR display_name LIKE ? "
+                        + "OR phone LIKE ? OR email LIKE ?) "
+                        + "ORDER BY id LIMIT ? OFFSET ?",
+                userRowMapper,
+                orgId, keyword, like, like, like, like, limit, offset
+        );
+        List<UserAccount> result = new ArrayList<>();
+        for (UserAccount user : users) {
+            result.add(withRoles(user));
+        }
+        return result;
+    }
+
+    @Override
+    public long countSearchByOrgId(long orgId, String keyword) {
+        String like = "%" + keyword + "%";
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM sys_user "
+                        + "WHERE org_id = ? AND status <> 'DELETED' "
+                        + "AND (? = '' OR username LIKE ? OR display_name LIKE ? "
+                        + "OR phone LIKE ? OR email LIKE ?)",
+                Long.class,
+                orgId, keyword, like, like, like, like
+        );
+        return count == null ? 0 : count;
+    }
+
+    @Override
     public void replaceRoles(long userId, Set<String> roleCodes) {
         jdbcTemplate.update("DELETE FROM sys_user_role WHERE user_id = ?", userId);
         for (String roleCode : roleCodes) {
@@ -158,34 +191,6 @@ public class JdbcUserRepository implements UserRepository {
                 email
         );
         return count != null && count > 0;
-    }
-
-    @Override
-    public boolean existsOrgById(long orgId) {
-        Long count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(1) FROM sys_org WHERE id = ?",
-                Long.class,
-                orgId
-        );
-        return count != null && count > 0;
-    }
-
-    @Override
-    public Optional<Org> findOrgById(long orgId) {
-        List<Org> list = jdbcTemplate.query(
-                "SELECT id, code, name, status FROM sys_org WHERE id = ?",
-                (rs, rowNum) -> new Org(
-                        rs.getLong("id"),
-                        rs.getString("code"),
-                        rs.getString("name"),
-                        rs.getString("status")
-                ),
-                orgId
-        );
-        if (list.isEmpty()) {
-            return Optional.empty();
-        }
-        return Optional.of(list.get(0));
     }
 
     @Override
@@ -250,24 +255,22 @@ public class JdbcUserRepository implements UserRepository {
     }
 
     @Override
+    public int bumpTokenVersionByOrgId(long orgId) {
+        return jdbcTemplate.update(
+                "UPDATE sys_user SET token_version = token_version + 1, "
+                        + "updated_at = CURRENT_TIMESTAMP "
+                        + "WHERE org_id = ? AND status <> 'DELETED'",
+                orgId
+        );
+    }
+
+    @Override
     public void updateStatus(long userId, String status) {
         jdbcTemplate.update(
                 "UPDATE sys_user SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 status,
                 userId
         );
-    }
-
-    @Override
-    public Optional<Long> findSystemOrgId() {
-        List<Long> ids = jdbcTemplate.query(
-                "SELECT id FROM sys_org WHERE code = 'SYSTEM' LIMIT 1",
-                (rs, rowNum) -> rs.getLong(1)
-        );
-        if (ids.isEmpty()) {
-            return Optional.empty();
-        }
-        return Optional.of(ids.get(0));
     }
 
     @Override
