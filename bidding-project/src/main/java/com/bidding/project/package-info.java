@@ -1,5 +1,6 @@
 /**
- * 架构占位包。实现阶段在此按 domain / application / infrastructure 分包。
- * 详见 docs/02-模块划分与依赖.md
+ * 项目领域：项目主数据（招标方本组织下管理）。
+ * 不依赖 AI / review；无项目成员角色。
+ * 分层：domain / application / infrastructure / adapter
  */
 package com.bidding.project;

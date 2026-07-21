@@ -548,7 +548,7 @@ Authorization: Bearer <accessToken>
 | name | 公司名称，创建后不可改 |
 | status | 库内仅 `ACTIVE` / `DISABLED` |
 | userCount | 组织下未删除用户数 |
-| projectCount | 项目模块未建，当前固定 `0` |
+| projectCount | 组织下未删除项目数 |
 
 ---
 
@@ -680,10 +680,112 @@ Authorization: Bearer <accessToken>
 - [ ] 创建组织：城市从 `GET /api/admin/cities` 选择，传正式名（如「深圳市」）
 - [ ] 组织二级：点进组织调 `GET /api/admin/orgs/{orgId}/users` 看该组织账号（含系统组织）
 - [ ] 停用组织后：该组织用户旧 Token 立即 401，需重新登录（组织启用后）
+- [ ] 项目：仅招标方；平台管理员 403；停用后列表可见且可改基本信息
 
 ---
 
-## 6. 变更记录
+## 6. 项目 Projects
+
+> 仅角色含 `TENDERER` 的用户。平台管理员无招标方角色时 **403**。  
+> 项目挂在当前用户所属组织；`orgId` 由服务端取自登录态，前端不可跨组织指定。  
+> **无项目成员角色**。标包/文件数量本期占位为 `0`。
+
+### 6.1 项目分页列表
+
+`GET /api/projects`
+
+**Query**
+
+| 参数 | 类型 | 必填 | 默认 | 说明 |
+|------|------|------|------|------|
+| keyword | string | 否 | `""` | 名称 / 代理机构 / 负责人模糊搜 |
+| status | string | 否 | `""` | `ACTIVE` / `DISABLED`；空=未删除全部 |
+| page | number | 否 | 1 | 页码 |
+| size | number | 否 | 20 | 每页条数，最大 100 |
+
+停用项目仍出现在列表中（可按 status 筛选）。已删除不返回。
+
+### 6.2 创建项目
+
+`POST /api/projects`
+
+```json
+{
+  "name": "市政道路改造工程",
+  "agency": "某某招标代理",
+  "projectType": "公开招标",
+  "leaderName": "张三"
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| name | string | 是 | 项目名称；同组织内未删除唯一；创建后可改 |
+| agency | string | 是 | 代理机构 |
+| projectType | string | 是 | 项目类型 |
+| leaderName | string | 是 | 项目负责人 |
+
+### 6.3 项目详情
+
+`GET /api/projects/{projectId}`
+
+跨组织或已删除 → `40400`。
+
+**成功 `data` 示例**
+
+```json
+{
+  "id": 1,
+  "orgId": 2,
+  "name": "市政道路改造工程",
+  "agency": "某某招标代理",
+  "projectType": "公开招标",
+  "leaderName": "张三",
+  "status": "ACTIVE",
+  "createdBy": 10,
+  "createdAt": "2026-07-21T08:00:00Z",
+  "updatedAt": "2026-07-21T08:00:00Z",
+  "tenderPackageCount": 0,
+  "tenderFileCount": 0
+}
+```
+
+### 6.4 更新基本信息
+
+`PUT /api/projects/{projectId}`
+
+```json
+{
+  "name": "市政道路改造工程-修订",
+  "agency": "某某招标代理",
+  "projectType": "公开招标",
+  "leaderName": "张三"
+}
+```
+
+请求体字段同创建。停用项目**仍可**更新基本信息（含改名）。
+
+**成功响应**：`data` 为更新后的项目摘要（结构同 6.3）。
+
+### 6.5 启用 / 停用
+
+`PUT /api/projects/{projectId}/status`
+
+```json
+{ "status": "DISABLED" }
+```
+
+停用后列表仍可见；后续标包/文件等业务将拦截（本期尚未实现这些业务）。
+
+### 6.6 删除（逻辑删除）
+
+`DELETE /api/projects/{projectId}`
+
+`status` → `DELETED`，之后不可再查。
+
+---
+
+## 7. 变更记录
 
 | 日期 | 说明 |
 |------|------|
@@ -697,3 +799,4 @@ Authorization: Bearer <accessToken>
 | 2026-07-21 | 全国地级市词典：`GET /api/admin/cities`；创建组织 city 必须精确匹配词典 |
 | 2026-07-21 | M2 组织二级列表：`GET /api/admin/orgs/{orgId}/users`；排除 DELETED；复用用户摘要 |
 | 2026-07-21 | M3 停用组织批量吊销会话：`token_version + 1`；启用不 bump；不改用户 status |
+| 2026-07-21 | 项目 CRUD：招标方本组织；字段含代理机构/类型/负责人；逻辑删；组织 projectCount 接真数 |

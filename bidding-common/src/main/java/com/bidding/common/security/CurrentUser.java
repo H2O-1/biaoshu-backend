@@ -64,4 +64,9 @@ public class CurrentUser {
     public boolean isPlatformAdmin() {
         return hasRole("PLATFORM_ADMIN");
     }
+
+    /** 是否招标方（项目由招标方创建与管理） */
+    public boolean isTenderer() {
+        return hasRole("TENDERER");
+    }
 }

@@ -1,1 +1,11 @@
 com\bidding\project\package-info.class
+com\bidding\project\adapter\web\ProjectController$UpdateProjectStatusRequest.class
+com\bidding\project\adapter\web\ProjectController.class
+com\bidding\project\application\ProjectAppService.class
+com\bidding\project\domain\model\Project.class
+com\bidding\project\domain\port\ProjectRepository.class
+com\bidding\project\infrastructure\persistence\ProjectCountPortAdapter.class
+com\bidding\project\infrastructure\persistence\JdbcProjectRepository.class
+com\bidding\project\adapter\web\ProjectController$UpdateProjectRequest.class
+com\bidding\project\adapter\web\ProjectController$CreateProjectRequest.class
+com\bidding\project\application\ProjectAppService$ProjectSummary.class

@@ -3,6 +3,7 @@ package com.bidding.identity.application;
 import com.bidding.common.api.PageResult;
 import com.bidding.common.error.BizException;
 import com.bidding.common.error.ErrorCode;
+import com.bidding.common.port.ProjectCountPort;
 import com.bidding.common.security.CurrentUser;
 import com.bidding.common.security.UserContext;
 import com.bidding.identity.domain.model.Org;
@@ -50,6 +51,9 @@ class AdminOrgAppServiceTest {
     @Mock
     private CityCatalog cityCatalog;
 
+    @Mock
+    private ProjectCountPort projectCountPort;
+
     @InjectMocks
     private AdminOrgAppService adminOrgAppService;
 
@@ -76,6 +80,7 @@ class AdminOrgAppServiceTest {
         Org created = org(10L, "ORG_ABCDEF123456", "华能招标有限公司", "北京市", "ACTIVE");
         when(orgRepository.findById(10L)).thenReturn(Optional.of(created));
         when(orgRepository.countUsersByOrgId(10L)).thenReturn(0L);
+        when(projectCountPort.countByOrgId(10L)).thenReturn(0L);
         when(userRepository.findById(1L)).thenReturn(Optional.of(adminUser()));
 
         AdminOrgAppService.OrgSummary summary =
@@ -124,6 +129,7 @@ class AdminOrgAppServiceTest {
                 .thenReturn(List.of(org));
         when(orgRepository.countSearch(eq("测试"), eq(""), eq(""))).thenReturn(1L);
         when(orgRepository.countUsersByOrgId(2L)).thenReturn(3L);
+        when(projectCountPort.countByOrgId(2L)).thenReturn(0L);
 
         PageResult<AdminOrgAppService.OrgSummary> page =
                 adminOrgAppService.listOrgs("测试", "", "", 1, 20);
@@ -152,6 +158,7 @@ class AdminOrgAppServiceTest {
                 .thenReturn(Optional.of(before))
                 .thenReturn(Optional.of(after));
         when(orgRepository.countUsersByOrgId(2L)).thenReturn(1L);
+        when(projectCountPort.countByOrgId(2L)).thenReturn(0L);
         when(userRepository.bumpTokenVersionByOrgId(2L)).thenReturn(1);
 
         AdminOrgAppService.OrgSummary summary =
@@ -169,6 +176,7 @@ class AdminOrgAppServiceTest {
                 .thenReturn(Optional.of(disabled))
                 .thenReturn(Optional.of(disabled));
         when(orgRepository.countUsersByOrgId(2L)).thenReturn(1L);
+        when(projectCountPort.countByOrgId(2L)).thenReturn(0L);
 
         AdminOrgAppService.OrgSummary summary =
                 adminOrgAppService.updateStatus(2L, "DISABLED");
@@ -186,6 +194,7 @@ class AdminOrgAppServiceTest {
                 .thenReturn(Optional.of(before))
                 .thenReturn(Optional.of(after));
         when(orgRepository.countUsersByOrgId(2L)).thenReturn(1L);
+        when(projectCountPort.countByOrgId(2L)).thenReturn(0L);
 
         AdminOrgAppService.OrgSummary summary =
                 adminOrgAppService.updateStatus(2L, "ACTIVE");

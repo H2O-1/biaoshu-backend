@@ -3,6 +3,7 @@ package com.bidding.identity.application;
 import com.bidding.common.api.PageResult;
 import com.bidding.common.error.BizException;
 import com.bidding.common.error.ErrorCode;
+import com.bidding.common.port.ProjectCountPort;
 import com.bidding.common.security.CurrentUser;
 import com.bidding.common.security.UserContext;
 import com.bidding.identity.domain.model.Org;
@@ -36,13 +37,16 @@ public class AdminOrgAppService {
     private final OrgRepository orgRepository;
     private final UserRepository userRepository;
     private final CityCatalog cityCatalog;
+    private final ProjectCountPort projectCountPort;
 
     public AdminOrgAppService(OrgRepository orgRepository,
                               UserRepository userRepository,
-                              CityCatalog cityCatalog) {
+                              CityCatalog cityCatalog,
+                              ProjectCountPort projectCountPort) {
         this.orgRepository = orgRepository;
         this.userRepository = userRepository;
         this.cityCatalog = cityCatalog;
+        this.projectCountPort = projectCountPort;
     }
 
     /**
@@ -153,8 +157,7 @@ public class AdminOrgAppService {
         summary.setCity(org.getCity());
         summary.setStatus(org.getStatus());
         summary.setUserCount(orgRepository.countUsersByOrgId(org.getId()));
-        // 项目模块未建，占位为 0
-        summary.setProjectCount(0);
+        summary.setProjectCount(projectCountPort.countByOrgId(org.getId()));
         summary.setCreatedBy(org.getCreatedBy());
         summary.setCreatedByName(resolveCreatedByName(org.getCreatedBy()));
         summary.setCreatedAt(org.getCreatedAt());

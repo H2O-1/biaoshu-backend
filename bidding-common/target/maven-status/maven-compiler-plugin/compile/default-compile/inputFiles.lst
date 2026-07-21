@@ -4,5 +4,6 @@ D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\co
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\error\ErrorCode.java
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\package-info.java
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\package-info.java
+D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\ProjectCountPort.java
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\security\CurrentUser.java
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\security\UserContext.java
