@@ -71,6 +71,18 @@ class ProjectFlowIT {
                 .andExpect(status().isOk());
         String tendererToken = login("tenderer_proj", "Stable9x");
 
+        // 先建未绑定招标包
+        MvcResult pkgCreated = mockMvc.perform(post("/api/packages")
+                        .header("Authorization", "Bearer " + tendererToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"type":"TENDER","name":"市政招标文件包"}
+                                """))
+                .andExpect(status().isOk())
+                .andReturn();
+        long tenderPackageId = Long.parseLong(pkgCreated.getResponse().getContentAsString()
+                .replaceAll("(?s).*\"id\"\\s*:\\s*(\\d+).*", "$1"));
+
         // 平台管理员不能建项目
         mockMvc.perform(post("/api/projects")
                         .header("Authorization", "Bearer " + adminToken)
@@ -80,9 +92,10 @@ class ProjectFlowIT {
                                   "name":"不该成功的项目",
                                   "agency":"代理A",
                                   "projectType":"公开招标",
-                                  "leaderName":"张三"
+                                  "leaderName":"张三",
+                                  "tenderPackageId": %d
                                 }
-                                """))
+                                """.formatted(tenderPackageId)))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value(40300));
 
@@ -94,18 +107,37 @@ class ProjectFlowIT {
                                   "name":"市政道路改造工程",
                                   "agency":"某某招标代理",
                                   "projectType":"公开招标",
-                                  "leaderName":"张三"
+                                  "leaderName":"张三",
+                                  "tenderPackageId": %d
                                 }
-                                """))
+                                """.formatted(tenderPackageId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.name").value("市政道路改造工程"))
                 .andExpect(jsonPath("$.data.orgId").value((int) orgId))
-                .andExpect(jsonPath("$.data.tenderPackageCount").value(0))
+                .andExpect(jsonPath("$.data.tenderPackageId").value((int) tenderPackageId))
+                .andExpect(jsonPath("$.data.tenderPackageCount").value(1))
                 .andReturn();
         long projectId = Long.parseLong(created.getResponse().getContentAsString()
                 .replaceAll("(?s).*\"id\"\\s*:\\s*(\\d+).*", "$1"));
 
-        // 同组织重名
+        // 已绑定的招标包不可再删
+        mockMvc.perform(delete("/api/packages/" + tenderPackageId)
+                        .header("Authorization", "Bearer " + tendererToken))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(40900));
+
+        // 同组织重名（再准备一个未绑包）
+        MvcResult pkg2 = mockMvc.perform(post("/api/packages")
+                        .header("Authorization", "Bearer " + tendererToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"type":"TENDER","name":"第二招标包"}
+                                """))
+                .andExpect(status().isOk())
+                .andReturn();
+        long tenderPackageId2 = Long.parseLong(pkg2.getResponse().getContentAsString()
+                .replaceAll("(?s).*\"id\"\\s*:\\s*(\\d+).*", "$1"));
+
         mockMvc.perform(post("/api/projects")
                         .header("Authorization", "Bearer " + tendererToken)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -114,9 +146,26 @@ class ProjectFlowIT {
                                   "name":"市政道路改造工程",
                                   "agency":"代理B",
                                   "projectType":"邀请招标",
-                                  "leaderName":"李四"
+                                  "leaderName":"李四",
+                                  "tenderPackageId": %d
                                 }
-                                """))
+                                """.formatted(tenderPackageId2)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(40900));
+
+        // 已占用的招标包不能再绑新项目
+        mockMvc.perform(post("/api/projects")
+                        .header("Authorization", "Bearer " + tendererToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name":"另一个项目",
+                                  "agency":"代理B",
+                                  "projectType":"邀请招标",
+                                  "leaderName":"李四",
+                                  "tenderPackageId": %d
+                                }
+                                """.formatted(tenderPackageId)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value(40900));
 

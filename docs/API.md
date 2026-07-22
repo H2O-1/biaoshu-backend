@@ -681,6 +681,9 @@ Authorization: Bearer <accessToken>
 - [ ] 组织二级：点进组织调 `GET /api/admin/orgs/{orgId}/users` 看该组织账号（含系统组织）
 - [ ] 停用组织后：该组织用户旧 Token 立即 401，需重新登录（组织启用后）
 - [ ] 项目：仅招标方；平台管理员 403；停用后列表可见且可改基本信息
+- [ ] 创建项目：必须 `tenderPackageId`（未绑招标包）；绑定后包不可删、不可再绑
+- [ ] 投标包：先建后选；`POST /api/projects/{id}/bid-packages` 绑定；公司名同组织唯一；已绑可删
+- [ ] 招标包：仅招标方；未绑可删；已绑项目不可删；unboundOnly 可选未绑列表
 
 ---
 
@@ -688,7 +691,8 @@ Authorization: Bearer <accessToken>
 
 > 仅角色含 `TENDERER` 的用户。平台管理员无招标方角色时 **403**。  
 > 项目挂在当前用户所属组织；`orgId` 由服务端取自登录态，前端不可跨组织指定。  
-> **无项目成员角色**。标包/文件数量本期占位为 `0`。
+> **无项目成员角色**。创建时必须绑定一个本组织**未占用**的招标包。  
+> 文件数量本期占位为 `0`。
 
 ### 6.1 项目分页列表
 
@@ -714,7 +718,8 @@ Authorization: Bearer <accessToken>
   "name": "市政道路改造工程",
   "agency": "某某招标代理",
   "projectType": "公开招标",
-  "leaderName": "张三"
+  "leaderName": "张三",
+  "tenderPackageId": 50
 }
 ```
 
@@ -724,6 +729,9 @@ Authorization: Bearer <accessToken>
 | agency | string | 是 | 代理机构 |
 | projectType | string | 是 | 项目类型 |
 | leaderName | string | 是 | 项目负责人 |
+| tenderPackageId | number | 是 | 本组织未绑定的招标包 ID（可先 `GET /api/packages?unboundOnly=true`） |
+
+绑定失败（无效/已占用/跨组织）→ `40000` 或 `40900`；同一事务内完成，失败则项目不会落库。
 
 ### 6.3 项目详情
 
@@ -745,7 +753,8 @@ Authorization: Bearer <accessToken>
   "createdBy": 10,
   "createdAt": "2026-07-21T08:00:00Z",
   "updatedAt": "2026-07-21T08:00:00Z",
-  "tenderPackageCount": 0,
+  "tenderPackageId": 50,
+  "tenderPackageCount": 1,
   "tenderFileCount": 0
 }
 ```
@@ -763,7 +772,7 @@ Authorization: Bearer <accessToken>
 }
 ```
 
-请求体字段同创建。停用项目**仍可**更新基本信息（含改名）。
+请求体字段同创建中的基本信息字段（**不含** `tenderPackageId`，绑定后不可换包）。停用项目**仍可**更新基本信息（含改名）。
 
 **成功响应**：`data` 为更新后的项目摘要（结构同 6.3）。
 
@@ -781,14 +790,119 @@ Authorization: Bearer <accessToken>
 
 `DELETE /api/projects/{projectId}`
 
-`status` → `DELETED`，之后不可再查。
+`status` → `DELETED`，之后不可再查。  
+已绑定的招标包**仍占着**（不可再绑到新项目、不可删）；释放规则以后另定。
+
+### 6.7 项目下投标包
+
+#### 添加（绑定）投标包
+
+`POST /api/projects/{projectId}/bid-packages`
+
+```json
+{ "bidPackageId": 60 }
+```
+
+须为本组织、类型 `BID`、未删除、**尚未绑定**的投标包。一投标包只能绑一个项目。  
+未绑列表：`GET /api/packages?type=BID&unboundOnly=true`。
+
+#### 项目下投标包列表
+
+`GET /api/projects/{projectId}/bid-packages?page=1&size=20`
+
+返回已绑定到该项目的投标包分页。
 
 ---
 
-## 7. 变更记录
+## 7. 标包 Packages
+
+> 仅角色含 `TENDERER` 的用户。平台管理员无招标方角色时 **403**。  
+> 挂在当前用户所属组织；`orgId` 由服务端取自登录态。  
+> **创建时均不绑项目**（`projectId` 为空）：  
+> - 招标包：创建项目时选绑（见 6.2）  
+> - 投标包：在项目里添加时选绑（见 6.7）  
+> `fileCount` 占位为 `0`（文件下期）。  
+> `name`：招标=包名；投标=投标公司名称（同组织未删除唯一）。
+
+### 7.1 标包分页列表
+
+`GET /api/packages`
+
+**Query**
+
+| 参数 | 类型 | 必填 | 默认 | 说明 |
+|------|------|------|------|------|
+| type | string | 否 | `TENDER` | `TENDER` / `BID` |
+| keyword | string | 否 | `""` | 名称模糊搜 |
+| unboundOnly | boolean | 否 | false | `true`=只返回未绑定项目的 |
+| page | number | 否 | 1 | 页码 |
+| size | number | 否 | 20 | 每页条数，最大 100 |
+
+已删除不返回。
+
+### 7.2 创建标包
+
+`POST /api/packages`
+
+**招标包**
+
+```json
+{ "type": "TENDER", "name": "市政招标文件包" }
+```
+
+**投标包**
+
+```json
+{
+  "type": "BID",
+  "name": "华建集团",
+  "contactName": "王五",
+  "contactPhone": "13800001111"
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| type | string | 是 | `TENDER` / `BID` |
+| name | string | 是 | 招标=包名；投标=公司名；同组织同类型唯一 |
+| contactName | string | 投标必填 | 负责人姓名 |
+| contactPhone | string | 投标必填 | 负责人电话 |
+
+创建后 `projectId` 为 null。
+
+### 7.3 标包详情
+
+`GET /api/packages/{packageId}`
+
+跨组织或已删除 → `40400`。
+
+### 7.4 更新标包
+
+`PUT /api/packages/{packageId}`
+
+招标包：`{ "name": "..." }`  
+投标包：`{ "name", "contactName", "contactPhone" }`（均必填）
+
+已绑定项目的仍可改。
+
+### 7.5 删除（逻辑删除）
+
+`DELETE /api/packages/{packageId}`
+
+| 类型 | 规则 |
+|------|------|
+| 招标包 | 已绑定项目 → `40900`；未绑可删 |
+| 投标包 | **可直接删**（已绑则项目下不再可见） |
+
+---
+
+## 8. 变更记录
 
 | 日期 | 说明 |
 |------|------|
+| 2026-07-22 | P3 投标包：先建后选；项目下绑定/列表；公司名同组织唯一；已绑可删 |
+| 2026-07-22 | P2 创建项目必选未绑招标包并绑定；详情返回 tenderPackageId；删项目后包仍占用 |
+| 2026-07-22 | P1 招标包 CRUD：本组织创建/列表/改名/删除；unboundOnly；已绑不可删；fileCount 占位 |
 | 2026-07-20 | 初版：登录 + 平台管理员角色/用户查询与角色设置 |
 | 2026-07-20 | 新增：平台管理员创建用户（跨组织 orgId、初始角色、密码≥8） |
 | 2026-07-20 | 密码与会话闭环：`mustChangePassword` + `token_version`；改密/退出/重置/停用/删除 |

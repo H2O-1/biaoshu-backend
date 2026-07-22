@@ -1,7 +1,6 @@
 # CNB 云原生构建：推送 / PR 时自动编译测试
-# 文档：https://docs.cnb.cool/zh/build/quick-start.md
 
-main:
+develop:
   push:
     - name: build-and-test
       docker:

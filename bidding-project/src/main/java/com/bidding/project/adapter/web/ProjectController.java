@@ -2,9 +2,11 @@ package com.bidding.project.adapter.web;
 
 import com.bidding.common.api.ApiResponse;
 import com.bidding.common.api.PageResult;
+import com.bidding.project.application.PackageAppService;
 import com.bidding.project.application.ProjectAppService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -36,7 +38,8 @@ public class ProjectController {
                 request.getName(),
                 request.getAgency(),
                 request.getProjectType(),
-                request.getLeaderName()
+                request.getLeaderName(),
+                request.getTenderPackageId()
         ));
     }
 
@@ -81,6 +84,37 @@ public class ProjectController {
         return ApiResponse.ok();
     }
 
+    /** 项目下添加（绑定）投标包 */
+    @PostMapping("/{projectId}/bid-packages")
+    public ApiResponse<PackageAppService.PackageSummary> bindBidPackage(
+            @PathVariable("projectId") long projectId,
+            @Valid @RequestBody BindBidPackageRequest request) {
+        return ApiResponse.ok(projectAppService.bindBidPackage(
+                projectId, request.getBidPackageId()));
+    }
+
+    /** 项目下已绑定的投标包列表 */
+    @GetMapping("/{projectId}/bid-packages")
+    public ApiResponse<PageResult<PackageAppService.PackageSummary>> listBidPackages(
+            @PathVariable("projectId") long projectId,
+            @RequestParam(required = false, defaultValue = "1") int page,
+            @RequestParam(required = false, defaultValue = "20") int size) {
+        return ApiResponse.ok(projectAppService.listBidPackages(projectId, page, size));
+    }
+
+    public static class BindBidPackageRequest {
+        @NotNull
+        private Long bidPackageId;
+
+        public Long getBidPackageId() {
+            return bidPackageId;
+        }
+
+        public void setBidPackageId(Long bidPackageId) {
+            this.bidPackageId = bidPackageId;
+        }
+    }
+
     public static class CreateProjectRequest {
         @NotBlank
         @Size(max = 128)
@@ -97,6 +131,10 @@ public class ProjectController {
         @NotBlank
         @Size(max = 64)
         private String leaderName;
+
+        /** 本组织未绑定的招标包 ID */
+        @NotNull
+        private Long tenderPackageId;
 
         public String getName() {
             return name;
@@ -128,6 +166,14 @@ public class ProjectController {
 
         public void setLeaderName(String leaderName) {
             this.leaderName = leaderName;
+        }
+
+        public Long getTenderPackageId() {
+            return tenderPackageId;
+        }
+
+        public void setTenderPackageId(Long tenderPackageId) {
+            this.tenderPackageId = tenderPackageId;
         }
     }
 

@@ -5,7 +5,9 @@ import com.bidding.common.error.BizException;
 import com.bidding.common.error.ErrorCode;
 import com.bidding.common.security.CurrentUser;
 import com.bidding.common.security.UserContext;
+import com.bidding.project.domain.model.BizPackage;
 import com.bidding.project.domain.model.Project;
+import com.bidding.project.domain.port.PackageRepository;
 import com.bidding.project.domain.port.ProjectRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,6 +39,9 @@ class ProjectAppServiceTest {
     @Mock
     private ProjectRepository projectRepository;
 
+    @Mock
+    private PackageRepository packageRepository;
+
     @InjectMocks
     private ProjectAppService projectAppService;
 
@@ -64,31 +69,51 @@ class ProjectAppServiceTest {
     }
 
     @Test
-    void createSuccess() {
+    void createSuccess_bindsTenderPackage() {
+        when(packageRepository.findById(50L)).thenReturn(Optional.of(
+                unboundTender(50L, 2L, "市政招标文件包")));
         when(projectRepository.existsByOrgIdAndName(eq(2L), eq("市政道路改造"), isNull()))
                 .thenReturn(false);
         when(projectRepository.insert(eq(2L), eq("市政道路改造"), eq("某某代理公司"),
                 eq("公开招标"), eq("张三"), eq("ACTIVE"), eq(10L))).thenReturn(100L);
+        when(packageRepository.bindToProjectIfUnbound(50L, 100L, "TENDER")).thenReturn(1);
 
         Project created = project(100L, 2L, "市政道路改造", "ACTIVE");
         when(projectRepository.findById(100L)).thenReturn(Optional.of(created));
+        when(packageRepository.findByProjectIdAndType(100L, "TENDER"))
+                .thenReturn(Optional.of(boundTender(50L, 2L, 100L, "市政招标文件包")));
 
         ProjectAppService.ProjectSummary summary = projectAppService.create(
-                "市政道路改造", "某某代理公司", "公开招标", "张三");
+                "市政道路改造", "某某代理公司", "公开招标", "张三", 50L);
 
         assertEquals(100L, summary.getId());
         assertEquals(2L, summary.getOrgId());
-        assertEquals("市政道路改造", summary.getName());
-        assertEquals(0L, summary.getTenderPackageCount());
+        assertEquals(50L, summary.getTenderPackageId());
+        assertEquals(1L, summary.getTenderPackageCount());
+        verify(packageRepository).bindToProjectIfUnbound(50L, 100L, "TENDER");
+    }
+
+    @Test
+    void createRejectWhenPackageAlreadyBound() {
+        when(packageRepository.findById(50L)).thenReturn(Optional.of(
+                boundTender(50L, 2L, 99L, "已占用包")));
+
+        BizException ex = assertThrows(BizException.class,
+                () -> projectAppService.create("市政道路改造", "代理", "公开招标", "张三", 50L));
+        assertEquals(ErrorCode.CONFLICT, ex.errorCode());
+        verify(projectRepository, never()).insert(
+                anyLong(), anyString(), anyString(), anyString(), anyString(), anyString(), anyLong());
     }
 
     @Test
     void createRejectDuplicateName() {
+        when(packageRepository.findById(50L)).thenReturn(Optional.of(
+                unboundTender(50L, 2L, "包")));
         when(projectRepository.existsByOrgIdAndName(eq(2L), eq("市政道路改造"), isNull()))
                 .thenReturn(true);
 
         BizException ex = assertThrows(BizException.class,
-                () -> projectAppService.create("市政道路改造", "代理", "公开招标", "张三"));
+                () -> projectAppService.create("市政道路改造", "代理", "公开招标", "张三", 50L));
         assertEquals(ErrorCode.CONFLICT, ex.errorCode());
         verify(projectRepository, never()).insert(
                 anyLong(), anyString(), anyString(), anyString(), anyString(), anyString(), anyLong());
@@ -113,6 +138,8 @@ class ProjectAppServiceTest {
                 .thenReturn(Optional.of(after));
         when(projectRepository.existsByOrgIdAndName(eq(2L), eq("新名称"), eq(100L)))
                 .thenReturn(false);
+        when(packageRepository.findByProjectIdAndType(100L, "TENDER"))
+                .thenReturn(Optional.of(boundTender(50L, 2L, 100L, "包")));
 
         ProjectAppService.ProjectSummary summary = projectAppService.update(
                 100L, "新名称", "新代理", "邀请招标", "李四");
@@ -127,6 +154,8 @@ class ProjectAppServiceTest {
         when(projectRepository.searchByOrgId(eq(2L), eq(""), eq(""), eq(0), eq(20)))
                 .thenReturn(List.of(project(100L, 2L, "市政道路改造", "ACTIVE")));
         when(projectRepository.countSearchByOrgId(eq(2L), eq(""), eq(""))).thenReturn(1L);
+        when(packageRepository.findByProjectIdAndType(100L, "TENDER"))
+                .thenReturn(Optional.empty());
 
         PageResult<ProjectAppService.ProjectSummary> page =
                 projectAppService.list("", "", 1, 20);
@@ -138,5 +167,15 @@ class ProjectAppServiceTest {
     private static Project project(long id, long orgId, String name, String status) {
         return new Project(id, orgId, name, "代理机构", "公开招标", "张三",
                 status, 10L, Instant.now(), Instant.now());
+    }
+
+    private static BizPackage unboundTender(long id, long orgId, String name) {
+        return new BizPackage(id, orgId, null, "TENDER", name,
+                null, null, "ACTIVE", 10L, Instant.now(), Instant.now());
+    }
+
+    private static BizPackage boundTender(long id, long orgId, long projectId, String name) {
+        return new BizPackage(id, orgId, projectId, "TENDER", name,
+                null, null, "ACTIVE", 10L, Instant.now(), Instant.now());
     }
 }

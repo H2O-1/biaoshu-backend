@@ -5,7 +5,9 @@ import com.bidding.common.error.BizException;
 import com.bidding.common.error.ErrorCode;
 import com.bidding.common.security.CurrentUser;
 import com.bidding.common.security.UserContext;
+import com.bidding.project.domain.model.BizPackage;
 import com.bidding.project.domain.model.Project;
+import com.bidding.project.domain.port.PackageRepository;
 import com.bidding.project.domain.port.ProjectRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,6 +21,7 @@ import java.util.Optional;
 /**
  * 招标方：本组织下的项目 CRUD。
  * 平台管理员无 TENDERER 角色时不可调用（403）。
+ * 创建项目必须绑定一个本组织未占用的招标包（同一事务）。
  * 停用后仍可改基本信息（含名称）；后续标包/文件等业务另拦。
  */
 @Service
@@ -34,13 +37,24 @@ public class ProjectAppService {
     private static final int MAX_LEADER_NAME_LENGTH = 64;
 
     private final ProjectRepository projectRepository;
+    private final PackageRepository packageRepository;
 
-    public ProjectAppService(ProjectRepository projectRepository) {
+    public ProjectAppService(ProjectRepository projectRepository,
+                             PackageRepository packageRepository) {
         this.projectRepository = projectRepository;
+        this.packageRepository = packageRepository;
     }
 
+    /**
+     * 创建项目并绑定招标包。
+     * 招标包须：本组织、类型 TENDER、未删除、尚未绑定其他项目。
+     */
     @Transactional
-    public ProjectSummary create(String name, String agency, String projectType, String leaderName) {
+    public ProjectSummary create(String name,
+                                 String agency,
+                                 String projectType,
+                                 String leaderName,
+                                 long tenderPackageId) {
         CurrentUser operator = checkTenderer();
 
         String safeName = normalizeName(name);
@@ -48,11 +62,14 @@ public class ProjectAppService {
         String safeType = normalizeProjectType(projectType);
         String safeLeader = normalizeLeaderName(leaderName);
 
+        // 先校验招标包可用，再建项目，避免建出无包项目
+        BizPackage tenderPkg = requireBindableTenderPackage(tenderPackageId, operator.getOrgId());
+
         if (projectRepository.existsByOrgIdAndName(operator.getOrgId(), safeName, null)) {
             throw new BizException(ErrorCode.CONFLICT, "本组织下项目名称已存在");
         }
 
-        long id = projectRepository.insert(
+        long projectId = projectRepository.insert(
                 operator.getOrgId(),
                 safeName,
                 safeAgency,
@@ -61,7 +78,15 @@ public class ProjectAppService {
                 STATUS_ACTIVE,
                 operator.getUserId()
         );
-        return toSummary(requireOwnedProject(id, operator.getOrgId()));
+
+        int bound = packageRepository.bindToProjectIfUnbound(
+                tenderPkg.getId(), projectId, PackageAppService.TYPE_TENDER);
+        if (bound != 1) {
+            // 并发下可能被抢走；整笔事务回滚
+            throw new BizException(ErrorCode.CONFLICT, "招标包已被其他项目绑定，请重新选择");
+        }
+
+        return toSummary(requireOwnedProject(projectId, operator.getOrgId()));
     }
 
     @Transactional(readOnly = true)
@@ -133,7 +158,11 @@ public class ProjectAppService {
         return toSummary(requireOwnedProject(projectId, operator.getOrgId()));
     }
 
-    /** 逻辑删除 */
+    /**
+     * 逻辑删除项目。
+     * 已绑定的招标包仍占着（不可再绑、不可删），释放规则以后再定。
+     * 已绑定的投标包仍挂着 project_id；删投标包本身可直接删。
+     */
     @Transactional
     public void delete(long projectId) {
         CurrentUser operator = checkTenderer();
@@ -142,6 +171,82 @@ public class ProjectAppService {
             return;
         }
         projectRepository.updateStatus(projectId, STATUS_DELETED);
+    }
+
+    /**
+     * 项目下添加投标包：将本组织未绑定的投标包绑到该项目。
+     * 一投标包只能绑一个项目。
+     */
+    @Transactional
+    public PackageAppService.PackageSummary bindBidPackage(long projectId, long bidPackageId) {
+        CurrentUser operator = checkTenderer();
+        requireOwnedProject(projectId, operator.getOrgId());
+
+        Optional<BizPackage> optional = packageRepository.findById(bidPackageId);
+        if (optional.isEmpty()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "请选择有效的投标包");
+        }
+        BizPackage pkg = optional.get();
+        if (pkg.getOrgId() != operator.getOrgId() || pkg.isDeleted()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "请选择有效的投标包");
+        }
+        if (!pkg.isBid()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "只能添加投标包");
+        }
+        if (pkg.isBoundToProject()) {
+            throw new BizException(ErrorCode.CONFLICT, "该投标包已绑定其他项目，请重新选择");
+        }
+
+        int bound = packageRepository.bindToProjectIfUnbound(
+                pkg.getId(), projectId, PackageAppService.TYPE_BID);
+        if (bound != 1) {
+            throw new BizException(ErrorCode.CONFLICT, "该投标包已被其他项目绑定，请重新选择");
+        }
+
+        Optional<BizPackage> after = packageRepository.findById(bidPackageId);
+        if (after.isEmpty()) {
+            throw new BizException(ErrorCode.INTERNAL, "绑定后查询投标包失败");
+        }
+        return toPackageSummary(after.get());
+    }
+
+    /** 项目下已绑定的投标包列表 */
+    @Transactional(readOnly = true)
+    public PageResult<PackageAppService.PackageSummary> listBidPackages(
+            long projectId, int page, int size) {
+        CurrentUser operator = checkTenderer();
+        requireOwnedProject(projectId, operator.getOrgId());
+
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), 100);
+        int offset = (safePage - 1) * safeSize;
+
+        List<BizPackage> packages = packageRepository.searchByProjectIdAndType(
+                projectId, PackageAppService.TYPE_BID, offset, safeSize);
+        List<PackageAppService.PackageSummary> items = new ArrayList<>();
+        for (BizPackage pkg : packages) {
+            items.add(toPackageSummary(pkg));
+        }
+        long total = packageRepository.countByProjectIdAndType(
+                projectId, PackageAppService.TYPE_BID);
+        return new PageResult<>(items, total, safePage, safeSize);
+    }
+
+    private PackageAppService.PackageSummary toPackageSummary(BizPackage pkg) {
+        PackageAppService.PackageSummary summary = new PackageAppService.PackageSummary();
+        summary.setId(pkg.getId());
+        summary.setOrgId(pkg.getOrgId());
+        summary.setProjectId(pkg.getProjectId());
+        summary.setType(pkg.getType());
+        summary.setName(pkg.getName());
+        summary.setContactName(pkg.getContactName());
+        summary.setContactPhone(pkg.getContactPhone());
+        summary.setStatus(pkg.getStatus());
+        summary.setCreatedBy(pkg.getCreatedBy());
+        summary.setCreatedAt(pkg.getCreatedAt());
+        summary.setUpdatedAt(pkg.getUpdatedAt());
+        summary.setFileCount(0);
+        return summary;
     }
 
     private ProjectSummary toSummary(Project project) {
@@ -156,10 +261,41 @@ public class ProjectAppService {
         summary.setCreatedBy(project.getCreatedBy());
         summary.setCreatedAt(project.getCreatedAt());
         summary.setUpdatedAt(project.getUpdatedAt());
-        // 标包 / 文件模块未建，占位
-        summary.setTenderPackageCount(0);
+
+        Optional<BizPackage> tenderOpt = packageRepository.findByProjectIdAndType(
+                project.getId(), PackageAppService.TYPE_TENDER);
+        if (tenderOpt.isPresent()) {
+            summary.setTenderPackageId(tenderOpt.get().getId());
+            summary.setTenderPackageCount(1);
+        } else {
+            summary.setTenderPackageId(null);
+            summary.setTenderPackageCount(0);
+        }
+        // 文件模块未建，占位
         summary.setTenderFileCount(0);
         return summary;
+    }
+
+    /**
+     * 校验招标包可绑定：本组织、TENDER、未删除、未绑定。
+     */
+    private BizPackage requireBindableTenderPackage(long packageId, long orgId) {
+        Optional<BizPackage> optional = packageRepository.findById(packageId);
+        if (optional.isEmpty()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "请选择有效的招标包");
+        }
+        BizPackage pkg = optional.get();
+        // 跨组织当无效，避免探 ID
+        if (pkg.getOrgId() != orgId || pkg.isDeleted()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "请选择有效的招标包");
+        }
+        if (!pkg.isTender()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "创建项目只能绑定招标包");
+        }
+        if (pkg.isBoundToProject()) {
+            throw new BizException(ErrorCode.CONFLICT, "该招标包已绑定其他项目，请重新选择");
+        }
+        return pkg;
     }
 
     private Project requireOwnedProject(long projectId, long orgId) {
@@ -253,6 +389,8 @@ public class ProjectAppService {
         private long createdBy;
         private Instant createdAt;
         private Instant updatedAt;
+        /** 已绑定的招标包 ID；异常历史数据可能为空 */
+        private Long tenderPackageId;
         private long tenderPackageCount;
         private long tenderFileCount;
 
@@ -334,6 +472,14 @@ public class ProjectAppService {
 
         public void setUpdatedAt(Instant updatedAt) {
             this.updatedAt = updatedAt;
+        }
+
+        public Long getTenderPackageId() {
+            return tenderPackageId;
+        }
+
+        public void setTenderPackageId(Long tenderPackageId) {
+            this.tenderPackageId = tenderPackageId;
         }
 
         public long getTenderPackageCount() {
