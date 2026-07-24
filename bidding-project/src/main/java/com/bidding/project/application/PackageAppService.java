@@ -8,11 +8,9 @@ import com.bidding.common.security.CurrentUser;
 import com.bidding.common.security.UserContext;
 import com.bidding.project.domain.model.BizPackage;
 import com.bidding.project.domain.port.PackageRepository;
-import org.hibernate.validator.internal.constraintvalidators.bv.NotNullValidator;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.sql.ResultSet;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -39,13 +37,11 @@ public class PackageAppService {
 
     private final PackageRepository packageRepository;
     private final DocumentCountPort documentCountPort;
-    private final NotNullValidator notNullValidator;
 
     public PackageAppService(PackageRepository packageRepository,
-                             DocumentCountPort documentCountPort, NotNullValidator notNullValidator) {
+                             DocumentCountPort documentCountPort) {
         this.packageRepository = packageRepository;
         this.documentCountPort = documentCountPort;
-        this.notNullValidator = notNullValidator;
     }
 
     /**
