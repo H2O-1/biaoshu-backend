@@ -1,1 +1,3 @@
+com\bidding\worker\BiddingWorkerApplication.class
+com\bidding\worker\scheduler\IndexJobPoller.class
 com\bidding\worker\package-info.class

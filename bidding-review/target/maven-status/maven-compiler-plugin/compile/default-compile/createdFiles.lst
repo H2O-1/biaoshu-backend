@@ -1,1 +1,5 @@
 com\bidding\review\package-info.class
+com\bidding\review\infrastructure\persistence\JdbcJobRepository.class
+com\bidding\review\adapter\web\JobController.class
+com\bidding\review\application\JobAppService.class
+com\bidding\review\application\JobAppService$JobSummary.class

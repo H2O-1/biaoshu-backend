@@ -1,1 +1,11 @@
+D:\Work\bidding-architecture\backend\bidding-file\src\main\java\com\bidding\file\adapter\web\DocumentController.java
+D:\Work\bidding-architecture\backend\bidding-file\src\main\java\com\bidding\file\application\DocumentAppService.java
+D:\Work\bidding-architecture\backend\bidding-file\src\main\java\com\bidding\file\domain\model\Document.java
+D:\Work\bidding-architecture\backend\bidding-file\src\main\java\com\bidding\file\domain\port\DocumentRepository.java
+D:\Work\bidding-architecture\backend\bidding-file\src\main\java\com\bidding\file\domain\port\ObjectStoragePort.java
+D:\Work\bidding-architecture\backend\bidding-file\src\main\java\com\bidding\file\infrastructure\persistence\DocumentCountPortAdapter.java
+D:\Work\bidding-architecture\backend\bidding-file\src\main\java\com\bidding\file\infrastructure\persistence\JdbcDocumentRepository.java
+D:\Work\bidding-architecture\backend\bidding-file\src\main\java\com\bidding\file\infrastructure\port\DocumentAccessPortAdapter.java
+D:\Work\bidding-architecture\backend\bidding-file\src\main\java\com\bidding\file\infrastructure\storage\InMemoryObjectStorage.java
+D:\Work\bidding-architecture\backend\bidding-file\src\main\java\com\bidding\file\infrastructure\storage\S3ObjectStorage.java
 D:\Work\bidding-architecture\backend\bidding-file\src\main\java\com\bidding\file\package-info.java

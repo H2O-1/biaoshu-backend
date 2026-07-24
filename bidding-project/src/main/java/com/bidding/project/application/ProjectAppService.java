@@ -3,6 +3,7 @@ package com.bidding.project.application;
 import com.bidding.common.api.PageResult;
 import com.bidding.common.error.BizException;
 import com.bidding.common.error.ErrorCode;
+import com.bidding.common.port.DocumentCountPort;
 import com.bidding.common.security.CurrentUser;
 import com.bidding.common.security.UserContext;
 import com.bidding.project.domain.model.BizPackage;
@@ -38,11 +39,14 @@ public class ProjectAppService {
 
     private final ProjectRepository projectRepository;
     private final PackageRepository packageRepository;
+    private final DocumentCountPort documentCountPort;
 
     public ProjectAppService(ProjectRepository projectRepository,
-                             PackageRepository packageRepository) {
+                             PackageRepository packageRepository,
+                             DocumentCountPort documentCountPort) {
         this.projectRepository = projectRepository;
         this.packageRepository = packageRepository;
+        this.documentCountPort = documentCountPort;
     }
 
     /**
@@ -245,7 +249,7 @@ public class ProjectAppService {
         summary.setCreatedBy(pkg.getCreatedBy());
         summary.setCreatedAt(pkg.getCreatedAt());
         summary.setUpdatedAt(pkg.getUpdatedAt());
-        summary.setFileCount(0);
+        summary.setFileCount(documentCountPort.countActiveByPackageId(pkg.getId()));
         return summary;
     }
 

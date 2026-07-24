@@ -1,1 +1,5 @@
+D:\Work\bidding-architecture\backend\bidding-ai\src\main\java\com\bidding\ai\infrastructure\chunk\FakeTextChunker.java
+D:\Work\bidding-architecture\backend\bidding-ai\src\main\java\com\bidding\ai\infrastructure\embedding\FakeEmbeddingPort.java
+D:\Work\bidding-architecture\backend\bidding-ai\src\main\java\com\bidding\ai\infrastructure\persistence\JdbcDocumentChunkRepository.java
+D:\Work\bidding-architecture\backend\bidding-ai\src\main\java\com\bidding\ai\infrastructure\persistence\JdbcVectorStore.java
 D:\Work\bidding-architecture\backend\bidding-ai\src\main\java\com\bidding\ai\package-info.java

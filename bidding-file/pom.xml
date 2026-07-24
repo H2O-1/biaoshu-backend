@@ -10,11 +10,32 @@
     </parent>
     <artifactId>bidding-file</artifactId>
     <packaging>jar</packaging>
-    <description>架构骨架模块（无业务实现）</description>
+    <description>文件：标包下文档上传/列表/删除（对象存 MinIO）</description>
     <dependencies>
         <dependency>
             <groupId>com.bidding</groupId>
             <artifactId>bidding-common</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 </project>

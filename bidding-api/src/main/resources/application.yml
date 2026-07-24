@@ -2,6 +2,10 @@ server:
   port: ${SERVER_PORT:8080}
 
 spring:
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 55MB
   application:
     name: bidding-api
   datasource:
@@ -21,6 +25,17 @@ bidding:
     username: ${BOOTSTRAP_ADMIN_USERNAME:admin}
     password: ${BOOTSTRAP_ADMIN_PASSWORD:}
     display-name: 平台管理员
+  storage:
+    type: ${STORAGE_TYPE:memory}
+    s3:
+      endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+      access-key: ${MINIO_ACCESS_KEY:minioadmin}
+      secret-key: ${MINIO_SECRET_KEY:minioadmin}
+      bucket: ${MINIO_BUCKET:bidding-dev}
+      region: ${MINIO_REGION:us-east-1}
+  file:
+    max-size-bytes: 52428800
+    max-files-per-package: 5
 
 logging:
   level:

@@ -12,3 +12,11 @@ bidding:
     username: admin
     password: ${BOOTSTRAP_ADMIN_PASSWORD:ChangeMe@123}
     display-name: 平台管理员
+  storage:
+    type: s3
+    s3:
+      endpoint: http://localhost:9000
+      access-key: minioadmin
+      secret-key: minioadmin
+      bucket: bidding-dev
+      region: us-east-1

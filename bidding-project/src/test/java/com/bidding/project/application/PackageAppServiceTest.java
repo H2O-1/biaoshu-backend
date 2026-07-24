@@ -3,6 +3,7 @@ package com.bidding.project.application;
 import com.bidding.common.api.PageResult;
 import com.bidding.common.error.BizException;
 import com.bidding.common.error.ErrorCode;
+import com.bidding.common.port.DocumentCountPort;
 import com.bidding.common.security.CurrentUser;
 import com.bidding.common.security.UserContext;
 import com.bidding.project.domain.model.BizPackage;
@@ -39,6 +40,9 @@ class PackageAppServiceTest {
     @Mock
     private PackageRepository packageRepository;
 
+    @Mock
+    private DocumentCountPort documentCountPort;
+
     @InjectMocks
     private PackageAppService packageAppService;
 
@@ -74,6 +78,7 @@ class PackageAppServiceTest {
 
         BizPackage created = tender(50L, 2L, null, "市政招标文件包");
         when(packageRepository.findById(50L)).thenReturn(Optional.of(created));
+        when(documentCountPort.countActiveByPackageId(50L)).thenReturn(0L);
 
         PackageAppService.PackageSummary summary = packageAppService.createTender("市政招标文件包");
 
@@ -105,6 +110,7 @@ class PackageAppServiceTest {
 
         BizPackage created = bid(60L, 2L, null, "华建集团");
         when(packageRepository.findById(60L)).thenReturn(Optional.of(created));
+        when(documentCountPort.countActiveByPackageId(60L)).thenReturn(0L);
 
         PackageAppService.PackageSummary summary =
                 packageAppService.createBid("华建集团", "王五", "13800001111");
@@ -119,10 +125,23 @@ class PackageAppServiceTest {
     void deleteBidAllowedWhenBound() {
         when(packageRepository.findById(60L)).thenReturn(Optional.of(
                 bid(60L, 2L, 100L, "华建集团")));
+        when(documentCountPort.countActiveByPackageId(60L)).thenReturn(0L);
 
         packageAppService.delete(60L);
 
         verify(packageRepository).updateStatus(60L, "DELETED");
+    }
+
+    @Test
+    void deleteRejectWhenHasFiles() {
+        when(packageRepository.findById(50L)).thenReturn(Optional.of(
+                tender(50L, 2L, null, "有文件的包")));
+        when(documentCountPort.countActiveByPackageId(50L)).thenReturn(2L);
+
+        BizException ex = assertThrows(BizException.class,
+                () -> packageAppService.delete(50L));
+        assertEquals(ErrorCode.CONFLICT, ex.errorCode());
+        verify(packageRepository, never()).updateStatus(anyLong(), anyString());
     }
 
     @Test
@@ -140,6 +159,7 @@ class PackageAppServiceTest {
     void deleteUnboundTenderSuccess() {
         when(packageRepository.findById(50L)).thenReturn(Optional.of(
                 tender(50L, 2L, null, "未绑包")));
+        when(documentCountPort.countActiveByPackageId(50L)).thenReturn(0L);
 
         packageAppService.delete(50L);
 
@@ -152,6 +172,7 @@ class PackageAppServiceTest {
                 .thenReturn(List.of(tender(51L, 2L, null, "可选包")));
         when(packageRepository.countSearchByOrgId(eq(2L), eq("TENDER"), eq(""), eq(true)))
                 .thenReturn(1L);
+        when(documentCountPort.countActiveByPackageId(51L)).thenReturn(0L);
 
         PageResult<PackageAppService.PackageSummary> page =
                 packageAppService.list("TENDER", "", true, 1, 20);

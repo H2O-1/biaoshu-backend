@@ -684,6 +684,7 @@ Authorization: Bearer <accessToken>
 - [ ] 创建项目：必须 `tenderPackageId`（未绑招标包）；绑定后包不可删、不可再绑
 - [ ] 投标包：先建后选；`POST /api/projects/{id}/bid-packages` 绑定；公司名同组织唯一；已绑可删
 - [ ] 招标包：仅招标方；未绑可删；已绑项目不可删；unboundOnly 可选未绑列表
+- [ ] 文件：标包下上传 PDF/Word/Excel；≤50MB；每包≤5；有文件不可删包
 
 ---
 
@@ -892,14 +893,78 @@ Authorization: Bearer <accessToken>
 | 类型 | 规则 |
 |------|------|
 | 招标包 | 已绑定项目 → `40900`；未绑可删 |
-| 投标包 | **可直接删**（已绑则项目下不再可见） |
+| 投标包 | **可直接删**（已绑则项目下不再可见）；**包内有文件时不可删** |
 
 ---
 
-## 8. 变更记录
+## 8. 标包文件 Documents
+
+> 仅 `TENDERER`。文件挂在标包下；类型限 PDF / Word / Excel；单文件 ≤ 50MB；每包最多 5 个。  
+> 能力：上传 / 列表 / 下载 / PDF 预览 / 删除。  
+> 鉴权：与其它接口相同，仅 `Authorization: Bearer <accessToken>`（前端拉 blob 后用 `blob:` URL 页内展示）。  
+> `indexStatus` 占位，默认 `PENDING`。  
+> local 测试用内存存储；dev 连 MinIO（bucket `bidding-dev`）。
+
+### 8.1 上传
+
+`POST /api/packages/{packageId}/files`  
+`Content-Type: multipart/form-data`，字段名：`file`
+
+### 8.2 列表
+
+`GET /api/packages/{packageId}/files`
+
+**成功 `data` 元素示例**
+
+```json
+{
+  "id": 1,
+  "orgId": 2,
+  "projectId": 10,
+  "packageId": 50,
+  "fileName": "招标文件.pdf",
+  "contentType": "application/pdf",
+  "fileExt": "pdf",
+  "sizeBytes": 1024,
+  "indexStatus": "PENDING",
+  "status": "ACTIVE",
+  "createdBy": 10,
+  "createdAt": "2026-07-22T06:00:00Z",
+  "updatedAt": "2026-07-22T06:00:00Z"
+}
+```
+
+### 8.3 下载
+
+`GET /api/packages/{packageId}/files/{documentId}/download`
+
+- 响应：文件二进制流（非 `ApiResponse` 包装）
+- `Content-Disposition: attachment; filename*=UTF-8''...`
+- `Content-Type`：存库的 MIME（缺省按扩展名推断）
+- 支持 PDF / Word / Excel
+
+### 8.4 预览（仅 PDF）
+
+`GET /api/packages/{packageId}/files/{documentId}/preview`
+
+- 响应：文件二进制流（非 `ApiResponse` 包装）
+- `Content-Disposition: inline; filename*=UTF-8''...`
+- 仅 PDF；Word/Excel → `40000`，提示「仅支持预览 PDF，Word/Excel 请下载后查看」
+
+### 8.5 删除
+
+`DELETE /api/packages/{packageId}/files/{documentId}`
+
+先删对象存储，再逻辑删元数据。
+
+---
+
+## 9. 变更记录
 
 | 日期 | 说明 |
 |------|------|
+| 2026-07-22 | 标包文件：下载 + PDF 预览；仍仅 Bearer；非 PDF 预览 400 |
+| 2026-07-22 | 标包文件：上传/列表/删除；MinIO(S3)；有文件不可删包；fileCount 真数；index_status 占位 |
 | 2026-07-22 | P3 投标包：先建后选；项目下绑定/列表；公司名同组织唯一；已绑可删 |
 | 2026-07-22 | P2 创建项目必选未绑招标包并绑定；详情返回 tenderPackageId；删项目后包仍占用 |
 | 2026-07-22 | P1 招标包 CRUD：本组织创建/列表/改名/删除；unboundOnly；已绑不可删；fileCount 占位 |

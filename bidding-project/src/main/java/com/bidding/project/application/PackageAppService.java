@@ -3,13 +3,16 @@ package com.bidding.project.application;
 import com.bidding.common.api.PageResult;
 import com.bidding.common.error.BizException;
 import com.bidding.common.error.ErrorCode;
+import com.bidding.common.port.DocumentCountPort;
 import com.bidding.common.security.CurrentUser;
 import com.bidding.common.security.UserContext;
 import com.bidding.project.domain.model.BizPackage;
 import com.bidding.project.domain.port.PackageRepository;
+import org.hibernate.validator.internal.constraintvalidators.bv.NotNullValidator;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.sql.ResultSet;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -19,6 +22,7 @@ import java.util.Optional;
  * 标包应用服务。
  * 招标包 / 投标包：创建时均不绑项目；项目侧再选绑。
  * 仅招标方可操作；平台管理员无 TENDERER 时 403。
+ * 包内有文件时不允许删除。
  */
 @Service
 public class PackageAppService {
@@ -34,9 +38,14 @@ public class PackageAppService {
     private static final int MAX_CONTACT_PHONE_LENGTH = 32;
 
     private final PackageRepository packageRepository;
+    private final DocumentCountPort documentCountPort;
+    private final NotNullValidator notNullValidator;
 
-    public PackageAppService(PackageRepository packageRepository) {
+    public PackageAppService(PackageRepository packageRepository,
+                             DocumentCountPort documentCountPort, NotNullValidator notNullValidator) {
         this.packageRepository = packageRepository;
+        this.documentCountPort = documentCountPort;
+        this.notNullValidator = notNullValidator;
     }
 
     /**
@@ -93,7 +102,6 @@ public class PackageAppService {
         );
         return toSummary(requireOwnedPackage(id, operator.getOrgId()));
     }
-
     /**
      * 标包分页列表（按 type）。
      *
@@ -174,6 +182,7 @@ public class PackageAppService {
      * 逻辑删除标包。
      * 招标包：已绑定项目不可删。
      * 投标包：可直接删（已绑则从项目侧消失）。
+     * 包内仍有文件时一律不可删（先删文件）。
      */
     @Transactional
     public void delete(long packageId) {
@@ -181,6 +190,11 @@ public class PackageAppService {
         BizPackage pkg = requireOwnedPackage(packageId, operator.getOrgId());
         if (pkg.isTender() && pkg.isBoundToProject()) {
             throw new BizException(ErrorCode.CONFLICT, "招标包已绑定项目，请先删除项目后再删招标包");
+        }
+        long fileCount = documentCountPort.countActiveByPackageId(packageId);
+        if (fileCount > 0) {
+            throw new BizException(ErrorCode.CONFLICT,
+                    "标包内还有 " + fileCount + " 个文件，请先删除文件后再删标包");
         }
         if (pkg.isDeleted()) {
             return;
@@ -201,8 +215,7 @@ public class PackageAppService {
         summary.setCreatedBy(pkg.getCreatedBy());
         summary.setCreatedAt(pkg.getCreatedAt());
         summary.setUpdatedAt(pkg.getUpdatedAt());
-        // 文件模块未建，占位
-        summary.setFileCount(0);
+        summary.setFileCount(documentCountPort.countActiveByPackageId(pkg.getId()));
         return summary;
     }
 
@@ -260,7 +273,7 @@ public class PackageAppService {
         return trimmed;
     }
 
-    /** 标包摘要（含 fileCount 占位） */
+    /** 标包摘要 */
     public static class PackageSummary {
         private long id;
         private long orgId;

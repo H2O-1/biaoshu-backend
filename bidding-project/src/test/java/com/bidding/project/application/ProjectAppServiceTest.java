@@ -3,6 +3,7 @@ package com.bidding.project.application;
 import com.bidding.common.api.PageResult;
 import com.bidding.common.error.BizException;
 import com.bidding.common.error.ErrorCode;
+import com.bidding.common.port.DocumentCountPort;
 import com.bidding.common.security.CurrentUser;
 import com.bidding.common.security.UserContext;
 import com.bidding.project.domain.model.BizPackage;
@@ -41,6 +42,9 @@ class ProjectAppServiceTest {
 
     @Mock
     private PackageRepository packageRepository;
+
+    @Mock
+    private DocumentCountPort documentCountPort;
 
     @InjectMocks
     private ProjectAppService projectAppService;

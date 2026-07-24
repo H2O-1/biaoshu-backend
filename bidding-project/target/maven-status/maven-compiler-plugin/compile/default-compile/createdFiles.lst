@@ -2,6 +2,7 @@ com\bidding\project\domain\model\BizPackage.class
 com\bidding\project\domain\port\ProjectRepository.class
 com\bidding\project\adapter\web\PackageController.class
 com\bidding\project\infrastructure\persistence\JdbcPackageRepository.class
+com\bidding\project\infrastructure\persistence\PackageLookupPortAdapter.class
 com\bidding\project\adapter\web\ProjectController$CreateProjectRequest.class
 com\bidding\project\application\PackageAppService.class
 com\bidding\project\application\ProjectAppService$ProjectSummary.class

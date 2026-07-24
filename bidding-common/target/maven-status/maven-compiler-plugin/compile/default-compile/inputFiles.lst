@@ -3,7 +3,15 @@ D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\co
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\error\BizException.java
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\error\ErrorCode.java
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\package-info.java
+D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\DocumentAccessPort.java
+D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\DocumentChunkPort.java
+D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\DocumentCountPort.java
+D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\EmbeddingPort.java
+D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\JobPort.java
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\package-info.java
+D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\PackageLookupPort.java
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\ProjectCountPort.java
+D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\TextChunkerPort.java
+D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\VectorStorePort.java
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\security\CurrentUser.java
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\security\UserContext.java

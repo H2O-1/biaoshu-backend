@@ -19,3 +19,10 @@ bidding:
     username: admin
     password: "${BOOTSTRAP_ADMIN_PASSWORD:ChangeMe@123}"
     display-name: 平台管理员
+  storage:
+    type: memory
+  ai:
+    embedding: fake
+    chunker: fake
+  worker:
+    id: api-embedded
