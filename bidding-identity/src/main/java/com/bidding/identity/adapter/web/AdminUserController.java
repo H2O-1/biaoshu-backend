@@ -53,6 +53,27 @@ public class AdminUserController {
         return ApiResponse.ok(adminUserAppService.getUser(userId));
     }
 
+    /**
+     * 平台方账号分页列表（仅平台管理员 / 超管）。
+     */
+    @GetMapping("/platform-admins")
+    public ApiResponse<AdminUserAppService.PlatformAdminPage> listPlatformAdmins(
+            @RequestParam(required = false, defaultValue = "") String keyword,
+            @RequestParam(required = false, defaultValue = "") String status,
+            @RequestParam(required = false, defaultValue = "1") int page,
+            @RequestParam(required = false, defaultValue = "20") int size) {
+        return ApiResponse.ok(adminUserAppService.listPlatformAdmins(keyword, status, page, size));
+    }
+
+    /**
+     * 平台方账号详情。
+     */
+    @GetMapping("/platform-admins/{userId}")
+    public ApiResponse<AdminUserAppService.UserSummary> getPlatformAdmin(
+            @PathVariable("userId") long userId) {
+        return ApiResponse.ok(adminUserAppService.getPlatformAdmin(userId));
+    }
+
     @PostMapping("/users")
     public ApiResponse<AdminUserAppService.UserSummary> createUser(
             @Valid @RequestBody CreateUserRequest request) {
@@ -64,6 +85,19 @@ public class AdminUserController {
                 request.getPhone(),
                 request.getEmail(),
                 request.getRoleCodes()
+        ));
+    }
+
+    /**
+     * 创建平台管理员：固定系统组织 + PLATFORM_ADMIN；无需传 orgId / roleCodes / 手机 / 邮箱。
+     */
+    @PostMapping("/platform-admins")
+    public ApiResponse<AdminUserAppService.UserSummary> createPlatformAdmin(
+            @Valid @RequestBody CreatePlatformAdminRequest request) {
+        return ApiResponse.ok(adminUserAppService.createPlatformAdmin(
+                request.getUsername(),
+                request.getPassword(),
+                request.getDisplayName()
         ));
     }
 
@@ -95,7 +129,45 @@ public class AdminUserController {
     @DeleteMapping("/users/{userId}")
     public ApiResponse<Void> deleteUser(@PathVariable("userId") long userId) {
         adminUserAppService.deleteUser(userId);
-        return ApiResponse.ok(null);
+        return ApiResponse.ok();
+    }
+
+    public static class CreatePlatformAdminRequest {
+        @NotBlank
+        @Size(min = 3, max = 64)
+        private String username;
+
+        @NotBlank
+        @Size(min = 8, max = 72)
+        private String password;
+
+        @NotBlank
+        @Size(max = 128)
+        private String displayName;
+
+        public String getUsername() {
+            return username;
+        }
+
+        public void setUsername(String username) {
+            this.username = username;
+        }
+
+        public String getPassword() {
+            return password;
+        }
+
+        public void setPassword(String password) {
+            this.password = password;
+        }
+
+        public String getDisplayName() {
+            return displayName;
+        }
+
+        public void setDisplayName(String displayName) {
+            this.displayName = displayName;
+        }
     }
 
     public static class CreateUserRequest {

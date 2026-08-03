@@ -27,7 +27,7 @@ public class JdbcUserRepository implements UserRepository {
 
     private static final String USER_COLUMNS =
             "id, org_id, username, password_hash, display_name, phone, email, status, "
-                    + "must_change_password, token_version, created_at";
+                    + "must_change_password, token_version, created_at, updated_at, created_by";
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -35,20 +35,26 @@ public class JdbcUserRepository implements UserRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    private final RowMapper<UserAccount> userRowMapper = (rs, rowNum) -> new UserAccount(
-            rs.getLong("id"),
-            rs.getLong("org_id"),
-            rs.getString("username"),
-            rs.getString("password_hash"),
-            rs.getString("display_name"),
-            rs.getString("phone"),
-            rs.getString("email"),
-            rs.getString("status"),
-            rs.getBoolean("must_change_password"),
-            rs.getInt("token_version"),
-            toInstant(rs.getTimestamp("created_at")),
-            new HashSet<>()
-    );
+    private final RowMapper<UserAccount> userRowMapper = (rs, rowNum) -> {
+        long createdByRaw = rs.getLong("created_by");
+        Long createdBy = rs.wasNull() ? null : createdByRaw;
+        return new UserAccount(
+                rs.getLong("id"),
+                rs.getLong("org_id"),
+                rs.getString("username"),
+                rs.getString("password_hash"),
+                rs.getString("display_name"),
+                rs.getString("phone"),
+                rs.getString("email"),
+                rs.getString("status"),
+                rs.getBoolean("must_change_password"),
+                rs.getInt("token_version"),
+                toInstant(rs.getTimestamp("created_at")),
+                toInstant(rs.getTimestamp("updated_at")),
+                createdBy,
+                new HashSet<>()
+        );
+    };
 
     @Override
     public Optional<UserAccount> findByUsername(String username) {
@@ -142,6 +148,64 @@ public class JdbcUserRepository implements UserRepository {
     }
 
     @Override
+    public List<UserAccount> searchPlatformAdmins(String keyword, String status, int offset, int limit) {
+        String like = "%" + keyword + "%";
+        String statusKw = status == null ? "" : status;
+        List<UserAccount> users = jdbcTemplate.query(
+                "SELECT DISTINCT u.id, u.org_id, u.username, u.password_hash, u.display_name, "
+                        + "u.phone, u.email, u.status, u.must_change_password, u.token_version, "
+                        + "u.created_at, u.updated_at, u.created_by "
+                        + "FROM sys_user u "
+                        + "INNER JOIN sys_user_role ur ON ur.user_id = u.id "
+                        + "WHERE u.status <> 'DELETED' "
+                        + "AND ur.role_code IN ('PLATFORM_ADMIN', 'PLATFORM_SUPER_ADMIN') "
+                        + "AND (? = '' OR u.status = ?) "
+                        + "AND (? = '' OR u.username LIKE ? OR u.display_name LIKE ?) "
+                        + "ORDER BY u.id LIMIT ? OFFSET ?",
+                userRowMapper,
+                statusKw, statusKw,
+                keyword, like, like, limit, offset
+        );
+        List<UserAccount> result = new ArrayList<>();
+        for (UserAccount user : users) {
+            result.add(withRoles(user));
+        }
+        return result;
+    }
+
+    @Override
+    public long countPlatformAdmins(String keyword, String status) {
+        String like = "%" + keyword + "%";
+        String statusKw = status == null ? "" : status;
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(DISTINCT u.id) FROM sys_user u "
+                        + "INNER JOIN sys_user_role ur ON ur.user_id = u.id "
+                        + "WHERE u.status <> 'DELETED' "
+                        + "AND ur.role_code IN ('PLATFORM_ADMIN', 'PLATFORM_SUPER_ADMIN') "
+                        + "AND (? = '' OR u.status = ?) "
+                        + "AND (? = '' OR u.username LIKE ? OR u.display_name LIKE ?)",
+                Long.class,
+                statusKw, statusKw,
+                keyword, like, like
+        );
+        return count == null ? 0 : count;
+    }
+
+    @Override
+    public long countPlatformAdminsByStatus(String status) {
+        String safeStatus = status == null ? "" : status.trim();
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(DISTINCT u.id) FROM sys_user u "
+                        + "INNER JOIN sys_user_role ur ON ur.user_id = u.id "
+                        + "WHERE u.status = ? "
+                        + "AND ur.role_code IN ('PLATFORM_ADMIN', 'PLATFORM_SUPER_ADMIN')",
+                Long.class,
+                safeStatus
+        );
+        return count == null ? 0 : count;
+    }
+
+    @Override
     public void replaceRoles(long userId, Set<String> roleCodes) {
         jdbcTemplate.update("DELETE FROM sys_user_role WHERE user_id = ?", userId);
         for (String roleCode : roleCodes) {
@@ -159,6 +223,41 @@ public class JdbcUserRepository implements UserRepository {
                 "SELECT COUNT(1) FROM sys_user_role WHERE role_code = ?",
                 Long.class,
                 roleCode
+        );
+        return count == null ? 0 : count;
+    }
+
+    @Override
+    public List<Long> listUserIdsWithRole(String roleCode) {
+        return jdbcTemplate.query(
+                "SELECT user_id FROM sys_user_role WHERE role_code = ? ORDER BY user_id",
+                (rs, rowNum) -> rs.getLong("user_id"),
+                roleCode
+        );
+    }
+
+    @Override
+    public long countDistinctActiveUsersWithAnyRole(List<String> roleCodes) {
+        if (roleCodes == null || roleCodes.isEmpty()) {
+            return 0L;
+        }
+        StringBuilder placeholders = new StringBuilder();
+        for (int i = 0; i < roleCodes.size(); i++) {
+            if (i > 0) {
+                placeholders.append(',');
+            }
+            placeholders.append('?');
+        }
+        List<Object> args = new ArrayList<>();
+        for (String roleCode : roleCodes) {
+            args.add(roleCode);
+        }
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(DISTINCT ur.user_id) FROM sys_user_role ur "
+                        + "INNER JOIN sys_user u ON u.id = ur.user_id AND u.status <> 'DELETED' "
+                        + "WHERE ur.role_code IN (" + placeholders + ")",
+                Long.class,
+                args.toArray()
         );
         return count == null ? 0 : count;
     }
@@ -194,6 +293,28 @@ public class JdbcUserRepository implements UserRepository {
     }
 
     @Override
+    public boolean existsByPhoneExceptUserId(String phone, long userId) {
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM sys_user WHERE phone = ? AND id <> ?",
+                Long.class,
+                phone,
+                userId
+        );
+        return count != null && count > 0;
+    }
+
+    @Override
+    public boolean existsByEmailExceptUserId(String email, long userId) {
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM sys_user WHERE email = ? AND id <> ?",
+                Long.class,
+                email,
+                userId
+        );
+        return count != null && count > 0;
+    }
+
+    @Override
     public long insert(long orgId,
                        String username,
                        String passwordHash,
@@ -201,13 +322,14 @@ public class JdbcUserRepository implements UserRepository {
                        String phone,
                        String email,
                        String status,
-                       boolean mustChangePassword) {
+                       boolean mustChangePassword,
+                       Long createdBy) {
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(con -> {
             PreparedStatement ps = con.prepareStatement(
                     "INSERT INTO sys_user(org_id, username, password_hash, display_name, phone, email, status, "
-                            + "must_change_password, token_version, created_at, updated_at) "
-                            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                            + "must_change_password, token_version, created_by, created_at, updated_at) "
+                            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
                     Statement.RETURN_GENERATED_KEYS
             );
             ps.setLong(1, orgId);
@@ -218,6 +340,11 @@ public class JdbcUserRepository implements UserRepository {
             ps.setString(6, email);
             ps.setString(7, status);
             ps.setBoolean(8, mustChangePassword);
+            if (createdBy == null) {
+                ps.setObject(9, null);
+            } else {
+                ps.setLong(9, createdBy);
+            }
             return ps;
         }, keyHolder);
 
@@ -241,6 +368,18 @@ public class JdbcUserRepository implements UserRepository {
                         + "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 passwordHash,
                 mustChangePassword,
+                userId
+        );
+    }
+
+    @Override
+    public void updateProfile(long userId, String displayName, String phone, String email) {
+        jdbcTemplate.update(
+                "UPDATE sys_user SET display_name = ?, phone = ?, email = ?, "
+                        + "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                displayName,
+                phone,
+                email,
                 userId
         );
     }
@@ -299,6 +438,8 @@ public class JdbcUserRepository implements UserRepository {
                 user.isMustChangePassword(),
                 user.getTokenVersion(),
                 user.getCreatedAt(),
+                user.getUpdatedAt(),
+                user.getCreatedBy(),
                 new HashSet<>(roles)
         );
     }

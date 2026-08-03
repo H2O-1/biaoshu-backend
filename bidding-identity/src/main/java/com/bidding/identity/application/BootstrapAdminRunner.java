@@ -1,6 +1,7 @@
 package com.bidding.identity.application;
 
 import com.bidding.identity.domain.model.RoleCode;
+import com.bidding.identity.domain.model.UserAccount;
 import com.bidding.identity.domain.port.OrgRepository;
 import com.bidding.identity.domain.port.UserRepository;
 import org.slf4j.Logger;
@@ -17,8 +18,7 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * 启动时检查：如果还没有平台管理员，就自动创建一个。
- * 密码从配置读取，不写进 SQL 文件。
+ * 启动时检查：无平台管理员则创建引导账号；无超管则给引导账号补超管角色。
  */
 @Component
 public class BootstrapAdminRunner implements ApplicationRunner {
@@ -58,11 +58,13 @@ public class BootstrapAdminRunner implements ApplicationRunner {
         }
 
         long adminCount = userRepository.countUsersWithRole(RoleCode.PLATFORM_ADMIN.name());
-        if (adminCount > 0) {
-            // 已经有管理员了，什么都不做
-            return;
+        if (adminCount == 0) {
+            createBootstrapAdmin();
         }
+        ensureSuperAdminExists();
+    }
 
+    private void createBootstrapAdmin() {
         if (password == null || password.trim().isEmpty()) {
             throw new IllegalStateException(
                     "系统无平台管理员，请设置环境变量 BOOTSTRAP_ADMIN_PASSWORD 后启动");
@@ -79,14 +81,40 @@ public class BootstrapAdminRunner implements ApplicationRunner {
         }
 
         String passwordHash = passwordEncoder.encode(password);
-        // 引导管理员不强制改密，避免本地首次启动就被拦住
         long userId = userRepository.insert(
-                orgId, username, passwordHash, displayName, null, null, "ACTIVE", false);
+                orgId, username, passwordHash, displayName, null, null, "ACTIVE", false, null);
 
         Set<String> roles = new HashSet<>();
         roles.add(RoleCode.PLATFORM_ADMIN.name());
+        roles.add(RoleCode.PLATFORM_SUPER_ADMIN.name());
         userRepository.replaceRoles(userId, roles);
 
-        log.warn("已创建引导平台管理员账号 username={}，请尽快修改密码", username);
+        log.warn("已创建引导平台超管账号 username={}，请尽快修改密码", username);
+    }
+
+    /**
+     * 升级兼容：已有普管但无超管时，给引导用户名（或首个平台管理员）补上超管角色。
+     */
+    private void ensureSuperAdminExists() {
+        long superCount = userRepository.countUsersWithRole(RoleCode.PLATFORM_SUPER_ADMIN.name());
+        if (superCount > 0) {
+            return;
+        }
+        Optional<UserAccount> bootstrap = userRepository.findByUsername(username);
+        if (bootstrap.isPresent()
+                && bootstrap.get().getRoleCodes().contains(RoleCode.PLATFORM_ADMIN.name())) {
+            grantSuperAdmin(bootstrap.get());
+            return;
+        }
+        // 找不到引导账号则无法自动指定，留给人工赋权
+        log.warn("系统尚无平台超级管理员，请由运维为唯一超管账号赋予 PLATFORM_SUPER_ADMIN");
+    }
+
+    private void grantSuperAdmin(UserAccount account) {
+        Set<String> roles = new HashSet<>(account.getRoleCodes());
+        roles.add(RoleCode.PLATFORM_ADMIN.name());
+        roles.add(RoleCode.PLATFORM_SUPER_ADMIN.name());
+        userRepository.replaceRoles(account.getId(), roles);
+        log.warn("已为账号 username={} 补齐平台超级管理员角色", account.getUsername());
     }
 }

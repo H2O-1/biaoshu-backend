@@ -6,6 +6,7 @@ import com.bidding.project.application.PackageAppService;
 import com.bidding.project.application.ProjectAppService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -17,6 +18,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 /**
  * 项目接口（招标方）。平台管理员无招标方角色时 403。
@@ -39,7 +42,8 @@ public class ProjectController {
                 request.getAgency(),
                 request.getProjectType(),
                 request.getLeaderName(),
-                request.getTenderPackageId()
+                request.getTenderPackageId(),
+                request.getBidPackageIds()
         ));
     }
 
@@ -47,9 +51,10 @@ public class ProjectController {
     public ApiResponse<PageResult<ProjectAppService.ProjectSummary>> list(
             @RequestParam(required = false, defaultValue = "") String keyword,
             @RequestParam(required = false, defaultValue = "") String status,
+            @RequestParam(required = false, defaultValue = "") String workflowStatus,
             @RequestParam(required = false, defaultValue = "1") int page,
             @RequestParam(required = false, defaultValue = "20") int size) {
-        return ApiResponse.ok(projectAppService.list(keyword, status, page, size));
+        return ApiResponse.ok(projectAppService.list(keyword, status, workflowStatus, page, size));
     }
 
     @GetMapping("/{projectId}")
@@ -84,7 +89,12 @@ public class ProjectController {
         return ApiResponse.ok();
     }
 
-    /** 项目下添加（绑定）投标包 */
+    /**
+     * 项目下添加（绑定）投标包。
+     *
+     * @deprecated 请在创建项目时传入 {@code bidPackageIds}；本接口暂保留兼容，后续移除。
+     */
+    @Deprecated
     @PostMapping("/{projectId}/bid-packages")
     public ApiResponse<PackageAppService.PackageSummary> bindBidPackage(
             @PathVariable("projectId") long projectId,
@@ -116,25 +126,26 @@ public class ProjectController {
     }
 
     public static class CreateProjectRequest {
-        @NotBlank
+        /** 可选；不填或空白时后端生成「未命名-yyyyMMdd-HHmm」 */
         @Size(max = 128)
         private String name;
 
-        @NotBlank
         @Size(max = 128)
         private String agency;
 
-        @NotBlank
         @Size(max = 64)
         private String projectType;
 
-        @NotBlank
         @Size(max = 64)
         private String leaderName;
 
         /** 本组织未绑定的招标包 ID */
         @NotNull
         private Long tenderPackageId;
+
+        /** 本组织未绑定的投标包 ID 列表，至少一个 */
+        @NotEmpty
+        private List<Long> bidPackageIds;
 
         public String getName() {
             return name;
@@ -175,6 +186,14 @@ public class ProjectController {
         public void setTenderPackageId(Long tenderPackageId) {
             this.tenderPackageId = tenderPackageId;
         }
+
+        public List<Long> getBidPackageIds() {
+            return bidPackageIds;
+        }
+
+        public void setBidPackageIds(List<Long> bidPackageIds) {
+            this.bidPackageIds = bidPackageIds;
+        }
     }
 
     public static class UpdateProjectRequest {
@@ -182,15 +201,12 @@ public class ProjectController {
         @Size(max = 128)
         private String name;
 
-        @NotBlank
         @Size(max = 128)
         private String agency;
 
-        @NotBlank
         @Size(max = 64)
         private String projectType;
 
-        @NotBlank
         @Size(max = 64)
         private String leaderName;
 

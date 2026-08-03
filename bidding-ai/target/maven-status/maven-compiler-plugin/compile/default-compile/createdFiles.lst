@@ -1,5 +1,1 @@
-com\bidding\ai\infrastructure\persistence\JdbcVectorStore.class
-com\bidding\ai\infrastructure\persistence\JdbcDocumentChunkRepository.class
 com\bidding\ai\package-info.class
-com\bidding\ai\infrastructure\chunk\FakeTextChunker.class
-com\bidding\ai\infrastructure\embedding\FakeEmbeddingPort.class

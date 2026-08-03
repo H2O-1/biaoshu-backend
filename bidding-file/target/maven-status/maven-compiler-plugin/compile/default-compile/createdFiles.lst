@@ -1,13 +1,3 @@
-com\bidding\file\infrastructure\storage\S3ObjectStorage.class
-com\bidding\file\infrastructure\persistence\DocumentCountPortAdapter.class
-com\bidding\file\infrastructure\storage\InMemoryObjectStorage.class
-com\bidding\file\application\DocumentAppService$FileContent.class
-com\bidding\file\application\DocumentAppService.class
-com\bidding\file\domain\port\ObjectStoragePort.class
-com\bidding\file\infrastructure\persistence\JdbcDocumentRepository.class
-com\bidding\file\domain\port\DocumentRepository.class
-com\bidding\file\domain\model\Document.class
-com\bidding\file\application\DocumentAppService$DocumentSummary.class
-com\bidding\file\adapter\web\DocumentController.class
-com\bidding\file\infrastructure\port\DocumentAccessPortAdapter.class
+com\bidding\file\infrastructure\persistence\DocumentCascadePortAdapter.class
+com\bidding\file\infrastructure\persistence\DocumentProjectBindPortAdapter.class
 com\bidding\file\package-info.class

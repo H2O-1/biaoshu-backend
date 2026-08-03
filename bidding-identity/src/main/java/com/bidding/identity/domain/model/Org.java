@@ -4,7 +4,7 @@ import java.time.Instant;
 
 /**
  * 组织（对应表 sys_org）。
- * 公司名称 name、编码 code 创建后均不可修改。
+ * 编码 code 创建后不可修改；名称、城市可改。
  */
 public class Org {
 
@@ -70,6 +70,11 @@ public class Org {
     /** 是否正常可用 */
     public boolean isActive() {
         return "ACTIVE".equalsIgnoreCase(status);
+    }
+
+    /** 是否已逻辑删除 */
+    public boolean isDeleted() {
+        return "DELETED".equalsIgnoreCase(status);
     }
 
     /** 是否系统种子组织 */

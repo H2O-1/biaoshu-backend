@@ -23,7 +23,7 @@ import java.util.Optional;
 public class JdbcDocumentRepository implements DocumentRepository {
 
     private static final String DOC_COLUMNS =
-            "id, org_id, project_id, package_id, file_name, content_type, file_ext, size_bytes, "
+            "id, org_id, project_id, package_id, file_name, content_type, file_ext, file_type, size_bytes, "
                     + "object_key, index_status, status, created_by, created_at, updated_at";
 
     private final JdbcTemplate jdbcTemplate;
@@ -40,6 +40,7 @@ public class JdbcDocumentRepository implements DocumentRepository {
             rs.getString("file_name"),
             rs.getString("content_type"),
             rs.getString("file_ext"),
+            rs.getString("file_type"),
             rs.getLong("size_bytes"),
             rs.getString("object_key"),
             rs.getString("index_status"),
@@ -83,12 +84,156 @@ public class JdbcDocumentRepository implements DocumentRepository {
     }
 
     @Override
+    public long countActiveByOrgId(long orgId) {
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM biz_document WHERE org_id = ? AND status <> 'DELETED'",
+                Long.class,
+                orgId
+        );
+        return count == null ? 0 : count;
+    }
+
+    @Override
+    public long countActiveByOrgIdAndIndexStatus(long orgId, String indexStatus) {
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM biz_document WHERE org_id = ? AND status <> 'DELETED' AND index_status = ?",
+                Long.class,
+                orgId,
+                indexStatus
+        );
+        return count == null ? 0 : count;
+    }
+
+    @Override
+    public long countActiveByIndexStatus(String indexStatus) {
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM biz_document WHERE status <> 'DELETED' AND index_status = ?",
+                Long.class,
+                indexStatus
+        );
+        return count == null ? 0 : count;
+    }
+
+    @Override
+    public long countActiveByProjectIdAndPackageType(long projectId, String packageType) {
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM biz_document d "
+                        + "INNER JOIN biz_package p ON p.id = d.package_id "
+                        + "WHERE d.project_id = ? AND d.status <> 'DELETED' "
+                        + "AND p.status <> 'DELETED' AND p.type = ?",
+                Long.class,
+                projectId,
+                packageType
+        );
+        return count == null ? 0 : count;
+    }
+
+    @Override
+    public long countActiveNotSuccessIndexByProjectIdAndPackageType(long projectId, String packageType) {
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM biz_document d "
+                        + "INNER JOIN biz_package p ON p.id = d.package_id "
+                        + "WHERE d.project_id = ? AND d.status <> 'DELETED' "
+                        + "AND p.status <> 'DELETED' AND p.type = ? "
+                        + "AND d.index_status <> 'SUCCESS'",
+                Long.class,
+                projectId,
+                packageType
+        );
+        return count == null ? 0 : count;
+    }
+
+    @Override
+    public Optional<String> findActiveFileNameByProjectIdAndPackageTypeAndFileType(
+            long projectId, String packageType, String fileType) {
+        List<String> list = jdbcTemplate.query(
+                "SELECT d.file_name FROM biz_document d "
+                        + "INNER JOIN biz_package p ON p.id = d.package_id "
+                        + "WHERE d.project_id = ? AND d.status <> 'DELETED' "
+                        + "AND p.status <> 'DELETED' AND p.type = ? "
+                        + "AND d.file_type = ? "
+                        + "ORDER BY d.id DESC LIMIT 1",
+                (rs, rowNum) -> rs.getString("file_name"),
+                projectId,
+                packageType,
+                fileType
+        );
+        if (list == null || list.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(list.get(0));
+    }
+
+    @Override
+    public long countPackagesWithActiveFilesByProjectIdAndPackageType(long projectId, String packageType) {
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM biz_package p "
+                        + "WHERE p.project_id = ? AND p.type = ? AND p.status <> 'DELETED' "
+                        + "AND EXISTS ("
+                        + "  SELECT 1 FROM biz_document d "
+                        + "  WHERE d.package_id = p.id AND d.status <> 'DELETED'"
+                        + ")",
+                Long.class,
+                projectId,
+                packageType
+        );
+        return count == null ? 0 : count;
+    }
+
+    @Override
+    public String resolveIndexStatusByPackageId(long packageId) {
+        List<String> statuses = jdbcTemplate.query(
+                "SELECT DISTINCT index_status FROM biz_document "
+                        + "WHERE package_id = ? AND status <> 'DELETED'",
+                (rs, rowNum) -> rs.getString(1),
+                packageId
+        );
+        if (statuses == null || statuses.isEmpty()) {
+            return null;
+        }
+        boolean hasFailed = false;
+        boolean hasProcessing = false;
+        boolean hasPending = false;
+        boolean hasSuccess = false;
+        for (int i = 0; i < statuses.size(); i++) {
+            String s = statuses.get(i);
+            if (s == null) {
+                continue;
+            }
+            if ("FAILED".equals(s)) {
+                hasFailed = true;
+            } else if ("PROCESSING".equals(s)) {
+                hasProcessing = true;
+            } else if ("PENDING".equals(s)) {
+                hasPending = true;
+            } else if ("SUCCESS".equals(s)) {
+                hasSuccess = true;
+            }
+        }
+        // 包级展示取最差状态，便于前端提示解析进度
+        if (hasFailed) {
+            return "FAILED";
+        }
+        if (hasProcessing) {
+            return "PROCESSING";
+        }
+        if (hasPending) {
+            return "PENDING";
+        }
+        if (hasSuccess) {
+            return "SUCCESS";
+        }
+        return null;
+    }
+
+    @Override
     public long insert(long orgId,
                        Long projectId,
                        long packageId,
                        String fileName,
                        String contentType,
                        String fileExt,
+                       String fileType,
                        long sizeBytes,
                        String objectKey,
                        String indexStatus,
@@ -98,9 +243,9 @@ public class JdbcDocumentRepository implements DocumentRepository {
         jdbcTemplate.update(con -> {
             PreparedStatement ps = con.prepareStatement(
                     "INSERT INTO biz_document(org_id, project_id, package_id, file_name, content_type, "
-                            + "file_ext, size_bytes, object_key, index_status, status, created_by, "
+                            + "file_ext, file_type, size_bytes, object_key, index_status, status, created_by, "
                             + "created_at, updated_at) "
-                            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
                     Statement.RETURN_GENERATED_KEYS
             );
             ps.setLong(1, orgId);
@@ -117,11 +262,12 @@ public class JdbcDocumentRepository implements DocumentRepository {
                 ps.setString(5, contentType);
             }
             ps.setString(6, fileExt);
-            ps.setLong(7, sizeBytes);
-            ps.setString(8, objectKey);
-            ps.setString(9, indexStatus);
-            ps.setString(10, status);
-            ps.setLong(11, createdBy);
+            ps.setString(7, fileType);
+            ps.setLong(8, sizeBytes);
+            ps.setString(9, objectKey);
+            ps.setString(10, indexStatus);
+            ps.setString(11, status);
+            ps.setLong(12, createdBy);
             return ps;
         }, keyHolder);
 
@@ -143,6 +289,25 @@ public class JdbcDocumentRepository implements DocumentRepository {
         jdbcTemplate.update(
                 "UPDATE biz_document SET status = 'DELETED', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 documentId
+        );
+    }
+
+    @Override
+    public void updateIndexStatus(long documentId, String indexStatus) {
+        jdbcTemplate.update(
+                "UPDATE biz_document SET index_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                indexStatus,
+                documentId
+        );
+    }
+
+    @Override
+    public int bindProjectIdByPackageId(long packageId, long projectId) {
+        return jdbcTemplate.update(
+                "UPDATE biz_document SET project_id = ?, updated_at = CURRENT_TIMESTAMP "
+                        + "WHERE package_id = ? AND project_id IS NULL AND status <> 'DELETED'",
+                projectId,
+                packageId
         );
     }
 

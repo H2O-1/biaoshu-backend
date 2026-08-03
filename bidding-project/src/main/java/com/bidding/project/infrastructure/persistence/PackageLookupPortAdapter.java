@@ -5,6 +5,8 @@ import com.bidding.project.domain.model.BizPackage;
 import com.bidding.project.domain.port.PackageRepository;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -25,8 +27,43 @@ public class PackageLookupPortAdapter implements PackageLookupPort {
         if (optional.isEmpty()) {
             return null;
         }
-        BizPackage pkg = optional.get();
-        if (pkg.isDeleted()) {
+        return toRefIfActive(optional.get());
+    }
+
+    @Override
+    public PackageRef findActiveByProjectIdAndType(long projectId, String type) {
+        if (type == null || type.isBlank()) {
+            return null;
+        }
+        Optional<BizPackage> optional = packageRepository.findByProjectIdAndType(projectId, type.trim());
+        if (optional.isEmpty()) {
+            return null;
+        }
+        return toRefIfActive(optional.get());
+    }
+
+    @Override
+    public List<PackageRef> listActiveByProjectIdAndType(long projectId, String type) {
+        List<PackageRef> result = new ArrayList<>();
+        if (type == null || type.isBlank()) {
+            return result;
+        }
+        List<BizPackage> packages = packageRepository.searchByProjectIdAndType(
+                projectId, type.trim(), 0, 1000);
+        if (packages == null) {
+            return result;
+        }
+        for (int i = 0; i < packages.size(); i++) {
+            PackageRef ref = toRefIfActive(packages.get(i));
+            if (ref != null) {
+                result.add(ref);
+            }
+        }
+        return result;
+    }
+
+    private PackageRef toRefIfActive(BizPackage pkg) {
+        if (pkg == null || pkg.isDeleted()) {
             return null;
         }
         PackageRef ref = new PackageRef();
@@ -35,6 +72,13 @@ public class PackageLookupPortAdapter implements PackageLookupPort {
         ref.setProjectId(pkg.getProjectId());
         ref.setType(pkg.getType());
         ref.setStatus(pkg.getStatus());
+        ref.setName(pkg.getName());
+        ref.setContactName(pkg.getContactName());
+        ref.setContactPhone(pkg.getContactPhone());
+        ref.setCompanyAddress(pkg.getCompanyAddress());
+        ref.setPriceWithTax(pkg.getPriceWithTax());
+        ref.setTaxRate(pkg.getTaxRate());
+        ref.setPriceWithoutTax(pkg.getPriceWithoutTax());
         return ref;
     }
 }

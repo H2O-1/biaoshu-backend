@@ -18,6 +18,8 @@ public class UserAccount {
     private final boolean mustChangePassword;
     private final int tokenVersion;
     private final Instant createdAt;
+    private final Instant updatedAt;
+    private final Long createdBy;
     private final Set<String> roleCodes;
 
     public UserAccount(long id,
@@ -31,6 +33,8 @@ public class UserAccount {
                        boolean mustChangePassword,
                        int tokenVersion,
                        Instant createdAt,
+                       Instant updatedAt,
+                       Long createdBy,
                        Set<String> roleCodes) {
         this.id = id;
         this.orgId = orgId;
@@ -43,6 +47,8 @@ public class UserAccount {
         this.mustChangePassword = mustChangePassword;
         this.tokenVersion = tokenVersion;
         this.createdAt = createdAt;
+        this.updatedAt = updatedAt;
+        this.createdBy = createdBy;
         if (roleCodes == null) {
             this.roleCodes = new HashSet<>();
         } else {
@@ -94,6 +100,14 @@ public class UserAccount {
         return createdAt;
     }
 
+    public Instant getUpdatedAt() {
+        return updatedAt;
+    }
+
+    public Long getCreatedBy() {
+        return createdBy;
+    }
+
     public Set<String> getRoleCodes() {
         return roleCodes;
     }
@@ -101,5 +115,11 @@ public class UserAccount {
     /** 是否允许登录（仅 ACTIVE） */
     public boolean isEnabled() {
         return "ACTIVE".equalsIgnoreCase(status);
+    }
+
+    /** 是否平台方账号（普管或超管） */
+    public boolean isPlatformAdminAccount() {
+        return roleCodes.contains(RoleCode.PLATFORM_ADMIN.name())
+                || roleCodes.contains(RoleCode.PLATFORM_SUPER_ADMIN.name());
     }
 }

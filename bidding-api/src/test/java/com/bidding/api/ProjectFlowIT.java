@@ -71,7 +71,7 @@ class ProjectFlowIT {
                 .andExpect(status().isOk());
         String tendererToken = login("tenderer_proj", "Stable9x");
 
-        // 先建未绑定招标包
+        // 先建未绑定招标包 + 投标包
         MvcResult pkgCreated = mockMvc.perform(post("/api/packages")
                         .header("Authorization", "Bearer " + tendererToken)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -81,6 +81,22 @@ class ProjectFlowIT {
                 .andExpect(status().isOk())
                 .andReturn();
         long tenderPackageId = Long.parseLong(pkgCreated.getResponse().getContentAsString()
+                .replaceAll("(?s).*\"id\"\\s*:\\s*(\\d+).*", "$1"));
+
+        MvcResult bidCreated = mockMvc.perform(post("/api/packages")
+                        .header("Authorization", "Bearer " + tendererToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "type":"BID",
+                                  "name":"华建集团",
+                                  "contactName":"王五",
+                                  "contactPhone":"13800001111"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn();
+        long bidPackageId = Long.parseLong(bidCreated.getResponse().getContentAsString()
                 .replaceAll("(?s).*\"id\"\\s*:\\s*(\\d+).*", "$1"));
 
         // 平台管理员不能建项目
@@ -93,9 +109,10 @@ class ProjectFlowIT {
                                   "agency":"代理A",
                                   "projectType":"公开招标",
                                   "leaderName":"张三",
-                                  "tenderPackageId": %d
+                                  "tenderPackageId": %d,
+                                  "bidPackageIds": [%d]
                                 }
-                                """.formatted(tenderPackageId)))
+                                """.formatted(tenderPackageId, bidPackageId)))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value(40300));
 
@@ -108,9 +125,10 @@ class ProjectFlowIT {
                                   "agency":"某某招标代理",
                                   "projectType":"公开招标",
                                   "leaderName":"张三",
-                                  "tenderPackageId": %d
+                                  "tenderPackageId": %d,
+                                  "bidPackageIds": [%d]
                                 }
-                                """.formatted(tenderPackageId)))
+                                """.formatted(tenderPackageId, bidPackageId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.name").value("市政道路改造工程"))
                 .andExpect(jsonPath("$.data.orgId").value((int) orgId))
@@ -120,13 +138,18 @@ class ProjectFlowIT {
         long projectId = Long.parseLong(created.getResponse().getContentAsString()
                 .replaceAll("(?s).*\"id\"\\s*:\\s*(\\d+).*", "$1"));
 
+        mockMvc.perform(get("/api/projects/" + projectId + "/bid-packages")
+                        .header("Authorization", "Bearer " + tendererToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1));
+
         // 已绑定的招标包不可再删
         mockMvc.perform(delete("/api/packages/" + tenderPackageId)
                         .header("Authorization", "Bearer " + tendererToken))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value(40900));
 
-        // 同组织重名（再准备一个未绑包）
+        // 同组织重名（再准备未绑招标包 + 投标包）
         MvcResult pkg2 = mockMvc.perform(post("/api/packages")
                         .header("Authorization", "Bearer " + tendererToken)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -138,6 +161,22 @@ class ProjectFlowIT {
         long tenderPackageId2 = Long.parseLong(pkg2.getResponse().getContentAsString()
                 .replaceAll("(?s).*\"id\"\\s*:\\s*(\\d+).*", "$1"));
 
+        MvcResult bid2 = mockMvc.perform(post("/api/packages")
+                        .header("Authorization", "Bearer " + tendererToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "type":"BID",
+                                  "name":"另一投标公司",
+                                  "contactName":"赵六",
+                                  "contactPhone":"13800002222"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn();
+        long bidPackageId2 = Long.parseLong(bid2.getResponse().getContentAsString()
+                .replaceAll("(?s).*\"id\"\\s*:\\s*(\\d+).*", "$1"));
+
         mockMvc.perform(post("/api/projects")
                         .header("Authorization", "Bearer " + tendererToken)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -147,9 +186,10 @@ class ProjectFlowIT {
                                   "agency":"代理B",
                                   "projectType":"邀请招标",
                                   "leaderName":"李四",
-                                  "tenderPackageId": %d
+                                  "tenderPackageId": %d,
+                                  "bidPackageIds": [%d]
                                 }
-                                """.formatted(tenderPackageId2)))
+                                """.formatted(tenderPackageId2, bidPackageId2)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value(40900));
 
@@ -163,9 +203,10 @@ class ProjectFlowIT {
                                   "agency":"代理B",
                                   "projectType":"邀请招标",
                                   "leaderName":"李四",
-                                  "tenderPackageId": %d
+                                  "tenderPackageId": %d,
+                                  "bidPackageIds": [%d]
                                 }
-                                """.formatted(tenderPackageId)))
+                                """.formatted(tenderPackageId, bidPackageId2)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value(40900));
 

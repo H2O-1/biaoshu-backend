@@ -62,7 +62,12 @@ public class CurrentUser {
     }
 
     public boolean isPlatformAdmin() {
-        return hasRole("PLATFORM_ADMIN");
+        return hasRole("PLATFORM_ADMIN") || hasRole("PLATFORM_SUPER_ADMIN");
+    }
+
+    /** 是否平台超级管理员（可删除组织等） */
+    public boolean isPlatformSuperAdmin() {
+        return hasRole("PLATFORM_SUPER_ADMIN");
     }
 
     /** 是否招标方（项目由招标方创建与管理） */

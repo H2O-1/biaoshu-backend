@@ -84,9 +84,20 @@ public class JdbcOrgRepository implements OrgRepository {
     @Override
     public boolean existsByName(String name) {
         Long count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(1) FROM sys_org WHERE name = ?",
+                "SELECT COUNT(1) FROM sys_org WHERE name = ? AND status <> 'DELETED'",
                 Long.class,
                 name
+        );
+        return count != null && count > 0;
+    }
+
+    @Override
+    public boolean existsByNameExceptOrgId(String name, long orgId) {
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM sys_org WHERE name = ? AND status <> 'DELETED' AND id <> ?",
+                Long.class,
+                name,
+                orgId
         );
         return count != null && count > 0;
     }
@@ -110,7 +121,8 @@ public class JdbcOrgRepository implements OrgRepository {
         String cityLike = "%" + cityKw + "%";
         return jdbcTemplate.query(
                 "SELECT " + ORG_COLUMNS + " FROM sys_org "
-                        + "WHERE (? = '' OR name LIKE ?) "
+                        + "WHERE status <> 'DELETED' "
+                        + "AND (? = '' OR name LIKE ?) "
                         + "AND (? = '' OR city LIKE ?) "
                         + "AND (? = '' OR status = ?) "
                         + "ORDER BY id DESC LIMIT ? OFFSET ?",
@@ -131,13 +143,47 @@ public class JdbcOrgRepository implements OrgRepository {
         String cityLike = "%" + cityKw + "%";
         Long count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(1) FROM sys_org "
-                        + "WHERE (? = '' OR name LIKE ?) "
+                        + "WHERE status <> 'DELETED' "
+                        + "AND (? = '' OR name LIKE ?) "
                         + "AND (? = '' OR city LIKE ?) "
                         + "AND (? = '' OR status = ?)",
                 Long.class,
                 nameKw, nameLike,
                 cityKw, cityLike,
                 statusKw, statusKw
+        );
+        return count == null ? 0 : count;
+    }
+
+    @Override
+    public long countByStatus(String status) {
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM sys_org WHERE status = ?",
+                Long.class,
+                status
+        );
+        return count == null ? 0 : count;
+    }
+
+    @Override
+    public long countPendingConfig() {
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM sys_org o "
+                        + "WHERE o.status <> 'DELETED' "
+                        + "AND NOT EXISTS ("
+                        + "  SELECT 1 FROM sys_user u "
+                        + "  WHERE u.org_id = o.id AND u.status <> 'DELETED'"
+                        + ")",
+                Long.class
+        );
+        return count == null ? 0 : count;
+    }
+
+    @Override
+    public long countTendererOrgs() {
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM sys_org WHERE status <> 'DELETED' AND code <> 'SYSTEM'",
+                Long.class
         );
         return count == null ? 0 : count;
     }
@@ -181,6 +227,16 @@ public class JdbcOrgRepository implements OrgRepository {
         jdbcTemplate.update(
                 "UPDATE sys_org SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 status,
+                orgId
+        );
+    }
+
+    @Override
+    public void updateNameAndCity(long orgId, String name, String city) {
+        jdbcTemplate.update(
+                "UPDATE sys_org SET name = ?, city = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                name,
+                city,
                 orgId
         );
     }

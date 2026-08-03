@@ -5,6 +5,7 @@ package com.bidding.identity.domain.model;
  */
 public enum RoleCode {
     PLATFORM_ADMIN("平台管理员"),
+    PLATFORM_SUPER_ADMIN("平台超级管理员"),
     TENDERER("招标方"),
     BIDDER("投标方"),
     EXPERT("专家");

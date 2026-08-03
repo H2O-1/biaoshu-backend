@@ -3,7 +3,11 @@ package com.bidding.identity.application;
 import com.bidding.common.api.PageResult;
 import com.bidding.common.error.BizException;
 import com.bidding.common.error.ErrorCode;
+import com.bidding.common.port.DocumentCountPort;
+import com.bidding.common.port.DocumentIndexCountPort;
+import com.bidding.common.port.PackageCountPort;
 import com.bidding.common.port.ProjectCountPort;
+import com.bidding.common.port.ReviewStatusCountPort;
 import com.bidding.common.security.CurrentUser;
 import com.bidding.common.security.UserContext;
 import com.bidding.identity.domain.model.Org;
@@ -54,6 +58,18 @@ class AdminOrgAppServiceTest {
     @Mock
     private ProjectCountPort projectCountPort;
 
+    @Mock
+    private PackageCountPort packageCountPort;
+
+    @Mock
+    private DocumentIndexCountPort documentIndexCountPort;
+
+    @Mock
+    private DocumentCountPort documentCountPort;
+
+    @Mock
+    private ReviewStatusCountPort reviewStatusCountPort;
+
     @InjectMocks
     private AdminOrgAppService adminOrgAppService;
 
@@ -101,6 +117,51 @@ class AdminOrgAppServiceTest {
     }
 
     @Test
+    void updateOrgSuccess() {
+        Org before = org(2L, "ORG_X", "旧公司", "上海市", "ACTIVE");
+        Org after = org(2L, "ORG_X", "新公司", "深圳市", "ACTIVE");
+        when(orgRepository.findById(2L))
+                .thenReturn(Optional.of(before))
+                .thenReturn(Optional.of(after));
+        when(cityCatalog.containsName("深圳市")).thenReturn(true);
+        when(orgRepository.existsByNameExceptOrgId("新公司", 2L)).thenReturn(false);
+        when(orgRepository.countUsersByOrgId(2L)).thenReturn(1L);
+        when(projectCountPort.countByOrgId(2L)).thenReturn(0L);
+        when(packageCountPort.countActiveByOrgIdAndType(2L, "TENDER")).thenReturn(0L);
+        when(packageCountPort.countActiveByOrgIdAndType(2L, "BID")).thenReturn(0L);
+
+        AdminOrgAppService.OrgSummary summary =
+                adminOrgAppService.updateOrg(2L, " 新公司 ", "深圳市");
+
+        assertEquals("新公司", summary.getName());
+        assertEquals("深圳市", summary.getCity());
+        verify(orgRepository).updateNameAndCity(2L, "新公司", "深圳市");
+    }
+
+    @Test
+    void updateOrgRejectDuplicateName() {
+        Org org = org(2L, "ORG_X", "旧公司", "上海市", "ACTIVE");
+        when(orgRepository.findById(2L)).thenReturn(Optional.of(org));
+        when(orgRepository.existsByNameExceptOrgId("华能招标有限公司", 2L)).thenReturn(true);
+
+        BizException ex = assertThrows(BizException.class,
+                () -> adminOrgAppService.updateOrg(2L, "华能招标有限公司", "上海市"));
+        assertEquals(ErrorCode.CONFLICT, ex.errorCode());
+        verify(orgRepository, never()).updateNameAndCity(anyLong(), anyString(), anyString());
+    }
+
+    @Test
+    void updateOrgRejectSystemOrg() {
+        when(orgRepository.findById(1L)).thenReturn(Optional.of(
+                org(1L, "SYSTEM", "系统组织", "系统", "ACTIVE")));
+
+        BizException ex = assertThrows(BizException.class,
+                () -> adminOrgAppService.updateOrg(1L, "系统组织", "北京市"));
+        assertEquals(ErrorCode.BAD_REQUEST, ex.errorCode());
+        verify(orgRepository, never()).updateNameAndCity(anyLong(), anyString(), anyString());
+    }
+
+    @Test
     void createOrgRejectInvalidCity() {
         when(cityCatalog.containsName("深圳")).thenReturn(false);
 
@@ -130,13 +191,50 @@ class AdminOrgAppServiceTest {
         when(orgRepository.countSearch(eq("测试"), eq(""), eq(""))).thenReturn(1L);
         when(orgRepository.countUsersByOrgId(2L)).thenReturn(3L);
         when(projectCountPort.countByOrgId(2L)).thenReturn(0L);
+        when(packageCountPort.countActiveByOrgIdAndType(2L, "TENDER")).thenReturn(1L);
+        when(packageCountPort.countActiveByOrgIdAndType(2L, "BID")).thenReturn(2L);
+        when(orgRepository.countByStatus("ACTIVE")).thenReturn(5L);
+        when(orgRepository.countByStatus("DISABLED")).thenReturn(2L);
+        when(orgRepository.countPendingConfig()).thenReturn(1L);
 
-        PageResult<AdminOrgAppService.OrgSummary> page =
+        AdminOrgAppService.OrgPage page =
                 adminOrgAppService.listOrgs("测试", "", "", 1, 20);
 
         assertEquals(1, page.getItems().size());
         assertEquals(3L, page.getItems().get(0).getUserCount());
+        assertEquals(0L, page.getItems().get(0).getProjectCount());
+        assertEquals(1L, page.getItems().get(0).getTenderPackageCount());
+        assertEquals(2L, page.getItems().get(0).getBidPackageCount());
         assertEquals(1L, page.getTotal());
+        assertEquals(5L, page.getActiveCount());
+        assertEquals(2L, page.getDisabledCount());
+        assertEquals(1L, page.getPendingConfigCount());
+    }
+
+    @Test
+    void getOrgReturnsBusinessStats() {
+        Org org = org(2L, "ORG_X", "测试公司", "上海市", "ACTIVE");
+        when(orgRepository.findById(2L)).thenReturn(Optional.of(org));
+        when(orgRepository.countUsersByOrgId(2L)).thenReturn(3L);
+        when(projectCountPort.countByOrgId(2L)).thenReturn(5L);
+        when(packageCountPort.countActiveByOrgIdAndType(2L, "TENDER")).thenReturn(2L);
+        when(packageCountPort.countActiveByOrgIdAndType(2L, "BID")).thenReturn(4L);
+        when(documentIndexCountPort.countActiveByOrgIdAndIndexStatus(2L, "SUCCESS")).thenReturn(10L);
+        when(documentIndexCountPort.countActiveByOrgIdAndIndexStatus(2L, "FAILED")).thenReturn(1L);
+        when(reviewStatusCountPort.countByOrgIdAndStatus(2L, "SUCCESS")).thenReturn(3L);
+        when(reviewStatusCountPort.countByOrgIdAndStatus(2L, "FAILED")).thenReturn(2L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(adminUser()));
+
+        AdminOrgAppService.OrgDetail detail = adminOrgAppService.getOrg(2L);
+
+        assertEquals(2L, detail.getId());
+        assertEquals(5L, detail.getProjectCount());
+        assertEquals(2L, detail.getTenderPackageCount());
+        assertEquals(4L, detail.getBidPackageCount());
+        assertEquals(10L, detail.getDocumentIndexSuccessCount());
+        assertEquals(1L, detail.getDocumentIndexFailedCount());
+        assertEquals(3L, detail.getReviewSuccessCount());
+        assertEquals(2L, detail.getReviewFailedCount());
     }
 
     @Test
@@ -213,7 +311,7 @@ class AdminOrgAppServiceTest {
         roles.add(RoleCode.TENDERER.name());
         UserAccount account = new UserAccount(
                 9L, 2L, "zhangsan", "hash", "张三", "13800138000",
-                "zhangsan@example.com", "ACTIVE", false, 0, Instant.now(), roles);
+                "zhangsan@example.com", "ACTIVE", false, 0, Instant.now(), Instant.now(), null, roles);
         when(userRepository.searchByOrgId(eq(2L), eq(""), eq(0), eq(20)))
                 .thenReturn(List.of(account));
         when(userRepository.countSearchByOrgId(eq(2L), eq(""))).thenReturn(1L);
@@ -238,6 +336,76 @@ class AdminOrgAppServiceTest {
     }
 
     @Test
+    void getOrgDeletedReturnsNotFound() {
+        when(orgRepository.findById(2L)).thenReturn(Optional.of(
+                org(2L, "ORG_X", "测试公司", "上海市", "DELETED")));
+
+        BizException ex = assertThrows(BizException.class,
+                () -> adminOrgAppService.getOrg(2L));
+        assertEquals(ErrorCode.NOT_FOUND, ex.errorCode());
+    }
+
+    @Test
+    void deleteOrgForbiddenForNormalAdmin() {
+        BizException ex = assertThrows(BizException.class,
+                () -> adminOrgAppService.deleteOrg(2L));
+        assertEquals(ErrorCode.FORBIDDEN, ex.errorCode());
+        verify(orgRepository, never()).updateStatus(anyLong(), anyString());
+    }
+
+    @Test
+    void deleteOrgSuccessBySuperAdmin() {
+        Set<String> roles = new HashSet<>();
+        roles.add(RoleCode.PLATFORM_ADMIN.name());
+        roles.add(RoleCode.PLATFORM_SUPER_ADMIN.name());
+        UserContext.set(new CurrentUser(1L, 1L, "admin", roles, 0, false));
+
+        when(orgRepository.findById(2L)).thenReturn(Optional.of(
+                org(2L, "ORG_X", "测试公司", "上海市", "ACTIVE")));
+        when(orgRepository.countUsersByOrgId(2L)).thenReturn(0L);
+        when(projectCountPort.countByOrgId(2L)).thenReturn(0L);
+        when(packageCountPort.countActiveByOrgIdAndType(2L, "")).thenReturn(0L);
+        when(documentCountPort.countActiveByOrgId(2L)).thenReturn(0L);
+        when(userRepository.bumpTokenVersionByOrgId(2L)).thenReturn(0);
+
+        adminOrgAppService.deleteOrg(2L);
+
+        verify(orgRepository).updateStatus(2L, "DELETED");
+        verify(userRepository).bumpTokenVersionByOrgId(2L);
+    }
+
+    @Test
+    void deleteOrgRejectWhenHasUsers() {
+        Set<String> roles = new HashSet<>();
+        roles.add(RoleCode.PLATFORM_SUPER_ADMIN.name());
+        UserContext.set(new CurrentUser(1L, 1L, "admin", roles, 0, false));
+
+        when(orgRepository.findById(2L)).thenReturn(Optional.of(
+                org(2L, "ORG_X", "测试公司", "上海市", "ACTIVE")));
+        when(orgRepository.countUsersByOrgId(2L)).thenReturn(1L);
+
+        BizException ex = assertThrows(BizException.class,
+                () -> adminOrgAppService.deleteOrg(2L));
+        assertEquals(ErrorCode.BAD_REQUEST, ex.errorCode());
+        verify(orgRepository, never()).updateStatus(anyLong(), anyString());
+    }
+
+    @Test
+    void deleteOrgRejectSystemOrg() {
+        Set<String> roles = new HashSet<>();
+        roles.add(RoleCode.PLATFORM_SUPER_ADMIN.name());
+        UserContext.set(new CurrentUser(1L, 1L, "admin", roles, 0, false));
+
+        when(orgRepository.findById(1L)).thenReturn(Optional.of(
+                org(1L, "SYSTEM", "系统组织", "系统", "ACTIVE")));
+
+        BizException ex = assertThrows(BizException.class,
+                () -> adminOrgAppService.deleteOrg(1L));
+        assertEquals(ErrorCode.BAD_REQUEST, ex.errorCode());
+        verify(orgRepository, never()).updateStatus(anyLong(), anyString());
+    }
+
+    @Test
     void nonAdminForbidden() {
         Set<String> roles = new HashSet<>();
         roles.add(RoleCode.BIDDER.name());
@@ -258,6 +426,6 @@ class AdminOrgAppServiceTest {
         Set<String> roles = new HashSet<>();
         roles.add(RoleCode.PLATFORM_ADMIN.name());
         return new UserAccount(1L, 1L, "admin", "hash", "平台管理员",
-                null, null, "ACTIVE", false, 0, Instant.now(), roles);
+                null, null, "ACTIVE", false, 0, Instant.now(), Instant.now(), null, roles);
     }
 }

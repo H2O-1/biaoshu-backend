@@ -1,5 +1,5 @@
 /**
- * 架构占位包。实现阶段在此按 domain / application / infrastructure 分包。
- * 详见 docs/02-模块划分与依赖.md
+ * AI 能力：切块、向量、LLM 客户端等。
+ * 业务经 Port 调用；本模块提供 Fake / 真实现，禁止倒挂依赖 project。
  */
 package com.bidding.ai;

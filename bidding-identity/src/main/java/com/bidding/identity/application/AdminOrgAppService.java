@@ -3,7 +3,11 @@ package com.bidding.identity.application;
 import com.bidding.common.api.PageResult;
 import com.bidding.common.error.BizException;
 import com.bidding.common.error.ErrorCode;
+import com.bidding.common.port.DocumentCountPort;
+import com.bidding.common.port.DocumentIndexCountPort;
+import com.bidding.common.port.PackageCountPort;
 import com.bidding.common.port.ProjectCountPort;
+import com.bidding.common.port.ReviewStatusCountPort;
 import com.bidding.common.security.CurrentUser;
 import com.bidding.common.security.UserContext;
 import com.bidding.identity.domain.model.Org;
@@ -23,7 +27,7 @@ import java.util.UUID;
 
 /**
  * 平台管理员：组织主数据 + 组织下账号二级列表。
- * 公司名称、编码创建后不可修改；本期不做删除。
+ * 编码创建后不可修改；名称与城市可改；逻辑删除仅超管。
  * 组织与账号分开：允许空组织，账号后续挂到组织下。
  */
 @Service
@@ -31,6 +35,13 @@ public class AdminOrgAppService {
 
     private static final String STATUS_ACTIVE = "ACTIVE";
     private static final String STATUS_DISABLED = "DISABLED";
+    private static final String STATUS_DELETED = "DELETED";
+    private static final String PACKAGE_TYPE_TENDER = "TENDER";
+    private static final String PACKAGE_TYPE_BID = "BID";
+    private static final String INDEX_SUCCESS = "SUCCESS";
+    private static final String INDEX_FAILED = "FAILED";
+    private static final String REVIEW_SUCCESS = "SUCCESS";
+    private static final String REVIEW_FAILED = "FAILED";
     private static final int MAX_NAME_LENGTH = 128;
     private static final int MAX_CITY_LENGTH = 64;
 
@@ -38,15 +49,27 @@ public class AdminOrgAppService {
     private final UserRepository userRepository;
     private final CityCatalog cityCatalog;
     private final ProjectCountPort projectCountPort;
+    private final PackageCountPort packageCountPort;
+    private final DocumentIndexCountPort documentIndexCountPort;
+    private final DocumentCountPort documentCountPort;
+    private final ReviewStatusCountPort reviewStatusCountPort;
 
     public AdminOrgAppService(OrgRepository orgRepository,
                               UserRepository userRepository,
                               CityCatalog cityCatalog,
-                              ProjectCountPort projectCountPort) {
+                              ProjectCountPort projectCountPort,
+                              PackageCountPort packageCountPort,
+                              DocumentIndexCountPort documentIndexCountPort,
+                              DocumentCountPort documentCountPort,
+                              ReviewStatusCountPort reviewStatusCountPort) {
         this.orgRepository = orgRepository;
         this.userRepository = userRepository;
         this.cityCatalog = cityCatalog;
         this.projectCountPort = projectCountPort;
+        this.packageCountPort = packageCountPort;
+        this.documentIndexCountPort = documentIndexCountPort;
+        this.documentCountPort = documentCountPort;
+        this.reviewStatusCountPort = reviewStatusCountPort;
     }
 
     /**
@@ -69,13 +92,39 @@ public class AdminOrgAppService {
         return toSummary(requireOrg(orgId));
     }
 
+    /**
+     * 编辑组织：可改公司名称、所在城市；编码不可改；系统组织不可改。
+     */
+    @Transactional
+    public OrgSummary updateOrg(long orgId, String name, String city) {
+        checkPlatformAdmin();
+        Org org = requireActiveOrDisabledOrg(orgId);
+        if (org.isSystem()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "系统组织不允许修改");
+        }
+
+        String safeName = normalizeName(name);
+        if (orgRepository.existsByNameExceptOrgId(safeName, orgId)) {
+            throw new BizException(ErrorCode.CONFLICT, "公司名称已存在");
+        }
+        String safeCity = normalizeCity(city);
+
+        orgRepository.updateNameAndCity(orgId, safeName, safeCity);
+        return toSummary(requireActiveOrDisabledOrg(orgId));
+    }
+
+    /**
+     * 组织分页列表。
+     * activeCount / disabledCount / pendingConfigCount 为全量统计，不受 name / city / status 筛选影响。
+     * pendingConfigCount：未删除且下属无未删除账号的组织数。
+     */
     @Transactional(readOnly = true)
-    public PageResult<OrgSummary> listOrgs(String nameKeyword, String city, String status,
-                                           int page, int size) {
+    public OrgPage listOrgs(String nameKeyword, String city, String status,
+                            int page, int size) {
         checkPlatformAdmin();
 
         int safePage = Math.max(page, 1);
-        int safeSize = Math.min(Math.max(size, 1), 100);
+        int safeSize = Math.min(Math.max(size, 1), 500);
         int offset = (safePage - 1) * safeSize;
 
         String nameKw = nameKeyword == null ? "" : nameKeyword.trim();
@@ -88,13 +137,46 @@ public class AdminOrgAppService {
             items.add(toSummary(org));
         }
         long total = orgRepository.countSearch(nameKw, cityKw, statusKw);
-        return new PageResult<>(items, total, safePage, safeSize);
+
+        OrgPage pageResult = new OrgPage();
+        pageResult.setItems(items);
+        pageResult.setTotal(total);
+        pageResult.setPage(safePage);
+        pageResult.setSize(safeSize);
+        pageResult.setActiveCount(orgRepository.countByStatus(STATUS_ACTIVE));
+        pageResult.setDisabledCount(orgRepository.countByStatus(STATUS_DISABLED));
+        pageResult.setPendingConfigCount(orgRepository.countPendingConfig());
+        return pageResult;
     }
 
     @Transactional(readOnly = true)
-    public OrgSummary getOrg(long orgId) {
+    public OrgDetail getOrg(long orgId) {
         checkPlatformAdmin();
-        return toSummary(requireOrg(orgId));
+        Org org = requireActiveOrDisabledOrg(orgId);
+        OrgSummary summary = toSummary(org);
+        OrgDetail detail = new OrgDetail();
+        detail.setId(summary.getId());
+        detail.setCode(summary.getCode());
+        detail.setName(summary.getName());
+        detail.setCity(summary.getCity());
+        detail.setStatus(summary.getStatus());
+        detail.setUserCount(summary.getUserCount());
+        detail.setProjectCount(summary.getProjectCount());
+        detail.setTenderPackageCount(summary.getTenderPackageCount());
+        detail.setBidPackageCount(summary.getBidPackageCount());
+        detail.setCreatedBy(summary.getCreatedBy());
+        detail.setCreatedByName(summary.getCreatedByName());
+        detail.setCreatedAt(summary.getCreatedAt());
+        detail.setUpdatedAt(summary.getUpdatedAt());
+        detail.setDocumentIndexSuccessCount(
+                documentIndexCountPort.countActiveByOrgIdAndIndexStatus(orgId, INDEX_SUCCESS));
+        detail.setDocumentIndexFailedCount(
+                documentIndexCountPort.countActiveByOrgIdAndIndexStatus(orgId, INDEX_FAILED));
+        detail.setReviewSuccessCount(
+                reviewStatusCountPort.countByOrgIdAndStatus(orgId, REVIEW_SUCCESS));
+        detail.setReviewFailedCount(
+                reviewStatusCountPort.countByOrgIdAndStatus(orgId, REVIEW_FAILED));
+        return detail;
     }
 
     /**
@@ -107,8 +189,8 @@ public class AdminOrgAppService {
                                                                     int page,
                                                                     int size) {
         checkPlatformAdmin();
-        // 组织不存在则 404；存在即可查（含 SYSTEM）
-        requireOrg(orgId);
+        // 组织不存在或已删除则 404；存在即可查（含 SYSTEM）
+        requireActiveOrDisabledOrg(orgId);
 
         int safePage = Math.max(page, 1);
         int safeSize = Math.min(Math.max(size, 1), 100);
@@ -118,7 +200,9 @@ public class AdminOrgAppService {
         List<UserAccount> accounts = userRepository.searchByOrgId(orgId, kw, offset, safeSize);
         List<AdminUserAppService.UserSummary> items = new ArrayList<>();
         for (UserAccount account : accounts) {
-            items.add(AdminUserAppService.UserSummary.from(account));
+            AdminUserAppService.UserSummary summary = AdminUserAppService.UserSummary.from(account);
+            summary.setCreatedByName(resolveCreatedByName(account.getCreatedBy()));
+            items.add(summary);
         }
         long total = userRepository.countSearchByOrgId(orgId, kw);
         return new PageResult<>(items, total, safePage, safeSize);
@@ -132,7 +216,7 @@ public class AdminOrgAppService {
     @Transactional
     public OrgSummary updateStatus(long orgId, String status) {
         checkPlatformAdmin();
-        Org org = requireOrg(orgId);
+        Org org = requireActiveOrDisabledOrg(orgId);
         if (org.isSystem()) {
             throw new BizException(ErrorCode.BAD_REQUEST, "系统组织不允许变更状态");
         }
@@ -146,18 +230,60 @@ public class AdminOrgAppService {
         if (becomingDisabled) {
             userRepository.bumpTokenVersionByOrgId(orgId);
         }
-        return toSummary(requireOrg(orgId));
+        return toSummary(requireActiveOrDisabledOrg(orgId));
+    }
+
+    /**
+     * 逻辑删除组织：仅超管；系统组织不可删；仍有用户/项目/标包/文件时禁止。
+     * 删除后吊销该组织下未删除用户会话。
+     */
+    @Transactional
+    public void deleteOrg(long orgId) {
+        CurrentUser operator = checkPlatformAdmin();
+        if (!operator.isPlatformSuperAdmin()) {
+            throw new BizException(ErrorCode.FORBIDDEN, "仅平台超级管理员可删除组织");
+        }
+        Org org = requireActiveOrDisabledOrg(orgId);
+        if (org.isSystem()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "系统组织不允许删除");
+        }
+
+        long userCount = orgRepository.countUsersByOrgId(orgId);
+        if (userCount > 0) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "组织下仍有用户，无法删除");
+        }
+        long projectCount = projectCountPort.countByOrgId(orgId);
+        if (projectCount > 0) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "组织下仍有项目，无法删除");
+        }
+        // type 空串 = 不限类型（招标包 + 投标包）
+        long packageCount = packageCountPort.countActiveByOrgIdAndType(orgId, "");
+        if (packageCount > 0) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "组织下仍有标包，无法删除");
+        }
+        long documentCount = documentCountPort.countActiveByOrgId(orgId);
+        if (documentCount > 0) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "组织下仍有文件，无法删除");
+        }
+
+        orgRepository.updateStatus(orgId, STATUS_DELETED);
+        userRepository.bumpTokenVersionByOrgId(orgId);
     }
 
     private OrgSummary toSummary(Org org) {
+        long orgId = org.getId();
         OrgSummary summary = new OrgSummary();
-        summary.setId(org.getId());
+        summary.setId(orgId);
         summary.setCode(org.getCode());
         summary.setName(org.getName());
         summary.setCity(org.getCity());
         summary.setStatus(org.getStatus());
-        summary.setUserCount(orgRepository.countUsersByOrgId(org.getId()));
-        summary.setProjectCount(projectCountPort.countByOrgId(org.getId()));
+        summary.setUserCount(orgRepository.countUsersByOrgId(orgId));
+        summary.setProjectCount(projectCountPort.countByOrgId(orgId));
+        summary.setTenderPackageCount(
+                packageCountPort.countActiveByOrgIdAndType(orgId, PACKAGE_TYPE_TENDER));
+        summary.setBidPackageCount(
+                packageCountPort.countActiveByOrgIdAndType(orgId, PACKAGE_TYPE_BID));
         summary.setCreatedBy(org.getCreatedBy());
         summary.setCreatedByName(resolveCreatedByName(org.getCreatedBy()));
         summary.setCreatedAt(org.getCreatedAt());
@@ -174,6 +300,14 @@ public class AdminOrgAppService {
             return null;
         }
         return optionalUser.get().getDisplayName();
+    }
+
+    private Org requireActiveOrDisabledOrg(long orgId) {
+        Optional<Org> optionalOrg = orgRepository.findById(orgId);
+        if (optionalOrg.isEmpty() || optionalOrg.get().isDeleted()) {
+            throw new BizException(ErrorCode.NOT_FOUND, "组织不存在");
+        }
+        return optionalOrg.get();
     }
 
     private Org requireOrg(long orgId) {
@@ -270,6 +404,8 @@ public class AdminOrgAppService {
         private String status;
         private long userCount;
         private long projectCount;
+        private long tenderPackageCount;
+        private long bidPackageCount;
         private Long createdBy;
         private String createdByName;
         private Instant createdAt;
@@ -331,6 +467,22 @@ public class AdminOrgAppService {
             this.projectCount = projectCount;
         }
 
+        public long getTenderPackageCount() {
+            return tenderPackageCount;
+        }
+
+        public void setTenderPackageCount(long tenderPackageCount) {
+            this.tenderPackageCount = tenderPackageCount;
+        }
+
+        public long getBidPackageCount() {
+            return bidPackageCount;
+        }
+
+        public void setBidPackageCount(long bidPackageCount) {
+            this.bidPackageCount = bidPackageCount;
+        }
+
         public Long getCreatedBy() {
             return createdBy;
         }
@@ -361,6 +513,115 @@ public class AdminOrgAppService {
 
         public void setUpdatedAt(Instant updatedAt) {
             this.updatedAt = updatedAt;
+        }
+    }
+
+    /** 组织分页（含全量正常/停用/待配置计数）。 */
+    public static class OrgPage {
+        private List<OrgSummary> items = new ArrayList<>();
+        private long total;
+        private int page;
+        private int size;
+        private long activeCount;
+        private long disabledCount;
+        private long pendingConfigCount;
+
+        public List<OrgSummary> getItems() {
+            return items;
+        }
+
+        public void setItems(List<OrgSummary> items) {
+            this.items = items;
+        }
+
+        public long getTotal() {
+            return total;
+        }
+
+        public void setTotal(long total) {
+            this.total = total;
+        }
+
+        public int getPage() {
+            return page;
+        }
+
+        public void setPage(int page) {
+            this.page = page;
+        }
+
+        public int getSize() {
+            return size;
+        }
+
+        public void setSize(int size) {
+            this.size = size;
+        }
+
+        public long getActiveCount() {
+            return activeCount;
+        }
+
+        public void setActiveCount(long activeCount) {
+            this.activeCount = activeCount;
+        }
+
+        public long getDisabledCount() {
+            return disabledCount;
+        }
+
+        public void setDisabledCount(long disabledCount) {
+            this.disabledCount = disabledCount;
+        }
+
+        public long getPendingConfigCount() {
+            return pendingConfigCount;
+        }
+
+        public void setPendingConfigCount(long pendingConfigCount) {
+            this.pendingConfigCount = pendingConfigCount;
+        }
+    }
+
+    /**
+     * 组织详情：摘要字段 + 解析/审查统计（仅详情接口）。
+     */
+    public static class OrgDetail extends OrgSummary {
+        private long documentIndexSuccessCount;
+        private long documentIndexFailedCount;
+        private long reviewSuccessCount;
+        private long reviewFailedCount;
+
+        public long getDocumentIndexSuccessCount() {
+            return documentIndexSuccessCount;
+        }
+
+        public void setDocumentIndexSuccessCount(long documentIndexSuccessCount) {
+            this.documentIndexSuccessCount = documentIndexSuccessCount;
+        }
+
+        public long getDocumentIndexFailedCount() {
+            return documentIndexFailedCount;
+        }
+
+        public void setDocumentIndexFailedCount(long documentIndexFailedCount) {
+            this.documentIndexFailedCount = documentIndexFailedCount;
+        }
+
+        public long getReviewSuccessCount() {
+            return reviewSuccessCount;
+        }
+
+        public void setReviewSuccessCount(long reviewSuccessCount) {
+            this.reviewSuccessCount = reviewSuccessCount;
+        }
+
+        public long getReviewFailedCount() {
+            return reviewFailedCount;
+        }
+
+        public void setReviewFailedCount(long reviewFailedCount) {
+            this.reviewFailedCount = reviewFailedCount;
         }
     }
 }

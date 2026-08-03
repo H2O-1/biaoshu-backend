@@ -42,7 +42,7 @@ public class SecurityConfig {
         http.authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/auth/login", "/actuator/health", "/error").permitAll()
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                .requestMatchers("/api/admin/**").hasRole("PLATFORM_ADMIN")
+                .requestMatchers("/api/admin/**").hasAnyRole("PLATFORM_ADMIN", "PLATFORM_SUPER_ADMIN")
                 .anyRequest().authenticated()
         );
 

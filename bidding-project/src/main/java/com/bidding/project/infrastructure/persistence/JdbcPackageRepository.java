@@ -8,6 +8,7 @@ import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
 
+import java.math.BigDecimal;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.sql.Timestamp;
@@ -23,7 +24,8 @@ import java.util.Optional;
 public class JdbcPackageRepository implements PackageRepository {
 
     private static final String PACKAGE_COLUMNS =
-            "id, org_id, project_id, type, name, contact_name, contact_phone, status, "
+            "id, org_id, project_id, type, name, contact_name, contact_phone, "
+                    + "company_address, price_with_tax, tax_rate, price_without_tax, status, "
                     + "created_by, created_at, updated_at";
 
     private final JdbcTemplate jdbcTemplate;
@@ -42,6 +44,10 @@ public class JdbcPackageRepository implements PackageRepository {
                 rs.getString("name"),
                 rs.getString("contact_name"),
                 rs.getString("contact_phone"),
+                rs.getString("company_address"),
+                rs.getBigDecimal("price_with_tax"),
+                rs.getBigDecimal("tax_rate"),
+                rs.getBigDecimal("price_without_tax"),
                 rs.getString("status"),
                 rs.getLong("created_by"),
                 toInstant(rs.getTimestamp("created_at")),
@@ -141,14 +147,19 @@ public class JdbcPackageRepository implements PackageRepository {
                        String name,
                        String contactName,
                        String contactPhone,
+                       String companyAddress,
+                       BigDecimal priceWithTax,
+                       BigDecimal taxRate,
+                       BigDecimal priceWithoutTax,
                        String status,
                        long createdBy) {
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(con -> {
             PreparedStatement ps = con.prepareStatement(
                     "INSERT INTO biz_package(org_id, project_id, type, name, contact_name, contact_phone, "
+                            + "company_address, price_with_tax, tax_rate, price_without_tax, "
                             + "status, created_by, created_at, updated_at) "
-                            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
                     Statement.RETURN_GENERATED_KEYS
             );
             ps.setLong(1, orgId);
@@ -159,18 +170,14 @@ public class JdbcPackageRepository implements PackageRepository {
             }
             ps.setString(3, type);
             ps.setString(4, name);
-            if (contactName == null) {
-                ps.setNull(5, Types.VARCHAR);
-            } else {
-                ps.setString(5, contactName);
-            }
-            if (contactPhone == null) {
-                ps.setNull(6, Types.VARCHAR);
-            } else {
-                ps.setString(6, contactPhone);
-            }
-            ps.setString(7, status);
-            ps.setLong(8, createdBy);
+            setNullableString(ps, 5, contactName);
+            setNullableString(ps, 6, contactPhone);
+            setNullableString(ps, 7, companyAddress);
+            setNullableDecimal(ps, 8, priceWithTax);
+            setNullableDecimal(ps, 9, taxRate);
+            setNullableDecimal(ps, 10, priceWithoutTax);
+            ps.setString(11, status);
+            ps.setLong(12, createdBy);
             return ps;
         }, keyHolder);
 
@@ -196,11 +203,21 @@ public class JdbcPackageRepository implements PackageRepository {
     }
 
     @Override
-    public void updateBidInfo(long packageId, String name, String contactName, String contactPhone) {
+    public void updateBidInfo(long packageId,
+                              String name,
+                              String contactName,
+                              String contactPhone,
+                              String companyAddress,
+                              BigDecimal priceWithTax,
+                              BigDecimal taxRate,
+                              BigDecimal priceWithoutTax) {
         jdbcTemplate.update(
                 "UPDATE biz_package SET name = ?, contact_name = ?, contact_phone = ?, "
+                        + "company_address = ?, price_with_tax = ?, tax_rate = ?, price_without_tax = ?, "
                         + "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                name, contactName, contactPhone, packageId
+                name, contactName, contactPhone,
+                companyAddress, priceWithTax, taxRate, priceWithoutTax,
+                packageId
         );
     }
 
@@ -257,6 +274,24 @@ public class JdbcPackageRepository implements PackageRepository {
                 projectId, type
         );
         return count == null ? 0 : count;
+    }
+
+    private static void setNullableString(PreparedStatement ps, int index, String value)
+            throws java.sql.SQLException {
+        if (value == null) {
+            ps.setNull(index, Types.VARCHAR);
+        } else {
+            ps.setString(index, value);
+        }
+    }
+
+    private static void setNullableDecimal(PreparedStatement ps, int index, BigDecimal value)
+            throws java.sql.SQLException {
+        if (value == null) {
+            ps.setNull(index, Types.NUMERIC);
+        } else {
+            ps.setBigDecimal(index, value);
+        }
     }
 
     private static Instant toInstant(Timestamp ts) {

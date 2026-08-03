@@ -23,6 +23,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
+import java.time.Instant;
 
 /**
  * 平台管理员业务：查角色、查用户、创建用户、改角色、重置密码、停用/删除。
@@ -76,7 +77,7 @@ public class AdminUserAppService {
         List<UserAccount> accounts = userRepository.search(kw, offset, safeSize);
         List<UserSummary> items = new ArrayList<>();
         for (UserAccount account : accounts) {
-            items.add(UserSummary.from(account));
+            items.add(toSummary(account));
         }
         long total = userRepository.countSearch(kw);
         return new PageResult<>(items, total, safePage, safeSize);
@@ -85,7 +86,53 @@ public class AdminUserAppService {
     @Transactional(readOnly = true)
     public UserSummary getUser(long userId) {
         checkPlatformAdmin();
-        return UserSummary.from(requireUser(userId));
+        return toSummary(requireUser(userId));
+    }
+
+    /**
+     * 平台方账号分页列表（仅 PLATFORM_ADMIN / PLATFORM_SUPER_ADMIN，排除已删除）。
+     * status 可筛 ACTIVE / DISABLED；空=全部。
+     * activeCount / disabledCount 为全量平台账号统计，不受 keyword / status 影响。
+     */
+    @Transactional(readOnly = true)
+    public PlatformAdminPage listPlatformAdmins(String keyword, String status, int page, int size) {
+        checkPlatformAdmin();
+
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), 100);
+        int offset = (safePage - 1) * safeSize;
+        String kw = keyword == null ? "" : keyword.trim();
+        String statusKw = normalizeStatusFilter(status);
+
+        List<UserAccount> accounts = userRepository.searchPlatformAdmins(kw, statusKw, offset, safeSize);
+        List<UserSummary> items = new ArrayList<>();
+        for (UserAccount account : accounts) {
+            items.add(toSummary(account));
+        }
+        long total = userRepository.countPlatformAdmins(kw, statusKw);
+
+        PlatformAdminPage pageResult = new PlatformAdminPage();
+        pageResult.setItems(items);
+        pageResult.setTotal(total);
+        pageResult.setPage(safePage);
+        pageResult.setSize(safeSize);
+        pageResult.setActiveCount(userRepository.countPlatformAdminsByStatus(STATUS_ACTIVE));
+        pageResult.setDisabledCount(userRepository.countPlatformAdminsByStatus(STATUS_DISABLED));
+        return pageResult;
+    }
+
+    /**
+     * 平台方账号详情。
+     */
+    @Transactional(readOnly = true)
+    public UserSummary getPlatformAdmin(long userId) {
+        checkPlatformAdmin();
+        UserAccount account = requireUser(userId);
+        if (STATUS_DELETED.equalsIgnoreCase(account.getStatus())
+                || !account.isPlatformAdminAccount()) {
+            throw new BizException(ErrorCode.NOT_FOUND, "平台账号不存在");
+        }
+        return toSummary(account);
     }
 
     /**
@@ -99,13 +146,13 @@ public class AdminUserAppService {
                                   String phone,
                                   String email,
                                   List<String> roleCodes) {
-        checkPlatformAdmin();
+        CurrentUser operator = checkPlatformAdmin();
 
         if (orgId <= 0) {
             throw new BizException(ErrorCode.BAD_REQUEST, "orgId 不合法");
         }
         Optional<Org> optionalOrg = orgRepository.findById(orgId);
-        if (optionalOrg.isEmpty()) {
+        if (optionalOrg.isEmpty() || optionalOrg.get().isDeleted()) {
             throw new BizException(ErrorCode.BAD_REQUEST, "组织不存在");
         }
         if (!optionalOrg.get().isActive()) {
@@ -130,15 +177,103 @@ public class AdminUserAppService {
         String safeDisplayName = normalizeDisplayName(displayName);
         PasswordPolicy.validateNewPassword(password);
         Set<String> roles = checkAndNormalizeRoles(roleCodes);
+        applySuperAdminRoleRules(operator, Set.of(), roles);
 
         String passwordHash = passwordEncoder.encode(password);
         // 新建账号一律强制首次改密
         long userId = userRepository.insert(
                 orgId, safeUsername, passwordHash, safeDisplayName, safePhone, safeEmail,
-                STATUS_ACTIVE, true);
+                STATUS_ACTIVE, true, operator.getUserId());
+        userRepository.replaceRoles(userId, roles);
+        if (roles.contains(RoleCode.PLATFORM_SUPER_ADMIN.name())) {
+            revokeOtherSuperAdmins(userId);
+        }
+
+        return toSummary(requireUser(userId));
+    }
+
+    /**
+     * 创建平台管理员：固定挂系统组织，角色固定 PLATFORM_ADMIN；手机号/邮箱为空。
+     * 任意平台管理员（含超管）可调用。
+     */
+    @Transactional
+    public UserSummary createPlatformAdmin(String username, String password, String displayName) {
+        CurrentUser operator = checkPlatformAdmin();
+
+        Optional<Long> optionalOrgId = orgRepository.findSystemOrgId();
+        if (optionalOrgId.isEmpty()) {
+            throw new BizException(ErrorCode.INTERNAL, "缺少系统组织");
+        }
+        long orgId = optionalOrgId.get();
+        Optional<Org> optionalOrg = orgRepository.findById(orgId);
+        if (optionalOrg.isEmpty() || optionalOrg.get().isDeleted() || !optionalOrg.get().isActive()) {
+            throw new BizException(ErrorCode.INTERNAL, "系统组织不可用");
+        }
+
+        String safeUsername = normalizeUsername(username);
+        if (userRepository.existsByUsername(safeUsername)) {
+            throw new BizException(ErrorCode.CONFLICT, "用户名已存在");
+        }
+
+        String safeDisplayName = normalizeDisplayName(displayName);
+        PasswordPolicy.validateNewPassword(password);
+
+        Set<String> roles = new HashSet<>();
+        roles.add(RoleCode.PLATFORM_ADMIN.name());
+
+        String passwordHash = passwordEncoder.encode(password);
+        long userId = userRepository.insert(
+                orgId, safeUsername, passwordHash, safeDisplayName, null, null,
+                STATUS_ACTIVE, true, operator.getUserId());
         userRepository.replaceRoles(userId, roles);
 
-        return UserSummary.from(requireUser(userId));
+        return toSummary(requireUser(userId));
+    }
+
+    /**
+     * 修改指定招标方组织下招标方账号的负责人姓名、手机号、邮箱（均必填）。
+     * 不改公司名称、城市、登录账号。
+     */
+    @Transactional
+    public UserSummary updateTendererProfile(long orgId,
+                                             long userId,
+                                             String displayName,
+                                             String phone,
+                                             String email) {
+        checkPlatformAdmin();
+
+        Optional<Org> optionalOrg = orgRepository.findById(orgId);
+        if (optionalOrg.isEmpty() || optionalOrg.get().isDeleted()) {
+            throw new BizException(ErrorCode.NOT_FOUND, "组织不存在");
+        }
+        Org org = optionalOrg.get();
+        if (org.isSystem()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "系统组织下账号请使用其他管理接口");
+        }
+
+        UserAccount target = requireUser(userId);
+        if (STATUS_DELETED.equalsIgnoreCase(target.getStatus())) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "已删除账号不能修改资料");
+        }
+        if (target.getOrgId() != orgId) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "用户不属于该组织");
+        }
+        if (!target.getRoleCodes().contains(RoleCode.TENDERER.name())) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "仅可修改招标方账号资料");
+        }
+
+        String safeDisplayName = normalizeDisplayName(displayName);
+        String safePhone = normalizePhone(phone);
+        if (userRepository.existsByPhoneExceptUserId(safePhone, userId)) {
+            throw new BizException(ErrorCode.CONFLICT, "手机号已存在");
+        }
+        String safeEmail = normalizeEmail(email);
+        if (userRepository.existsByEmailExceptUserId(safeEmail, userId)) {
+            throw new BizException(ErrorCode.CONFLICT, "邮箱已存在");
+        }
+
+        userRepository.updateProfile(userId, safeDisplayName, safePhone, safeEmail);
+        return toSummary(requireUser(userId));
     }
 
     /**
@@ -150,23 +285,27 @@ public class AdminUserAppService {
 
         UserAccount target = requireUser(userId);
         Set<String> nextRoles = checkAndNormalizeRoles(roleCodes);
+        applySuperAdminRoleRules(operator, target.getRoleCodes(), nextRoles);
 
-        boolean removingOwnAdmin = operator.getUserId() == userId
-                && operator.isPlatformAdmin()
-                && !nextRoles.contains(RoleCode.PLATFORM_ADMIN.name());
-        boolean wasAdmin = target.getRoleCodes().contains(RoleCode.PLATFORM_ADMIN.name());
-        boolean willBeAdmin = nextRoles.contains(RoleCode.PLATFORM_ADMIN.name());
+        boolean wasAdmin = target.getRoleCodes().contains(RoleCode.PLATFORM_ADMIN.name())
+                || target.getRoleCodes().contains(RoleCode.PLATFORM_SUPER_ADMIN.name());
+        boolean willBeAdmin = nextRoles.contains(RoleCode.PLATFORM_ADMIN.name())
+                || nextRoles.contains(RoleCode.PLATFORM_SUPER_ADMIN.name());
 
-        if ((removingOwnAdmin || (wasAdmin && !willBeAdmin))
-                && userRepository.countUsersWithRole(RoleCode.PLATFORM_ADMIN.name()) <= 1) {
+        if (wasAdmin && !willBeAdmin
+                && countEffectivePlatformAdmins() <= 1) {
             throw new BizException(ErrorCode.CONFLICT, "系统至少保留一名平台管理员");
         }
 
         userRepository.replaceRoles(userId, nextRoles);
+        if (nextRoles.contains(RoleCode.PLATFORM_SUPER_ADMIN.name())
+                && !target.getRoleCodes().contains(RoleCode.PLATFORM_SUPER_ADMIN.name())) {
+            revokeOtherSuperAdmins(userId);
+        }
         // 角色变化后旧 Token 立即失效
         userRepository.bumpTokenVersion(userId);
 
-        return UserSummary.from(requireUser(userId));
+        return toSummary(requireUser(userId));
     }
 
     /**
@@ -200,7 +339,7 @@ public class AdminUserAppService {
      */
     @Transactional
     public UserSummary updateStatus(long userId, String status) {
-        CurrentUser operator = checkPlatformAdmin();
+        checkPlatformAdmin();
         UserAccount target = requireUser(userId);
 
         String next = normalizeActiveOrDisabled(status);
@@ -209,14 +348,15 @@ public class AdminUserAppService {
         }
 
         if (STATUS_DISABLED.equals(next)) {
-            ensureNotLastPlatformAdmin(operator, target);
+            ensureNotLastPlatformAdmin(target);
+            ensureNotLastSuperAdmin(target);
         }
 
         userRepository.updateStatus(userId, next);
         if (STATUS_DISABLED.equals(next)) {
             userRepository.bumpTokenVersion(userId);
         }
-        return UserSummary.from(requireUser(userId));
+        return toSummary(requireUser(userId));
     }
 
     /**
@@ -224,31 +364,97 @@ public class AdminUserAppService {
      */
     @Transactional
     public void deleteUser(long userId) {
-        CurrentUser operator = checkPlatformAdmin();
+        checkPlatformAdmin();
         UserAccount target = requireUser(userId);
 
         if (STATUS_DELETED.equalsIgnoreCase(target.getStatus())) {
             return;
         }
-        ensureNotLastPlatformAdmin(operator, target);
+        ensureNotLastPlatformAdmin(target);
+        ensureNotLastSuperAdmin(target);
 
         userRepository.updateStatus(userId, STATUS_DELETED);
         userRepository.bumpTokenVersion(userId);
     }
 
-    private void ensureNotLastPlatformAdmin(CurrentUser operator, UserAccount target) {
-        boolean isAdmin = target.getRoleCodes().contains(RoleCode.PLATFORM_ADMIN.name());
+    private void ensureNotLastPlatformAdmin(UserAccount target) {
+        boolean isAdmin = target.getRoleCodes().contains(RoleCode.PLATFORM_ADMIN.name())
+                || target.getRoleCodes().contains(RoleCode.PLATFORM_SUPER_ADMIN.name());
         if (!isAdmin) {
             return;
         }
-        if (userRepository.countUsersWithRole(RoleCode.PLATFORM_ADMIN.name()) <= 1) {
+        if (countEffectivePlatformAdmins() <= 1) {
             throw new BizException(ErrorCode.CONFLICT, "系统至少保留一名平台管理员");
         }
-        // 不允许把自己停用/删掉导致无人可管（上面已拦最后一个；这里再拦「操作自己且只剩自己」已覆盖）
-        if (operator.getUserId() == target.getId()
-                && userRepository.countUsersWithRole(RoleCode.PLATFORM_ADMIN.name()) <= 1) {
-            throw new BizException(ErrorCode.CONFLICT, "系统至少保留一名平台管理员");
+    }
+
+    private void ensureNotLastSuperAdmin(UserAccount target) {
+        if (!target.getRoleCodes().contains(RoleCode.PLATFORM_SUPER_ADMIN.name())) {
+            return;
         }
+        if (userRepository.countUsersWithRole(RoleCode.PLATFORM_SUPER_ADMIN.name()) <= 1) {
+            throw new BizException(ErrorCode.CONFLICT, "系统至少保留一名平台超级管理员");
+        }
+    }
+
+    /**
+     * 超管全局唯一：仅现任超管可授予/摘除 PLATFORM_SUPER_ADMIN；
+     * 授予时自动附带 PLATFORM_ADMIN。
+     */
+    private void applySuperAdminRoleRules(CurrentUser operator,
+                                          Set<String> currentRoles,
+                                          Set<String> nextRoles) {
+        boolean wasSuper = currentRoles.contains(RoleCode.PLATFORM_SUPER_ADMIN.name());
+        boolean willBeSuper = nextRoles.contains(RoleCode.PLATFORM_SUPER_ADMIN.name());
+
+        if (wasSuper == willBeSuper) {
+            return;
+        }
+        if (!operator.isPlatformSuperAdmin()) {
+            throw new BizException(ErrorCode.FORBIDDEN, "仅平台超级管理员可变更超管角色");
+        }
+        if (wasSuper && !willBeSuper
+                && userRepository.countUsersWithRole(RoleCode.PLATFORM_SUPER_ADMIN.name()) <= 1) {
+            throw new BizException(ErrorCode.CONFLICT, "系统至少保留一名平台超级管理员");
+        }
+        if (willBeSuper) {
+            // 超管同时具备普管能力
+            nextRoles.add(RoleCode.PLATFORM_ADMIN.name());
+        }
+    }
+
+    /**
+     * 将 PLATFORM_SUPER_ADMIN 从除 keepUserId 外的所有账号上摘掉，并吊销其会话。
+     */
+    private void revokeOtherSuperAdmins(long keepUserId) {
+        List<Long> holderIds = userRepository.listUserIdsWithRole(
+                RoleCode.PLATFORM_SUPER_ADMIN.name());
+        for (Long holderId : holderIds) {
+            if (holderId == null || holderId == keepUserId) {
+                continue;
+            }
+            Optional<UserAccount> optionalHolder = userRepository.findById(holderId);
+            if (optionalHolder.isEmpty()) {
+                continue;
+            }
+            UserAccount holder = optionalHolder.get();
+            Set<String> roles = new HashSet<>(holder.getRoleCodes());
+            if (!roles.remove(RoleCode.PLATFORM_SUPER_ADMIN.name())) {
+                continue;
+            }
+            if (roles.isEmpty()) {
+                roles.add(RoleCode.PLATFORM_ADMIN.name());
+            }
+            userRepository.replaceRoles(holder.getId(), roles);
+            userRepository.bumpTokenVersion(holder.getId());
+        }
+    }
+
+    /** 未删除账号中，具备平台管理能力（普管或超管）的去重人数。 */
+    private long countEffectivePlatformAdmins() {
+        return userRepository.countDistinctActiveUsersWithAnyRole(List.of(
+                RoleCode.PLATFORM_ADMIN.name(),
+                RoleCode.PLATFORM_SUPER_ADMIN.name()));
     }
 
     private UserAccount requireUser(long userId) {
@@ -314,6 +520,17 @@ public class AdminUserAppService {
         return trimmed;
     }
 
+    private String normalizeStatusFilter(String status) {
+        if (status == null || status.trim().isEmpty()) {
+            return "";
+        }
+        String normalized = status.trim().toUpperCase(Locale.ROOT);
+        if (!STATUS_ACTIVE.equals(normalized) && !STATUS_DISABLED.equals(normalized)) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "status 仅支持 ACTIVE 或 DISABLED");
+        }
+        return normalized;
+    }
+
     private String normalizeActiveOrDisabled(String status) {
         if (status == null || status.trim().isEmpty()) {
             throw new BizException(ErrorCode.BAD_REQUEST, "status 不能为空");
@@ -351,6 +568,81 @@ public class AdminUserAppService {
         return user;
     }
 
+    private UserSummary toSummary(UserAccount account) {
+        UserSummary summary = UserSummary.from(account);
+        summary.setCreatedByName(resolveCreatedByName(account.getCreatedBy()));
+        return summary;
+    }
+
+    private String resolveCreatedByName(Long createdBy) {
+        if (createdBy == null) {
+            return null;
+        }
+        Optional<UserAccount> optionalUser = userRepository.findById(createdBy);
+        if (optionalUser.isEmpty()) {
+            return null;
+        }
+        return optionalUser.get().getDisplayName();
+    }
+
+    /** 平台方账号分页（含全量正常/停用计数）。 */
+    public static class PlatformAdminPage {
+        private List<UserSummary> items = new ArrayList<>();
+        private long total;
+        private int page;
+        private int size;
+        private long activeCount;
+        private long disabledCount;
+
+        public List<UserSummary> getItems() {
+            return items;
+        }
+
+        public void setItems(List<UserSummary> items) {
+            this.items = items;
+        }
+
+        public long getTotal() {
+            return total;
+        }
+
+        public void setTotal(long total) {
+            this.total = total;
+        }
+
+        public int getPage() {
+            return page;
+        }
+
+        public void setPage(int page) {
+            this.page = page;
+        }
+
+        public int getSize() {
+            return size;
+        }
+
+        public void setSize(int size) {
+            this.size = size;
+        }
+
+        public long getActiveCount() {
+            return activeCount;
+        }
+
+        public void setActiveCount(long activeCount) {
+            this.activeCount = activeCount;
+        }
+
+        public long getDisabledCount() {
+            return disabledCount;
+        }
+
+        public void setDisabledCount(long disabledCount) {
+            this.disabledCount = disabledCount;
+        }
+    }
+
     /** 返回给前端的用户信息（没有密码） */
     public static class UserSummary {
         private long id;
@@ -362,6 +654,10 @@ public class AdminUserAppService {
         private String status;
         private boolean mustChangePassword;
         private Set<String> roleCodes;
+        private Long createdBy;
+        private String createdByName;
+        private Instant createdAt;
+        private Instant updatedAt;
 
         public static UserSummary from(UserAccount account) {
             UserSummary summary = new UserSummary();
@@ -374,6 +670,9 @@ public class AdminUserAppService {
             summary.status = account.getStatus();
             summary.mustChangePassword = account.isMustChangePassword();
             summary.roleCodes = new TreeSet<>(account.getRoleCodes());
+            summary.createdBy = account.getCreatedBy();
+            summary.createdAt = account.getCreatedAt();
+            summary.updatedAt = account.getUpdatedAt();
             return summary;
         }
 
@@ -411,6 +710,26 @@ public class AdminUserAppService {
 
         public Set<String> getRoleCodes() {
             return roleCodes;
+        }
+
+        public Long getCreatedBy() {
+            return createdBy;
+        }
+
+        public String getCreatedByName() {
+            return createdByName;
+        }
+
+        public void setCreatedByName(String createdByName) {
+            this.createdByName = createdByName;
+        }
+
+        public Instant getCreatedAt() {
+            return createdAt;
+        }
+
+        public Instant getUpdatedAt() {
+            return updatedAt;
         }
     }
 

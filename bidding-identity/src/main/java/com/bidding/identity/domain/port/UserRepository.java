@@ -27,15 +27,47 @@ public interface UserRepository {
 
     long countSearchByOrgId(long orgId, String keyword);
 
+    /**
+     * 平台方账号分页（角色含 PLATFORM_ADMIN 或 PLATFORM_SUPER_ADMIN，排除已删除）。
+     *
+     * @param status 空=全部未删除；ACTIVE / DISABLED
+     */
+    List<UserAccount> searchPlatformAdmins(String keyword, String status, int offset, int limit);
+
+    long countPlatformAdmins(String keyword, String status);
+
+    /**
+     * 平台方账号按状态计数（角色含 PLATFORM_ADMIN 或 PLATFORM_SUPER_ADMIN）。
+     *
+     * @param status ACTIVE / DISABLED 等
+     */
+    long countPlatformAdminsByStatus(String status);
+
     void replaceRoles(long userId, Set<String> roleCodes);
 
     long countUsersWithRole(String roleCode);
+
+    /**
+     * 拥有指定角色的用户 ID 列表（含已删除账号上的残留关联，调用方自行过滤）。
+     */
+    List<Long> listUserIdsWithRole(String roleCode);
+
+    /**
+     * 未删除用户中，拥有任一给定角色的去重人数。
+     */
+    long countDistinctActiveUsersWithAnyRole(List<String> roleCodes);
 
     boolean existsByUsername(String username);
 
     boolean existsByPhone(String phone);
 
     boolean existsByEmail(String email);
+
+    /** 手机号是否已被其他用户占用（排除指定用户）。 */
+    boolean existsByPhoneExceptUserId(String phone, long userId);
+
+    /** 邮箱是否已被其他用户占用（排除指定用户）。 */
+    boolean existsByEmailExceptUserId(String email, long userId);
 
     long insert(long orgId,
                 String username,
@@ -44,9 +76,13 @@ public interface UserRepository {
                 String phone,
                 String email,
                 String status,
-                boolean mustChangePassword);
+                boolean mustChangePassword,
+                Long createdBy);
 
     void updatePassword(long userId, String passwordHash, boolean mustChangePassword);
+
+    /** 更新负责人姓名、手机号、邮箱。 */
+    void updateProfile(long userId, String displayName, String phone, String email);
 
     void bumpTokenVersion(long userId);
 

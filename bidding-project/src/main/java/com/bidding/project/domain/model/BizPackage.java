@@ -1,5 +1,6 @@
 package com.bidding.project.domain.model;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 
 /**
@@ -17,6 +18,14 @@ public class BizPackage {
     private final String name;
     private final String contactName;
     private final String contactPhone;
+    /** 公司地址（仅投标包） */
+    private final String companyAddress;
+    /** 含税价格（仅投标包） */
+    private final BigDecimal priceWithTax;
+    /** 税率，如 13 表示 13%（仅投标包） */
+    private final BigDecimal taxRate;
+    /** 不含税价，前端算好传入（仅投标包） */
+    private final BigDecimal priceWithoutTax;
     private final String status;
     private final long createdBy;
     private final Instant createdAt;
@@ -29,6 +38,10 @@ public class BizPackage {
                       String name,
                       String contactName,
                       String contactPhone,
+                      String companyAddress,
+                      BigDecimal priceWithTax,
+                      BigDecimal taxRate,
+                      BigDecimal priceWithoutTax,
                       String status,
                       long createdBy,
                       Instant createdAt,
@@ -40,6 +53,10 @@ public class BizPackage {
         this.name = name;
         this.contactName = contactName;
         this.contactPhone = contactPhone;
+        this.companyAddress = companyAddress;
+        this.priceWithTax = priceWithTax;
+        this.taxRate = taxRate;
+        this.priceWithoutTax = priceWithoutTax;
         this.status = status;
         this.createdBy = createdBy;
         this.createdAt = createdAt;
@@ -72,6 +89,22 @@ public class BizPackage {
 
     public String getContactPhone() {
         return contactPhone;
+    }
+
+    public String getCompanyAddress() {
+        return companyAddress;
+    }
+
+    public BigDecimal getPriceWithTax() {
+        return priceWithTax;
+    }
+
+    public BigDecimal getTaxRate() {
+        return taxRate;
+    }
+
+    public BigDecimal getPriceWithoutTax() {
+        return priceWithoutTax;
     }
 
     public String getStatus() {

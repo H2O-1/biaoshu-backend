@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.math.BigDecimal;
 import java.util.Locale;
 
 /**
@@ -36,8 +37,7 @@ public class PackageController {
 
     /**
      * 创建标包。
-     * TENDER：只需 name（包名）。
-     * BID：name=公司名，另需 contactName / contactPhone。
+     * type 必填；name / contact 可空；name 空则自动生成。
      */
     @PostMapping
     public ApiResponse<PackageAppService.PackageSummary> create(
@@ -50,7 +50,11 @@ public class PackageController {
             return ApiResponse.ok(packageAppService.createBid(
                     request.getName(),
                     request.getContactName(),
-                    request.getContactPhone()
+                    request.getContactPhone(),
+                    request.getCompanyAddress(),
+                    request.getPriceWithTax(),
+                    request.getTaxRate(),
+                    request.getPriceWithoutTax()
             ));
         }
         throw new BizException(ErrorCode.BAD_REQUEST, "type 仅支持 TENDER 或 BID");
@@ -88,7 +92,11 @@ public class PackageController {
                     packageId,
                     request.getName(),
                     request.getContactName(),
-                    request.getContactPhone()
+                    request.getContactPhone(),
+                    request.getCompanyAddress(),
+                    request.getPriceWithTax(),
+                    request.getTaxRate(),
+                    request.getPriceWithoutTax()
             ));
         }
         throw new BizException(ErrorCode.BAD_REQUEST, "不支持的标包类型");
@@ -111,17 +119,29 @@ public class PackageController {
         @NotBlank
         private String type;
 
-        @NotBlank
         @Size(max = 128)
         private String name;
 
-        /** 投标包必填：负责人姓名 */
+        /** 投标包可选：负责人姓名 */
         @Size(max = 64)
         private String contactName;
 
-        /** 投标包必填：负责人电话 */
+        /** 投标包可选：负责人电话 */
         @Size(max = 32)
         private String contactPhone;
+
+        /** 投标包可选：公司地址 */
+        @Size(max = 256)
+        private String companyAddress;
+
+        /** 投标包可选：含税价格（前端传入） */
+        private BigDecimal priceWithTax;
+
+        /** 投标包可选：税率，如 13 表示 13% */
+        private BigDecimal taxRate;
+
+        /** 投标包可选：不含税价（前端计算后传入） */
+        private BigDecimal priceWithoutTax;
 
         public String getType() {
             return type;
@@ -154,6 +174,38 @@ public class PackageController {
         public void setContactPhone(String contactPhone) {
             this.contactPhone = contactPhone;
         }
+
+        public String getCompanyAddress() {
+            return companyAddress;
+        }
+
+        public void setCompanyAddress(String companyAddress) {
+            this.companyAddress = companyAddress;
+        }
+
+        public BigDecimal getPriceWithTax() {
+            return priceWithTax;
+        }
+
+        public void setPriceWithTax(BigDecimal priceWithTax) {
+            this.priceWithTax = priceWithTax;
+        }
+
+        public BigDecimal getTaxRate() {
+            return taxRate;
+        }
+
+        public void setTaxRate(BigDecimal taxRate) {
+            this.taxRate = taxRate;
+        }
+
+        public BigDecimal getPriceWithoutTax() {
+            return priceWithoutTax;
+        }
+
+        public void setPriceWithoutTax(BigDecimal priceWithoutTax) {
+            this.priceWithoutTax = priceWithoutTax;
+        }
     }
 
     public static class UpdatePackageRequest {
@@ -166,6 +218,15 @@ public class PackageController {
 
         @Size(max = 32)
         private String contactPhone;
+
+        @Size(max = 256)
+        private String companyAddress;
+
+        private BigDecimal priceWithTax;
+
+        private BigDecimal taxRate;
+
+        private BigDecimal priceWithoutTax;
 
         public String getName() {
             return name;
@@ -189,6 +250,38 @@ public class PackageController {
 
         public void setContactPhone(String contactPhone) {
             this.contactPhone = contactPhone;
+        }
+
+        public String getCompanyAddress() {
+            return companyAddress;
+        }
+
+        public void setCompanyAddress(String companyAddress) {
+            this.companyAddress = companyAddress;
+        }
+
+        public BigDecimal getPriceWithTax() {
+            return priceWithTax;
+        }
+
+        public void setPriceWithTax(BigDecimal priceWithTax) {
+            this.priceWithTax = priceWithTax;
+        }
+
+        public BigDecimal getTaxRate() {
+            return taxRate;
+        }
+
+        public void setTaxRate(BigDecimal taxRate) {
+            this.taxRate = taxRate;
+        }
+
+        public BigDecimal getPriceWithoutTax() {
+            return priceWithoutTax;
+        }
+
+        public void setPriceWithoutTax(BigDecimal priceWithoutTax) {
+            this.priceWithoutTax = priceWithoutTax;
         }
     }
 }

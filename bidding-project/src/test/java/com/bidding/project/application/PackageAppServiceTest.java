@@ -3,7 +3,9 @@ package com.bidding.project.application;
 import com.bidding.common.api.PageResult;
 import com.bidding.common.error.BizException;
 import com.bidding.common.error.ErrorCode;
+import com.bidding.common.port.DocumentCascadePort;
 import com.bidding.common.port.DocumentCountPort;
+import com.bidding.common.port.ProjectArtifactInvalidationPort;
 import com.bidding.common.security.CurrentUser;
 import com.bidding.common.security.UserContext;
 import com.bidding.project.domain.model.BizPackage;
@@ -43,6 +45,12 @@ class PackageAppServiceTest {
     @Mock
     private DocumentCountPort documentCountPort;
 
+    @Mock
+    private DocumentCascadePort documentCascadePort;
+
+    @Mock
+    private ProjectArtifactInvalidationPort projectArtifactInvalidationPort;
+
     @InjectMocks
     private PackageAppService packageAppService;
 
@@ -74,7 +82,8 @@ class PackageAppServiceTest {
         when(packageRepository.existsByOrgIdAndTypeAndName(
                 eq(2L), eq("TENDER"), eq("市政招标文件包"), isNull())).thenReturn(false);
         when(packageRepository.insert(eq(2L), isNull(), eq("TENDER"), eq("市政招标文件包"),
-                isNull(), isNull(), eq("ACTIVE"), eq(10L))).thenReturn(50L);
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                eq("ACTIVE"), eq(10L))).thenReturn(50L);
 
         BizPackage created = tender(50L, 2L, null, "市政招标文件包");
         when(packageRepository.findById(50L)).thenReturn(Optional.of(created));
@@ -98,7 +107,8 @@ class PackageAppServiceTest {
         assertEquals(ErrorCode.CONFLICT, ex.errorCode());
         verify(packageRepository, never()).insert(
                 anyLong(), isNull(), anyString(), anyString(),
-                isNull(), isNull(), anyString(), anyLong());
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                anyString(), anyLong());
     }
 
     @Test
@@ -106,14 +116,16 @@ class PackageAppServiceTest {
         when(packageRepository.existsByOrgIdAndTypeAndName(
                 eq(2L), eq("BID"), eq("华建集团"), isNull())).thenReturn(false);
         when(packageRepository.insert(eq(2L), isNull(), eq("BID"), eq("华建集团"),
-                eq("王五"), eq("13800001111"), eq("ACTIVE"), eq(10L))).thenReturn(60L);
+                eq("王五"), eq("13800001111"), isNull(), isNull(), isNull(), isNull(),
+                eq("ACTIVE"), eq(10L))).thenReturn(60L);
 
         BizPackage created = bid(60L, 2L, null, "华建集团");
         when(packageRepository.findById(60L)).thenReturn(Optional.of(created));
         when(documentCountPort.countActiveByPackageId(60L)).thenReturn(0L);
 
         PackageAppService.PackageSummary summary =
-                packageAppService.createBid("华建集团", "王五", "13800001111");
+                packageAppService.createBid("华建集团", "王五", "13800001111",
+                        null, null, null, null);
 
         assertEquals(60L, summary.getId());
         assertEquals("BID", summary.getType());
@@ -122,26 +134,88 @@ class PackageAppServiceTest {
     }
 
     @Test
+    void createTenderAutoNameWhenBlank() {
+        when(packageRepository.existsByOrgIdAndTypeAndName(
+                eq(2L), eq("TENDER"), anyString(), isNull())).thenReturn(false);
+        when(packageRepository.insert(eq(2L), isNull(), eq("TENDER"), anyString(),
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                eq("ACTIVE"), eq(10L))).thenReturn(52L);
+        when(packageRepository.findById(52L)).thenReturn(Optional.of(
+                tender(52L, 2L, null, "未命名-20260729-1351")));
+        when(documentCountPort.countActiveByPackageId(52L)).thenReturn(0L);
+
+        PackageAppService.PackageSummary summary = packageAppService.createTender("  ");
+
+        assertEquals(52L, summary.getId());
+        org.mockito.ArgumentCaptor<String> nameCaptor =
+                org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(packageRepository).insert(eq(2L), isNull(), eq("TENDER"), nameCaptor.capture(),
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                eq("ACTIVE"), eq(10L));
+        org.junit.jupiter.api.Assertions.assertTrue(nameCaptor.getValue().startsWith("未命名-"));
+    }
+
+    @Test
+    void createBidAllowsBlankContact() {
+        when(packageRepository.existsByOrgIdAndTypeAndName(
+                eq(2L), eq("BID"), eq("华建集团"), isNull())).thenReturn(false);
+        when(packageRepository.insert(eq(2L), isNull(), eq("BID"), eq("华建集团"),
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                eq("ACTIVE"), eq(10L))).thenReturn(61L);
+
+        BizPackage created = new BizPackage(61L, 2L, null, "BID", "华建集团",
+                null, null, null, null, null, null,
+                "ACTIVE", 10L, Instant.now(), Instant.now());
+        when(packageRepository.findById(61L)).thenReturn(Optional.of(created));
+        when(documentCountPort.countActiveByPackageId(61L)).thenReturn(0L);
+
+        PackageAppService.PackageSummary summary =
+                packageAppService.createBid("华建集团", "  ", null,
+                        null, null, null, null);
+
+        assertEquals(61L, summary.getId());
+        assertNull(summary.getContactName());
+        assertNull(summary.getContactPhone());
+    }
+
+    @Test
     void deleteBidAllowedWhenBound() {
         when(packageRepository.findById(60L)).thenReturn(Optional.of(
                 bid(60L, 2L, 100L, "华建集团")));
-        when(documentCountPort.countActiveByPackageId(60L)).thenReturn(0L);
+        when(projectArtifactInvalidationPort.hasActiveAiWork(100L)).thenReturn(false);
 
         packageAppService.delete(60L);
 
+        verify(documentCascadePort).softDeleteAllActiveByPackageId(60L);
+        verify(projectArtifactInvalidationPort).deleteReviewItemsByPackageId(100L, 60L);
+        verify(projectArtifactInvalidationPort).obsoleteReviewsByProjectId(
+                eq(100L), anyString());
         verify(packageRepository).updateStatus(60L, "DELETED");
     }
 
     @Test
-    void deleteRejectWhenHasFiles() {
-        when(packageRepository.findById(50L)).thenReturn(Optional.of(
-                tender(50L, 2L, null, "有文件的包")));
-        when(documentCountPort.countActiveByPackageId(50L)).thenReturn(2L);
+    void deleteBidCascadesFilesWhenHasFiles() {
+        when(packageRepository.findById(60L)).thenReturn(Optional.of(
+                bid(60L, 2L, 100L, "华建集团")));
+        when(projectArtifactInvalidationPort.hasActiveAiWork(100L)).thenReturn(false);
+
+        packageAppService.delete(60L);
+
+        verify(documentCascadePort).softDeleteAllActiveByPackageId(60L);
+        verify(packageRepository).updateStatus(60L, "DELETED");
+    }
+
+    @Test
+    void deleteBidRejectWhenReviewInProgress() {
+        when(packageRepository.findById(60L)).thenReturn(Optional.of(
+                bid(60L, 2L, 100L, "华建集团")));
+        when(projectArtifactInvalidationPort.hasActiveAiWork(100L)).thenReturn(true);
 
         BizException ex = assertThrows(BizException.class,
-                () -> packageAppService.delete(50L));
+                () -> packageAppService.delete(60L));
         assertEquals(ErrorCode.CONFLICT, ex.errorCode());
         verify(packageRepository, never()).updateStatus(anyLong(), anyString());
+        verify(documentCascadePort, never()).softDeleteAllActiveByPackageId(anyLong());
     }
 
     @Test
@@ -159,11 +233,13 @@ class PackageAppServiceTest {
     void deleteUnboundTenderSuccess() {
         when(packageRepository.findById(50L)).thenReturn(Optional.of(
                 tender(50L, 2L, null, "未绑包")));
-        when(documentCountPort.countActiveByPackageId(50L)).thenReturn(0L);
 
         packageAppService.delete(50L);
 
+        verify(documentCascadePort).softDeleteAllActiveByPackageId(50L);
         verify(packageRepository).updateStatus(50L, "DELETED");
+        verify(projectArtifactInvalidationPort, never())
+                .obsoleteReviewsByProjectId(anyLong(), anyString());
     }
 
     @Test
@@ -193,11 +269,13 @@ class PackageAppServiceTest {
 
     private static BizPackage tender(long id, long orgId, Long projectId, String name) {
         return new BizPackage(id, orgId, projectId, "TENDER", name,
-                null, null, "ACTIVE", 10L, Instant.now(), Instant.now());
+                null, null, null, null, null, null,
+                "ACTIVE", 10L, Instant.now(), Instant.now());
     }
 
     private static BizPackage bid(long id, long orgId, Long projectId, String name) {
         return new BizPackage(id, orgId, projectId, "BID", name,
-                "王五", "13800001111", "ACTIVE", 10L, Instant.now(), Instant.now());
+                "王五", "13800001111", null, null, null, null,
+                "ACTIVE", 10L, Instant.now(), Instant.now());
     }
 }

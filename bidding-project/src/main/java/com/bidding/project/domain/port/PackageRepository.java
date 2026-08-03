@@ -2,6 +2,7 @@ package com.bidding.project.domain.port;
 
 import com.bidding.project.domain.model.BizPackage;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 
@@ -39,13 +40,24 @@ public interface PackageRepository {
                 String name,
                 String contactName,
                 String contactPhone,
+                String companyAddress,
+                BigDecimal priceWithTax,
+                BigDecimal taxRate,
+                BigDecimal priceWithoutTax,
                 String status,
                 long createdBy);
 
     void updateName(long packageId, String name);
 
-    /** 更新投标包：公司名 + 负责人 + 电话 */
-    void updateBidInfo(long packageId, String name, String contactName, String contactPhone);
+    /** 更新投标包：公司名 / 联系人 / 地址 / 报价 */
+    void updateBidInfo(long packageId,
+                       String name,
+                       String contactName,
+                       String contactPhone,
+                       String companyAddress,
+                       BigDecimal priceWithTax,
+                       BigDecimal taxRate,
+                       BigDecimal priceWithoutTax);
 
     void updateStatus(long packageId, String status);
 

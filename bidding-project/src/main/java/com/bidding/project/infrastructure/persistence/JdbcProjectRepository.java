@@ -11,6 +11,7 @@ import org.springframework.stereotype.Repository;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.sql.Timestamp;
+import java.sql.Types;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -134,9 +135,9 @@ public class JdbcProjectRepository implements ProjectRepository {
             );
             ps.setLong(1, orgId);
             ps.setString(2, name);
-            ps.setString(3, agency);
-            ps.setString(4, projectType);
-            ps.setString(5, leaderName);
+            setNullableString(ps, 3, agency);
+            setNullableString(ps, 4, projectType);
+            setNullableString(ps, 5, leaderName);
             ps.setString(6, status);
             ps.setLong(7, createdBy);
             return ps;
@@ -184,6 +185,15 @@ public class JdbcProjectRepository implements ProjectRepository {
                 orgId
         );
         return count == null ? 0 : count;
+    }
+
+    private static void setNullableString(PreparedStatement ps, int index, String value)
+            throws java.sql.SQLException {
+        if (value == null) {
+            ps.setNull(index, Types.VARCHAR);
+        } else {
+            ps.setString(index, value);
+        }
     }
 
     private static Instant toInstant(Timestamp ts) {

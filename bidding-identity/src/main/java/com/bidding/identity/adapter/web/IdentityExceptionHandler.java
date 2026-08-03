@@ -11,6 +11,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 /**
  * 统一处理异常，转成 ApiResponse 返回给前端。
@@ -43,6 +44,14 @@ public class IdentityExceptionHandler {
         }
         return ResponseEntity.badRequest()
                 .body(ApiResponse.fail(ErrorCode.BAD_REQUEST.code(), message));
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMaxUpload(MaxUploadSizeExceededException ex) {
+        log.warn("上传超过大小限制: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
+                .body(ApiResponse.fail(ErrorCode.BAD_REQUEST.code(),
+                        "上传文件过大，单文件不超过 100MB（可用配置 UPLOAD_MAX_FILE_SIZE 调整）"));
     }
 
     @ExceptionHandler(Exception.class)

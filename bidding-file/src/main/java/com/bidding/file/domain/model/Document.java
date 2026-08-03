@@ -14,6 +14,7 @@ public class Document {
     private final String fileName;
     private final String contentType;
     private final String fileExt;
+    private final String fileType;
     private final long sizeBytes;
     private final String objectKey;
     private final String indexStatus;
@@ -29,6 +30,7 @@ public class Document {
                     String fileName,
                     String contentType,
                     String fileExt,
+                    String fileType,
                     long sizeBytes,
                     String objectKey,
                     String indexStatus,
@@ -43,6 +45,7 @@ public class Document {
         this.fileName = fileName;
         this.contentType = contentType;
         this.fileExt = fileExt;
+        this.fileType = fileType;
         this.sizeBytes = sizeBytes;
         this.objectKey = objectKey;
         this.indexStatus = indexStatus;
@@ -78,6 +81,10 @@ public class Document {
 
     public String getFileExt() {
         return fileExt;
+    }
+
+    public String getFileType() {
+        return fileType;
     }
 
     public long getSizeBytes() {

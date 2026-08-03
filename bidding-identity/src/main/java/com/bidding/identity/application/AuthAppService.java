@@ -50,8 +50,8 @@ public class AuthAppService {
         }
 
         Optional<Org> optionalOrg = orgRepository.findById(user.getOrgId());
-        if (optionalOrg.isEmpty() || !optionalOrg.get().isActive()) {
-            throw new BizException(ErrorCode.FORBIDDEN, "所属组织已停用");
+        if (optionalOrg.isEmpty() || optionalOrg.get().isDeleted() || !optionalOrg.get().isActive()) {
+            throw new BizException(ErrorCode.FORBIDDEN, "所属组织不可用");
         }
 
         if (!passwordEncoder.matches(password, user.getPasswordHash())) {

@@ -88,9 +88,11 @@ class DocumentFlowIT {
 
         MvcResult uploaded = mockMvc.perform(multipart("/api/packages/" + packageId + "/files")
                         .file(file)
+                        .param("fileType", "招标正文")
                         .header("Authorization", "Bearer " + tendererToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.fileName").value("招标文件.pdf"))
+                .andExpect(jsonPath("$.data.fileType").value("招标正文"))
                 .andExpect(jsonPath("$.data.indexStatus").value("PENDING"))
                 .andExpect(jsonPath("$.data.fileExt").value("pdf"))
                 .andReturn();
@@ -130,6 +132,7 @@ class DocumentFlowIT {
                 "xlsx-bytes".getBytes());
         MvcResult xlsxUploaded = mockMvc.perform(multipart("/api/packages/" + packageId + "/files")
                         .file(xlsx)
+                        .param("fileType", "报价表")
                         .header("Authorization", "Bearer " + tendererToken))
                 .andExpect(status().isOk())
                 .andReturn();
