@@ -1,1 +1,3 @@
+com\bidding\file\infrastructure\persistence\DocumentCascadePortAdapter.class
+com\bidding\file\infrastructure\persistence\DocumentProjectBindPortAdapter.class
 com\bidding\file\package-info.class

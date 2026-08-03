@@ -1,15 +1,60 @@
 package com.bidding.common.security;
 
-import java.util.Collections;
+import java.util.HashSet;
 import java.util.Set;
 
 /**
- * 请求上下文中的当前登录用户。平台级角色挂在账号上。
+ * 当前登录用户（从 JWT 解析，并可能用库中的最新状态补齐）。
  */
-public record CurrentUser(long userId, long orgId, String username, Set<String> roleCodes) {
+public class CurrentUser {
 
-    public CurrentUser {
-        roleCodes = roleCodes == null ? Set.of() : Collections.unmodifiableSet(Set.copyOf(roleCodes));
+    private final long userId;
+    private final long orgId;
+    private final String username;
+    private final Set<String> roleCodes;
+    private final int tokenVersion;
+    private final boolean mustChangePassword;
+
+    public CurrentUser(long userId,
+                       long orgId,
+                       String username,
+                       Set<String> roleCodes,
+                       int tokenVersion,
+                       boolean mustChangePassword) {
+        this.userId = userId;
+        this.orgId = orgId;
+        this.username = username;
+        this.tokenVersion = tokenVersion;
+        this.mustChangePassword = mustChangePassword;
+        if (roleCodes == null) {
+            this.roleCodes = new HashSet<>();
+        } else {
+            this.roleCodes = new HashSet<>(roleCodes);
+        }
+    }
+
+    public long getUserId() {
+        return userId;
+    }
+
+    public long getOrgId() {
+        return orgId;
+    }
+
+    public String getUsername() {
+        return username;
+    }
+
+    public Set<String> getRoleCodes() {
+        return roleCodes;
+    }
+
+    public int getTokenVersion() {
+        return tokenVersion;
+    }
+
+    public boolean isMustChangePassword() {
+        return mustChangePassword;
     }
 
     public boolean hasRole(String roleCode) {
@@ -17,6 +62,16 @@ public record CurrentUser(long userId, long orgId, String username, Set<String> 
     }
 
     public boolean isPlatformAdmin() {
-        return hasRole("PLATFORM_ADMIN");
+        return hasRole("PLATFORM_ADMIN") || hasRole("PLATFORM_SUPER_ADMIN");
+    }
+
+    /** 是否平台超级管理员（可删除组织等） */
+    public boolean isPlatformSuperAdmin() {
+        return hasRole("PLATFORM_SUPER_ADMIN");
+    }
+
+    /** 是否招标方（项目由招标方创建与管理） */
+    public boolean isTenderer() {
+        return hasRole("TENDERER");
     }
 }

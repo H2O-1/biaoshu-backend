@@ -1,5 +1,10 @@
 package com.bidding.common.security;
 
+/**
+ * 用 ThreadLocal 保存「当前请求」的登录用户。
+ * <p>
+ * 由 JwtAuthenticationFilter 在请求开始时 set，结束时 clear，避免线程复用串数据。
+ */
 public final class UserContext {
 
     private static final ThreadLocal<CurrentUser> HOLDER = new ThreadLocal<>();

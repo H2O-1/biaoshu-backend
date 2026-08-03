@@ -1,4 +1,0 @@
--------------------------------------------------------------------------------
-Test set: com.bidding.api.AdminRoleFlowIT
--------------------------------------------------------------------------------
-Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 4.017 s -- in com.bidding.api.AdminRoleFlowIT

@@ -2,8 +2,21 @@ server:
   port: ${SERVER_PORT:8080}
 
 spring:
+  # 本地可放 application-secret.yml（gitignore）写 api-key；发版用环境变量 DASHSCOPE_API_KEY
+  config:
+    import: optional:classpath:application-secret.yml
+  servlet:
+    multipart:
+      # 招标/投标 PDF 常较大；可用 UPLOAD_MAX_FILE_SIZE / UPLOAD_MAX_REQUEST_SIZE 覆盖
+      max-file-size: ${UPLOAD_MAX_FILE_SIZE:100MB}
+      max-request-size: ${UPLOAD_MAX_REQUEST_SIZE:110MB}
   application:
     name: bidding-api
+  task:
+    scheduling:
+      # INDEX / 清单 / 审查 / 一键审查 多个 Poller 共用，避免单线程互相饿死
+      pool:
+        size: ${SCHEDULING_POOL_SIZE:6}
   datasource:
     url: "${DB_URL:jdbc:postgresql://localhost:5432/bidding}"
     username: ${DB_USER:bidding}
@@ -13,6 +26,10 @@ spring:
     locations: classpath:db/migration
 
 bidding:
+  cors:
+    # 默认留空，由 CorsConfig 回退到 127.0.0.1:5186 / localhost:5186
+    # 不要写成 ${VAR:http://...}：冒号会导致默认值被截成 "http"
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:}
   jwt:
     secret: ${JWT_SECRET:}
     expire-seconds: ${JWT_EXPIRE_SECONDS:28800}
@@ -21,6 +38,88 @@ bidding:
     username: ${BOOTSTRAP_ADMIN_USERNAME:admin}
     password: ${BOOTSTRAP_ADMIN_PASSWORD:}
     display-name: 平台管理员
+  storage:
+    type: ${STORAGE_TYPE:memory}
+    s3:
+      endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+      access-key: ${MINIO_ACCESS_KEY:minioadmin}
+      secret-key: ${MINIO_SECRET_KEY:minioadmin}
+      bucket: ${MINIO_BUCKET:bidding-dev}
+      region: ${MINIO_REGION:us-east-1}
+  file:
+    # 业务校验上限，须 ≤ spring.servlet.multipart.max-file-size
+    max-size-bytes: ${UPLOAD_MAX_SIZE_BYTES:104857600}
+    max-files-per-package: 5
+  # INDEX：fake=假向量；real=百炼 text-embedding-v4
+  index:
+    mode: ${INDEX_MODE:real}
+    worker-enabled: ${INDEX_WORKER_ENABLED:true}
+    poll-ms: ${INDEX_POLL_MS:2000}
+    worker-id: ${INDEX_WORKER_ID:}
+    fake-chunk-count: ${INDEX_FAKE_CHUNK_COUNT:3}
+    embedding-dim: ${INDEX_EMBEDDING_DIM:8}
+    embedding:
+      base-url: ${EMBEDDING_BASE_URL:https://ws-jbb2t4ahvyzwxo9b.cn-beijing.maas.aliyuncs.com/compatible-mode/v1}
+      model: ${EMBEDDING_MODEL:text-embedding-v4}
+      dimensions: ${EMBEDDING_DIMENSIONS:1024}
+      batch-size: ${EMBEDDING_BATCH_SIZE:10}
+      connect-timeout-ms: ${EMBEDDING_CONNECT_TIMEOUT_MS:3000}
+      read-timeout-ms: ${EMBEDDING_READ_TIMEOUT_MS:120000}
+    chunk:
+      max-chars: ${INDEX_CHUNK_MAX_CHARS:2000}
+      fallback-window: ${INDEX_CHUNK_FALLBACK_WINDOW:500}
+      fallback-overlap: ${INDEX_CHUNK_FALLBACK_OVERLAP:50}
+  # 向量召回：debug-enabled 控制调试接口；发版请设 false
+  recall:
+    debug-enabled: ${RECALL_DEBUG:true}
+    default-top-k: ${RECALL_DEFAULT_TOP_K:40}
+  # 重排：qwen3-rerank（compatible-api，与 embedding 的 compatible-mode 不同）
+  rerank:
+    debug-enabled: ${RERANK_DEBUG:true}
+    base-url: ${RERANK_BASE_URL:https://ws-jbb2t4ahvyzwxo9b.cn-beijing.maas.aliyuncs.com/compatible-api/v1}
+    model: ${RERANK_MODEL:qwen3-rerank}
+    tender-top-n: ${RERANK_TENDER_TOP_N:8}
+    bid-top-n: ${RERANK_BID_TOP_N:6}
+    connect-timeout-ms: ${RERANK_CONNECT_TIMEOUT_MS:3000}
+    read-timeout-ms: ${RERANK_READ_TIMEOUT_MS:120000}
+    # 默认文案勿含英文冒号，避免 ${VAR:default} 解析截断
+    tender-instruct: ${RERANK_TENDER_INSTRUCT:给定招标要求查询，从招标文件中检索陈述相关强制性要求、资格条件或废标否决条款的段落。}
+    bid-instruct: ${RERANK_BID_INSTRUCT:给定一条招标要求，从投标文件中检索对该要求作出响应、举证或说明的相关段落。}
+    default-instruct: ${RERANK_DEFAULT_INSTRUCT:给定检索查询，找出能够回答该查询的相关段落。}
+  # 建清单 BUILD_CHECKLIST
+  checklist:
+    worker-enabled: ${CHECKLIST_WORKER_ENABLED:true}
+    poll-ms: ${CHECKLIST_POLL_MS:3000}
+    worker-id: ${CHECKLIST_WORKER_ID:}
+    recall-top-k: ${CHECKLIST_RECALL_TOP_K:40}
+    rerank-top-n: ${CHECKLIST_RERANK_TOP_N:8}
+  # 审查 REVIEW（投标侧对照）
+  review:
+    worker-enabled: ${REVIEW_WORKER_ENABLED:true}
+    poll-ms: ${REVIEW_POLL_MS:3000}
+    worker-id: ${REVIEW_WORKER_ID:}
+    recall-top-k: ${REVIEW_RECALL_TOP_K:30}
+    rerank-top-n: ${REVIEW_RERANK_TOP_N:6}
+  # 一键审查总流程 AI_REVIEW_PIPELINE
+  ai-review-pipeline:
+    worker-enabled: ${AI_REVIEW_PIPELINE_WORKER_ENABLED:true}
+    poll-ms: ${AI_REVIEW_PIPELINE_POLL_MS:5000}
+    worker-id: ${AI_REVIEW_PIPELINE_WORKER_ID:}
+    wait-poll-ms: ${AI_REVIEW_PIPELINE_WAIT_POLL_MS:3000}
+    index-wait-timeout-ms: ${AI_REVIEW_PIPELINE_INDEX_WAIT_TIMEOUT_MS:7200000}
+    child-wait-timeout-ms: ${AI_REVIEW_PIPELINE_CHILD_WAIT_TIMEOUT_MS:7200000}
+  # 抽取 / 对照 LLM（compatible-mode chat）
+  llm:
+    base-url: ${LLM_BASE_URL:${EMBEDDING_BASE_URL:https://ws-jbb2t4ahvyzwxo9b.cn-beijing.maas.aliyuncs.com/compatible-mode/v1}}
+    model: ${LLM_MODEL:qwen3.7-plus}
+    prompt-version: ${LLM_PROMPT_VERSION:extract-v2}
+    review-prompt-version: ${LLM_REVIEW_PROMPT_VERSION:review-v2}
+    # 不配则用 HttpLlmPort 内置默认模板；自定义须保留占位符
+    # extract-prompt-template: 须含 {{recalled_chunks}}
+    # review-prompt-template: 须含 {{supplier}} {{requirement_id}} {{title}} {{main_type}}
+    #   {{full_score}} {{requirement_text}} {{requirement_excerpt}} {{bid_chunks_text}}
+    connect-timeout-ms: ${LLM_CONNECT_TIMEOUT_MS:3000}
+    read-timeout-ms: ${LLM_READ_TIMEOUT_MS:180000}
 
 logging:
   level:

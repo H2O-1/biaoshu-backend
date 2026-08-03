@@ -1,5 +1,8 @@
 package com.bidding.common.error;
 
+/**
+ * 业务错误码。与 HTTP 状态大致对应，但前端以 body.code 为准。
+ */
 public enum ErrorCode {
     BAD_REQUEST(40000, "请求参数错误"),
     UNAUTHORIZED(40100, "未登录或登录已失效"),

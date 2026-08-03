@@ -1,5 +1,6 @@
 /**
- * 架构占位包。实现阶段在此按 domain / application / infrastructure 分包。
- * 详见 docs/02-模块划分与依赖.md
+ * 审查与异步任务。
+ * <p>
+ * 约定：向量召回列表、重排候选列表不落业务表，执行时必须打日志。
  */
 package com.bidding.review;

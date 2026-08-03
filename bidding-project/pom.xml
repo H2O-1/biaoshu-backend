@@ -10,11 +10,28 @@
     </parent>
     <artifactId>bidding-project</artifactId>
     <packaging>jar</packaging>
-    <description>架构骨架模块（无业务实现）</description>
+    <description>项目：招标方本组织下的项目主数据</description>
     <dependencies>
         <dependency>
             <groupId>com.bidding</groupId>
             <artifactId>bidding-common</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 </project>

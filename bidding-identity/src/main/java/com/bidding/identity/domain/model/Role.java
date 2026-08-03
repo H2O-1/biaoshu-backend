@@ -1,4 +1,21 @@
 package com.bidding.identity.domain.model;
 
-public record Role(String code, String name) {
+/** 角色字典（对应表 sys_role） */
+public class Role {
+
+    private final String code;
+    private final String name;
+
+    public Role(String code, String name) {
+        this.code = code;
+        this.name = name;
+    }
+
+    public String getCode() {
+        return code;
+    }
+
+    public String getName() {
+        return name;
+    }
 }
