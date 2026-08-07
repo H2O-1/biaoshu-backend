@@ -32,11 +32,11 @@ public class RerankAppService {
             RecallAppService recallAppService,
             RerankPort rerankPort,
             @Value("${bidding.recall.default-top-k:40}") int defaultRecallTopK,
-            @Value("${bidding.rerank.tender-top-n:8}") int tenderTopN,
-            @Value("${bidding.rerank.bid-top-n:6}") int bidTopN,
-            @Value("${bidding.rerank.tender-instruct:给定招标要求查询，从招标文件中检索陈述相关强制性要求、资格条件或废标否决条款的段落。}")
+            @Value("${bidding.rerank.tender-top-n:15}") int tenderTopN,
+            @Value("${bidding.rerank.bid-top-n:15}") int bidTopN,
+            @Value("${bidding.rerank.tender-instruct:}")
             String tenderInstruct,
-            @Value("${bidding.rerank.bid-instruct:给定一条招标要求，从投标文件中检索对该要求作出响应、举证或说明的相关段落。}")
+            @Value("${bidding.rerank.bid-instruct:}")
             String bidInstruct) {
         this.recallAppService = recallAppService;
         this.rerankPort = rerankPort;
@@ -70,7 +70,7 @@ public class RerankAppService {
                 projectId, query, safeRecallTopK, packageIds, documentIds);
 
         if (recalled.isEmpty()) {
-            log.info("重排跳过：召回为空 projectId={} queryLen={}", projectId,
+            log.debug("重排跳过：召回为空 projectId={} queryLen={}", projectId,
                     query == null ? 0 : query.trim().length());
             return new ArrayList<>();
         }
@@ -136,7 +136,7 @@ public class RerankAppService {
                     .append(",rerank=").append(hit.getRerankScore());
         }
         sb.append(']');
-        log.info(sb.toString());
+        log.debug(sb.toString());
     }
 
     /** 重排后命中（含召回分与重排分；不入库）。 */

@@ -17,7 +17,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -199,8 +201,119 @@ class ReviewComparePipelineTest {
         ReviewPort.ItemDraft item = pipeline.run(2L, 100L, items, List.of(80L), 30, 6, null)
                 .getItems().get(0);
         assertEquals(ReviewPort.STATUS_UNKNOWN, item.getStatus());
+        assertEquals(ReviewPort.VERDICT_UNCLEAR, item.getVerdict());
         assertNull(item.getBidExcerpt());
         assertNull(item.getChunkId());
+        assertTrue(item.getJudgement().contains("无法判断"));
+        assertTrue(item.getJudgement().contains("未能绑定可核对的投标原文证据"));
+    }
+
+    @Test
+    void matchStatusWithUnverifiableEvidenceSyncsJudgementToUnknown() {
+        stubPackage(80L, "公司A");
+        ReviewComparePipeline pipeline = newPipeline();
+
+        RequirementChecklistPort.ItemView req = new RequirementChecklistPort.ItemView();
+        req.setId(12L);
+        req.setMainType("QUALIFICATION");
+        req.setRequirementCode("Q3");
+        req.setText("无重大违法记录");
+        req.setBidSearchJson("[\"无重大违法\",\"承诺函\"]");
+        req.setMust(true);
+        List<RequirementChecklistPort.ItemView> items = new ArrayList<>();
+        items.add(req);
+
+        when(embeddingPort.embed(anyList())).thenReturn(List.of(new float[]{0.1f}));
+        when(vectorRecallPort.recall(any())).thenAnswer(invocation -> {
+            VectorRecallPort.RecallHit hit = new VectorRecallPort.RecallHit();
+            hit.setChunkId(900L);
+            hit.setContent("本公司简介与组织架构……");
+            hit.setDocumentId(80L);
+            hit.setFileName("投标.pdf");
+            hit.setPackageId(80L);
+            hit.setPageNo(3);
+            return List.of(hit);
+        });
+        RerankPort.RerankHit r0 = new RerankPort.RerankHit();
+        r0.setIndex(0);
+        when(rerankPort.rerank(anyString(), anyList(), anyInt(), eq("bid-instruct")))
+                .thenReturn(List.of(r0));
+
+        LlmPort.CompareResult compared = new LlmPort.CompareResult();
+        compared.setStatus(ReviewPort.STATUS_MATCH);
+        compared.setVerdict(ReviewPort.VERDICT_PASS);
+        compared.setJudgement("符合。投标人在承诺函中声明无重大违法记录。");
+        LlmPort.BidEvidence ev = new LlmPort.BidEvidence();
+        ev.setFragmentId(900L);
+        ev.setPage(3);
+        // 语义改写，不在召回块中 → 证据作废
+        ev.setQuote("本公司郑重承诺近三年无重大违法记录");
+        compared.setBidEvidence(List.of(ev));
+        when(llmPort.compareRequirement(any(LlmPort.CompareRequest.class))).thenReturn(compared);
+
+        ReviewPort.ItemDraft item = pipeline.run(2L, 100L, items, List.of(80L), 30, 6, null)
+                .getItems().get(0);
+        assertEquals(ReviewPort.STATUS_UNKNOWN, item.getStatus());
+        assertEquals(ReviewPort.VERDICT_UNCLEAR, item.getVerdict());
+        assertNull(item.getBidExcerpt());
+        assertTrue(item.getJudgement().contains("符合"));
+        assertTrue(item.getJudgement().contains("无法判断"));
+        assertEquals(item.getJudgement(), item.getReason());
+    }
+
+    @Test
+    void whitespaceOnlyDifferenceInQuoteStillMatches() {
+        stubPackage(80L, "公司A");
+        ReviewComparePipeline pipeline = newPipeline();
+
+        RequirementChecklistPort.ItemView req = new RequirementChecklistPort.ItemView();
+        req.setId(13L);
+        req.setMainType("QUALIFICATION");
+        req.setRequirementCode("Q4");
+        req.setText("须具备二级资质");
+        req.setBidSearchJson("[\"二级资质\"]");
+        req.setMust(true);
+
+        when(embeddingPort.embed(anyList())).thenReturn(List.of(new float[]{0.1f}));
+        when(vectorRecallPort.recall(any())).thenAnswer(invocation -> {
+            VectorRecallPort.RecallHit hit = new VectorRecallPort.RecallHit();
+            hit.setChunkId(901L);
+            hit.setContent("本公司具备二级资质证书");
+            hit.setDocumentId(80L);
+            hit.setFileName("投标.pdf");
+            hit.setPackageId(80L);
+            hit.setPageNo(1);
+            return List.of(hit);
+        });
+        RerankPort.RerankHit r0 = new RerankPort.RerankHit();
+        r0.setIndex(0);
+        when(rerankPort.rerank(anyString(), anyList(), anyInt(), eq("bid-instruct")))
+                .thenReturn(List.of(r0));
+
+        LlmPort.CompareResult compared = new LlmPort.CompareResult();
+        compared.setStatus(ReviewPort.STATUS_MATCH);
+        compared.setVerdict(ReviewPort.VERDICT_PASS);
+        compared.setJudgement("符合。");
+        LlmPort.BidEvidence ev = new LlmPort.BidEvidence();
+        ev.setFragmentId(901L);
+        ev.setPage(1);
+        ev.setQuote("具备 二级 资质"); // 仅多了空格
+        compared.setBidEvidence(List.of(ev));
+        when(llmPort.compareRequirement(any(LlmPort.CompareRequest.class))).thenReturn(compared);
+
+        ReviewPort.ItemDraft item = pipeline.run(2L, 100L, items(req), List.of(80L), 30, 6, null)
+                .getItems().get(0);
+        assertEquals(ReviewPort.STATUS_MATCH, item.getStatus());
+        assertEquals(ReviewPort.VERDICT_PASS, item.getVerdict());
+        assertEquals("具备二级资质", item.getBidExcerpt());
+    }
+
+    @Test
+    void quoteInContentAllowsWhitespaceNormalizationOnly() {
+        assertTrue(ReviewComparePipeline.quoteInContent("具备二级资质", "具备 二级 资质"));
+        assertFalse(ReviewComparePipeline.quoteInContent("具备二级资质", "具备三级资质"));
+        assertEquals("具备二级资质",
+                ReviewComparePipeline.canonicalQuoteFromContent("本公司具备二级资质证书", "具备 二级 资质"));
     }
 
     @Test
@@ -225,8 +338,14 @@ class ReviewComparePipelineTest {
 
     private ReviewComparePipeline newPipeline() {
         return new ReviewComparePipeline(
-                embeddingPort, vectorRecallPort, rerankPort, llmPort, packageLookupPort,
-                objectMapper, 30, 6, "bid-instruct");
+                embeddingPort, vectorRecallPort, null, rerankPort, llmPort, packageLookupPort,
+                objectMapper, 30, 6, "bid-instruct", false, 0, 60, 4);
+    }
+
+    private static List<RequirementChecklistPort.ItemView> items(RequirementChecklistPort.ItemView req) {
+        List<RequirementChecklistPort.ItemView> list = new ArrayList<>();
+        list.add(req);
+        return list;
     }
 
     private void stubPackage(long id, String name) {

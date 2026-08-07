@@ -70,6 +70,7 @@ public class IndexJobExecutor {
         }
 
         try {
+            long tAll = System.currentTimeMillis();
             DocumentAccessPort.DocumentRef doc = documentAccessPort.findActiveById(documentId);
             if (doc == null) {
                 jobAppService.markIndexFailed(jobId, documentId, "文档不存在或已删除");
@@ -77,6 +78,7 @@ public class IndexJobExecutor {
             }
 
             DocumentTextExtractPort.ExtractResult source;
+            long t0 = System.currentTimeMillis();
             if (isRealMode()) {
                 jobAppService.markRunningProgress(jobId, 15, "读取文件并抽取文本");
                 source = loadRealExtractResult(documentId);
@@ -86,9 +88,12 @@ public class IndexJobExecutor {
                 source.setFullText("FAKE_SOURCE fileName=" + safe(doc.getFileName())
                         + " documentId=" + doc.getId());
             }
+            long extractMs = System.currentTimeMillis() - t0;
 
             jobAppService.markRunningProgress(jobId, 35, isRealMode() ? "章节切块中" : "Fake 切块中");
+            t0 = System.currentTimeMillis();
             List<ChunkingPort.ChunkDraft> drafts = chunkingPort.chunk(source);
+            long chunkMs = System.currentTimeMillis() - t0;
             if (drafts == null || drafts.isEmpty()) {
                 jobAppService.markIndexFailed(jobId, documentId, "切块结果为空");
                 return;
@@ -99,7 +104,9 @@ public class IndexJobExecutor {
             for (int i = 0; i < drafts.size(); i++) {
                 texts.add(drafts.get(i).getContent());
             }
+            t0 = System.currentTimeMillis();
             List<float[]> vectors = embeddingPort.embed(texts);
+            long embedMs = System.currentTimeMillis() - t0;
             if (vectors == null || vectors.size() != drafts.size()) {
                 jobAppService.markIndexFailed(jobId, documentId, "向量数量与切块不一致");
                 return;
@@ -117,6 +124,7 @@ public class IndexJobExecutor {
                 indexed.add(item);
             }
 
+            t0 = System.currentTimeMillis();
             documentIndexStorePort.replaceAll(
                     doc.getOrgId(),
                     doc.getProjectId(),
@@ -125,6 +133,7 @@ public class IndexJobExecutor {
                     embeddingPort.modelName(),
                     indexed
             );
+            long storeMs = System.currentTimeMillis() - t0;
 
             String modeLabel = isRealMode() ? "真文本" : "Fake";
             jobAppService.markIndexSuccess(
@@ -134,8 +143,10 @@ public class IndexJobExecutor {
                             + ", dim=" + embeddingPort.dimension()
                             + ", model=" + embeddingPort.modelName()
             );
-            log.info("INDEX job {} document {} {} 成功，切块数={}",
-                    jobId, documentId, modeLabel, indexed.size());
+            log.info("INDEX成功 jobId={} documentId={} fileName={} mode={} chunks={} "
+                            + "extractMs={} chunkMs={} embedMs={} storeMs={} totalMs={}",
+                    jobId, documentId, doc.getFileName(), modeLabel, indexed.size(),
+                    extractMs, chunkMs, embedMs, storeMs, System.currentTimeMillis() - tAll);
         } catch (Exception ex) {
             log.error("INDEX job {} document {} 执行失败", jobId, documentId, ex);
             String message = ex.getMessage();

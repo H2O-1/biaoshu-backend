@@ -456,22 +456,36 @@ Authorization: Bearer <accessToken>
 
 ## 后端自动跑什么
 
+总任务是 PostgreSQL 持久化状态机（阶段存 `biz_job.phase`，多 Worker 租约接管，每步事务内推进）：
+
 ```text
-① INDEX（向量化）
-   - SUCCESS 跳过
-   - PROCESSING 不重复入队，等待结束
-   - PENDING / FAILED 入队解析
-   - 任一文件 FAILED → 整单失败，error 带文件名
+INDEX_SUBMIT → INDEX_WAIT → CHECKLIST_SUBMIT → CHECKLIST_WAIT
+→ REVIEW_SUBMIT → REVIEW_WAIT → SUCCESS / FAILED
+```
 
-② 建清单 BUILD_CHECKLIST
-   - 已有 SUCCESS 清单且有条目 → 复用
-   - 否则新建并等待 SUCCESS（条目带 requirementId Q1/S1）
+- Worker 每次认领（`FOR UPDATE SKIP LOCKED` + 60s 租约）只推进一个阶段、立即返回；
+  等待子任务只推迟 `next_run_at`，不占线程、不计重试
+- SUBMIT 阶段「创建子任务 + 保存子任务 ID + 推进父任务」在同一事务，崩溃即回滚，重启按阶段续跑
+- 阶段推进以 jobId + workerId + expectedPhase 为条件，租约易主立即停手不覆盖
 
-③ 智能审查 REVIEW（按包全量：投标包 × 清单条目）
+```text
+① INDEX_SUBMIT / INDEX_WAIT（向量化）
+   - SUCCESS 跳过；PROCESSING 不重复入队；PENDING / FAILED 入队解析
+   - 任一文件 FAILED → 整单失败，error 带文件名；全部成功立即进下一阶段
+   - 仍有 PENDING/PROCESSING → 推迟下次运行；超过 index-wait-timeout → 失败
+
+② CHECKLIST_SUBMIT / CHECKLIST_WAIT（建清单）
+   - 已有 SUCCESS 清单且有条目 → 复用，直接进 REVIEW_SUBMIT
+   - 否则创建清单 + BUILD_CHECKLIST 子任务（同事务），等待 SUCCESS（条目带 requirementId Q1/S1）
+   - LLM：资格条目∥评分条目 → bidSearch → evidence（extract-artifact-v1）
+   - 清单 FAILED / OBSOLETE / 成功但无条目 / 超时 → 整单失败
+
+③ REVIEW_SUBMIT / REVIEW_WAIT（智能审查，按包全量：投标包 × 清单条目）
+   - 创建审查 + REVIEW 子任务（同事务），保存 review_id
    - 召回仅 bidSearch；重排/对照用 text；LLM=review-v2（产品规则）
    - 资格无证据 → 无法判断；评分无证据 → 建议分 0；fullScore 空 → 暂无评分
-   - 详情按包嵌套返回（含 content、subType）；无项目级通过/不通过
-   - 全部包审完后写回 reviewId
+   - 审查 SUCCESS → 总任务 SUCCESS 并写兼容 payload（checklistId / reviewId / reusedChecklist）；
+     FAILED / OBSOLETE / 超时 → 整单失败
 ```
 
 前端**不必**再单独调 index / checklists / reviews（仍保留原接口供调试或分步用）。
@@ -493,16 +507,36 @@ projectId=10 pipelineJobId=501 phase=DONE | 审查完成 reviewId=201 checklistI
 
 ## 配置（可选）
 
-| 配置 / 环境变量                             | 默认    | 说明                |
-| ------------------------------------------- | ------- | ------------------- |
-| `bidding.ai-review-pipeline.worker-enabled` | true    | 总流程 Worker       |
-| `AI_REVIEW_PIPELINE_POLL_MS`                | 5000    | 认领间隔            |
-| `AI_REVIEW_PIPELINE_WAIT_POLL_MS`           | 3000    | 等待子任务轮询间隔  |
-| `AI_REVIEW_PIPELINE_INDEX_WAIT_TIMEOUT_MS`  | 7200000 | 向量化超时（约 2h） |
-| `AI_REVIEW_PIPELINE_CHILD_WAIT_TIMEOUT_MS`  | 7200000 | 建清单/审查超时     |
+一键审查总任务（API 进程默认关闭，Worker 进程默认开启）：
+
+| 配置 / 环境变量                            | 默认    | 说明                                       |
+| ------------------------------------------ | ------- | ------------------------------------------ |
+| `AI_REVIEW_PIPELINE_WORKER_ENABLED`        | 见进程  | 总流程 Worker：API=false，Worker=true      |
+| `AI_REVIEW_PIPELINE_POLL_MS`               | 5000    | 认领间隔                                   |
+| `AI_REVIEW_PIPELINE_BATCH_SIZE`            | 3       | 单次调度最多连续推进任务数                 |
+| `AI_REVIEW_PIPELINE_LEASE_SECONDS`         | 60      | 多实例租约秒数，过期可被其他 Worker 接管   |
+| `AI_REVIEW_PIPELINE_WAIT_POLL_MS`          | 3000    | 等待阶段的下次运行间隔（不占线程）         |
+| `AI_REVIEW_PIPELINE_INDEX_WAIT_TIMEOUT_MS` | 7200000 | 向量化阶段超时（约 2h）                    |
+| `AI_REVIEW_PIPELINE_CHILD_WAIT_TIMEOUT_MS` | 7200000 | 建清单/审查阶段超时                        |
+| `AI_REVIEW_PIPELINE_MAX_RETRIES`           | 3       | 瞬时错误最大重试次数，达到转 FAILED        |
+| `AI_REVIEW_PIPELINE_RETRY_BACKOFF_MS`      | 10000   | 瞬时错误退避基数（指数，封顶 60 倍）       |
+| `STALE_RECOVERY_ENABLED`                   | false   | 僵尸子任务回收：临时人工功能，API/Worker 均默认关闭 |
+| `STALE_RECOVERY_STALE_MINUTES`             | 30      | 显式开启时，只回收早于该分钟数的 RUNNING/BUILDING 任务 |
+| `bidding.review.compare-parallelism`       | 4       | 审查条目并行度（上限 4）                   |
+
+其余 Poller 同理：`INDEX_WORKER_ENABLED` / `CHECKLIST_WORKER_ENABLED` / `REVIEW_WORKER_ENABLED`
+在 API 进程默认 false、bidding-worker 进程默认 true；本地单进程调试由 `local` profile 打开。
 
 ## 与项目列表状态
 
 总任务 `PENDING`/`RUNNING` 时，项目 `workflowStatus` 为 `AI_REVIEWING`。
 
 删投标包或删招标文件时：若有进行中的 INDEX/建清单/审查/一键审查任务会 **409**；否则将相关审查（及招标文件对应的清单）标为 `OBSOLETE`，`workflowStatus` 回到 `READY_FOR_AI_REVIEW`（或待补文件），需重新点一键审查。
+
+项目下**上传 / 复制 / 删除**任一招标或投标文件：建清单/审查/一键审查进行中 → **409**（INDEX 进行中不拦）；招标变更作废清单+审查，仅投标变更只作废审查；`OBSOLETE` 详情仍可查看。
+
+**发版 / 重启：** 一键审查总任务（AI_REVIEW_PIPELINE）是 PostgreSQL 持久化状态机，**不再**在启动时置失败：`RUNNING` 总任务在租约（默认 60s）过期后由任一 Worker 自动接管，按 `phase` 续跑；SUBMIT 阶段「建子任务 + 推进」同事务，崩溃回滚不产生重复子任务。Worker 可多实例部署，API 进程不跑 Poller。
+
+普通 INDEX / BUILD_CHECKLIST / REVIEW 子任务暂无租约与心跳，自动回收可能误杀长任务，故僵尸回收（`bidding.recovery.enabled`）在 API 与 Worker **一律默认关闭**，仅运维人工确认后显式开启（开启时启动日志打印高可见度警告）。**剩余风险**：Worker 异常中断留下的 RUNNING 子任务不会被自动回收，需人工核对处理；子任务统一租约化是后续任务。发版前若可停业务，仍建议先避开高峰或提示用户稍后重试。
+
+**从 V29 之前版本升级：** 旧版 PENDING 总任务迁移为 INDEX_SUBMIT，可由状态机安全重驱动（阶段幂等）；旧版 RUNNING 总任务因未持久化 checklist_id / review_id 无法无损续跑，统一标记 FAILED（错误信息提示重新发起）；SUCCESS/FAILED 映射为同名终态；CANCELLED 不变。

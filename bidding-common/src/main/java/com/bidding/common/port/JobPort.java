@@ -21,6 +21,17 @@ public interface JobPort {
     String STATUS_FAILED = "FAILED";
     String STATUS_CANCELLED = "CANCELLED";
 
+    String PHASE_INDEX_SUBMIT = "INDEX_SUBMIT";
+    String PHASE_INDEX_WAIT = "INDEX_WAIT";
+    String PHASE_CHECKLIST_SUBMIT = "CHECKLIST_SUBMIT";
+    String PHASE_CHECKLIST_WAIT = "CHECKLIST_WAIT";
+    String PHASE_REVIEW_SUBMIT = "REVIEW_SUBMIT";
+    String PHASE_REVIEW_WAIT = "REVIEW_WAIT";
+    /** 流水线终态阶段：成功（与总任务状态 SUCCESS 对应）。 */
+    String PHASE_SUCCESS = "SUCCESS";
+    /** 流水线终态阶段：失败（与总任务状态 FAILED 对应）。 */
+    String PHASE_FAILED = "FAILED";
+
     long insert(long orgId,
                 Long projectId,
                 String type,
@@ -35,11 +46,55 @@ public interface JobPort {
      */
     Optional<JobRef> claimNextPending(String type, String workerId);
 
+    /** 领取到期的流水线任务；过期租约可由其他实例接管。 */
+    Optional<JobRef> claimNextRunnablePipeline(String type, String workerId, int leaseSeconds);
+
+    /**
+     * 以任务、Worker 和当前阶段为条件推进状态，并释放本次租约。
+     * <p>
+     * 条件：id + status=RUNNING + worker_id + phase=expectedPhase
+     * + lease_expires_at &gt; 当前时间（租约必须仍然有效）。
+     * 命中 1 行返回 true；否则说明租约已过期或易主，调用方必须停止处理，
+     * 不得覆盖其他 Worker 的结果。
+     * checklistId / reviewId / payloadJson 传 null 表示保持原值；nextPhase 与当前阶段相同
+     * 时保留 phase_started_at（用于等待阶段计时），不同则重置为当前时间。
+     */
+    boolean advancePipeline(long jobId, String workerId, String expectedPhase, String nextPhase,
+                            int progress, String message, Instant nextRunAt,
+                            Long checklistId, Long reviewId, String payloadJson);
+
+    /**
+     * 瞬时错误重试：retry_count + 1、记录错误信息并推迟 next_run_at，释放本次租约。
+     * 条件与返回值语义同 {@link #advancePipeline}。
+     */
+    boolean retryPipeline(long jobId, String workerId, String expectedPhase,
+                          String errorMessage, Instant nextRunAt);
+
+    /**
+     * 条件标记总任务成功（终态 SUCCESS）：写入 message 与最终 payload，释放租约与 Worker。
+     * 条件与返回值语义同 {@link #advancePipeline}。
+     */
+    boolean succeedPipeline(long jobId, String workerId, String expectedPhase,
+                            String message, String payloadJson);
+
+    /**
+     * 条件标记总任务失败（终态 FAILED）：errorMessage 最多保留 2000 字符，释放租约与 Worker。
+     * 条件与返回值语义同 {@link #advancePipeline}。
+     */
+    boolean failPipeline(long jobId, String workerId, String expectedPhase, String errorMessage);
+
     void markRunningProgress(long jobId, int progress, String message);
 
     void markSuccess(long jobId, String message);
 
     void markFailed(long jobId, String errorMessage);
+
+    /**
+     * 将指定类型且仍为 RUNNING 的任务全部标为 FAILED（服务重启后回收僵尸任务）。
+     *
+     * @return 更新行数
+     */
+    int failRunningByTypes(String reason, String... types);
 
     /** 更新 payload（流水线写入 phase / reviewId 等）。 */
     void updatePayload(long jobId, String payloadJson);
@@ -62,6 +117,12 @@ public interface JobPort {
         private int retryCount;
         private long createdBy;
         private String workerId;
+        private String phase;
+        private Instant nextRunAt;
+        private Instant leaseExpiresAt;
+        private Instant phaseStartedAt;
+        private Long checklistId;
+        private Long reviewId;
         private Instant createdAt;
         private Instant startedAt;
         private Instant finishedAt;
@@ -162,6 +223,19 @@ public interface JobPort {
         public void setWorkerId(String workerId) {
             this.workerId = workerId;
         }
+
+        public String getPhase() { return phase; }
+        public void setPhase(String phase) { this.phase = phase; }
+        public Instant getNextRunAt() { return nextRunAt; }
+        public void setNextRunAt(Instant nextRunAt) { this.nextRunAt = nextRunAt; }
+        public Instant getLeaseExpiresAt() { return leaseExpiresAt; }
+        public void setLeaseExpiresAt(Instant leaseExpiresAt) { this.leaseExpiresAt = leaseExpiresAt; }
+        public Instant getPhaseStartedAt() { return phaseStartedAt; }
+        public void setPhaseStartedAt(Instant phaseStartedAt) { this.phaseStartedAt = phaseStartedAt; }
+        public Long getChecklistId() { return checklistId; }
+        public void setChecklistId(Long checklistId) { this.checklistId = checklistId; }
+        public Long getReviewId() { return reviewId; }
+        public void setReviewId(Long reviewId) { this.reviewId = reviewId; }
 
         public Instant getCreatedAt() {
             return createdAt;

@@ -48,6 +48,7 @@ public class ReviewJobExecutor {
     public void execute(JobPort.JobRef job) {
         long jobId = job.getId();
         Long reviewId = null;
+        long tAll = System.currentTimeMillis();
         try {
             Payload payload = parsePayload(job.getPayloadJson());
             if (payload.reviewId == null || payload.projectId == null) {
@@ -105,8 +106,8 @@ public class ReviewJobExecutor {
             // 项目级不再写通过/不通过；overall_verdict 置空
             reviewPort.markSuccess(rid, null);
             jobPort.markSuccess(jobId, "审查完成 items=" + result.getItems().size());
-            log.info("REVIEW 成功 jobId={} reviewId={} items={}",
-                    jobId, rid, result.getItems().size());
+            log.info("REVIEW 成功 jobId={} reviewId={} items={} costMs={}",
+                    jobId, rid, result.getItems().size(), System.currentTimeMillis() - tAll);
         } catch (Exception ex) {
             log.error("REVIEW 失败 jobId={}", jobId, ex);
             String msg = ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage();

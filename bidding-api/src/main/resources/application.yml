@@ -51,9 +51,10 @@ bidding:
     max-size-bytes: ${UPLOAD_MAX_SIZE_BYTES:104857600}
     max-files-per-package: 5
   # INDEX：fake=假向量；real=百炼 text-embedding-v4
+  # worker-enabled 默认 false：任务执行在独立 bidding-worker 进程；单进程调试用 local profile 或环境变量打开
   index:
     mode: ${INDEX_MODE:real}
-    worker-enabled: ${INDEX_WORKER_ENABLED:true}
+    worker-enabled: ${INDEX_WORKER_ENABLED:false}
     poll-ms: ${INDEX_POLL_MS:2000}
     worker-id: ${INDEX_WORKER_ID:}
     fake-chunk-count: ${INDEX_FAKE_CHUNK_COUNT:3}
@@ -70,52 +71,79 @@ bidding:
       fallback-window: ${INDEX_CHUNK_FALLBACK_WINDOW:500}
       fallback-overlap: ${INDEX_CHUNK_FALLBACK_OVERLAP:50}
   # 向量召回：debug-enabled 控制调试接口；发版请设 false
+  # hybrid：向量 ∥ BM25，RRF 融合（建清单/审查召回）；重排仍用合并后的候选
   recall:
     debug-enabled: ${RECALL_DEBUG:true}
     default-top-k: ${RECALL_DEFAULT_TOP_K:40}
+    hybrid-enabled: ${RECALL_HYBRID_ENABLED:true}
+    bm25-top-k: ${RECALL_BM25_TOP_K:0}
+    rrf-k: ${RECALL_RRF_K:60}
   # 重排：qwen3-rerank（compatible-api，与 embedding 的 compatible-mode 不同）
   rerank:
     debug-enabled: ${RERANK_DEBUG:true}
     base-url: ${RERANK_BASE_URL:https://ws-jbb2t4ahvyzwxo9b.cn-beijing.maas.aliyuncs.com/compatible-api/v1}
     model: ${RERANK_MODEL:qwen3-rerank}
-    tender-top-n: ${RERANK_TENDER_TOP_N:8}
-    bid-top-n: ${RERANK_BID_TOP_N:6}
+    tender-top-n: ${RERANK_TENDER_TOP_N:15}
+    bid-top-n: ${RERANK_BID_TOP_N:15}
     connect-timeout-ms: ${RERANK_CONNECT_TIMEOUT_MS:3000}
     read-timeout-ms: ${RERANK_READ_TIMEOUT_MS:120000}
     # 默认文案勿含英文冒号，避免 ${VAR:default} 解析截断
-    tender-instruct: ${RERANK_TENDER_INSTRUCT:给定招标要求查询，从招标文件中检索陈述相关强制性要求、资格条件或废标否决条款的段落。}
-    bid-instruct: ${RERANK_BID_INSTRUCT:给定一条招标要求，从投标文件中检索对该要求作出响应、举证或说明的相关段落。}
-    default-instruct: ${RERANK_DEFAULT_INSTRUCT:给定检索查询，找出能够回答该查询的相关段落。}
-  # 建清单 BUILD_CHECKLIST
+    # 空 = 请求不传 instruct，走百炼官网默认问答检索策略；需要定制时再设环境变量
+    tender-instruct: ${RERANK_TENDER_INSTRUCT:}
+    bid-instruct: ${RERANK_BID_INSTRUCT:}
+    default-instruct: ${RERANK_DEFAULT_INSTRUCT:}
+  # 建清单 BUILD_CHECKLIST（worker-enabled 默认 false，同 index 说明）
   checklist:
-    worker-enabled: ${CHECKLIST_WORKER_ENABLED:true}
+    worker-enabled: ${CHECKLIST_WORKER_ENABLED:false}
     poll-ms: ${CHECKLIST_POLL_MS:3000}
     worker-id: ${CHECKLIST_WORKER_ID:}
     recall-top-k: ${CHECKLIST_RECALL_TOP_K:40}
-    rerank-top-n: ${CHECKLIST_RERANK_TOP_N:8}
-  # 审查 REVIEW（投标侧对照）
+    rerank-top-n: ${CHECKLIST_RERANK_TOP_N:15}
+    # 产物 C：bidSearch 每批条目数
+    bid-search-batch-size: ${CHECKLIST_BID_SEARCH_BATCH_SIZE:10}
+  # 审查 REVIEW（投标侧对照；worker-enabled 默认 false，同 index 说明）
   review:
-    worker-enabled: ${REVIEW_WORKER_ENABLED:true}
+    worker-enabled: ${REVIEW_WORKER_ENABLED:false}
     poll-ms: ${REVIEW_POLL_MS:3000}
     worker-id: ${REVIEW_WORKER_ID:}
     recall-top-k: ${REVIEW_RECALL_TOP_K:30}
-    rerank-top-n: ${REVIEW_RERANK_TOP_N:6}
-  # 一键审查总流程 AI_REVIEW_PIPELINE
+    rerank-top-n: ${REVIEW_RERANK_TOP_N:15}
+  # 任务进度 SSE（GET /api/jobs/{id}/events）；短轮询 GET /api/jobs/{id} 仍保留
+  job:
+    sse:
+      enabled: ${JOB_SSE_ENABLED:true}
+      poll-ms: ${JOB_SSE_POLL_MS:1000}
+      heartbeat-ms: ${JOB_SSE_HEARTBEAT_MS:15000}
+      timeout-ms: ${JOB_SSE_TIMEOUT_MS:7200000}
+  # 一键审查总流程 AI_REVIEW_PIPELINE（PostgreSQL 持久化状态机；worker-enabled 默认 false，同 index 说明）
   ai-review-pipeline:
-    worker-enabled: ${AI_REVIEW_PIPELINE_WORKER_ENABLED:true}
+    worker-enabled: ${AI_REVIEW_PIPELINE_WORKER_ENABLED:false}
     poll-ms: ${AI_REVIEW_PIPELINE_POLL_MS:5000}
     worker-id: ${AI_REVIEW_PIPELINE_WORKER_ID:}
+    batch-size: ${AI_REVIEW_PIPELINE_BATCH_SIZE:3}
+    lease-seconds: ${AI_REVIEW_PIPELINE_LEASE_SECONDS:60}
+    # 等待阶段的下次运行间隔（状态机不再占线程等待，不计重试）
     wait-poll-ms: ${AI_REVIEW_PIPELINE_WAIT_POLL_MS:3000}
     index-wait-timeout-ms: ${AI_REVIEW_PIPELINE_INDEX_WAIT_TIMEOUT_MS:7200000}
     child-wait-timeout-ms: ${AI_REVIEW_PIPELINE_CHILD_WAIT_TIMEOUT_MS:7200000}
+    max-retries: ${AI_REVIEW_PIPELINE_MAX_RETRIES:3}
+    retry-backoff-ms: ${AI_REVIEW_PIPELINE_RETRY_BACKOFF_MS:10000}
+  # 僵尸子任务回收：只在 Worker 进程开启；总任务由租约过期自动接管
+  recovery:
+    enabled: ${STALE_RECOVERY_ENABLED:false}
+    stale-minutes: ${STALE_RECOVERY_STALE_MINUTES:30}
   # 抽取 / 对照 LLM（compatible-mode chat）
   llm:
     base-url: ${LLM_BASE_URL:${EMBEDDING_BASE_URL:https://ws-jbb2t4ahvyzwxo9b.cn-beijing.maas.aliyuncs.com/compatible-mode/v1}}
     model: ${LLM_MODEL:qwen3.7-plus}
-    prompt-version: ${LLM_PROMPT_VERSION:extract-v2}
+    # 建清单按产物拆分：A 资格 ∥ B 评分 → C bidSearch → D evidence（版本 extract-artifact-v1）
+    prompt-version: ${LLM_PROMPT_VERSION:extract-artifact-v1}
     review-prompt-version: ${LLM_REVIEW_PROMPT_VERSION:review-v2}
     # 不配则用 HttpLlmPort 内置默认模板；自定义须保留占位符
-    # extract-prompt-template: 须含 {{recalled_chunks}}
+    # extract-qual-prompt-template: 产物 A（{{recalled_chunks}}）
+    # extract-score-prompt-template: 产物 B（{{recalled_chunks}}）
+    # bid-search-prompt-template: 产物 C（{{checklist_items}}）
+    # evidence-prompt-template: 产物 D（{{checklist_items}} {{related_chunks}}）
     # review-prompt-template: 须含 {{supplier}} {{requirement_id}} {{title}} {{main_type}}
     #   {{full_score}} {{requirement_text}} {{requirement_excerpt}} {{bid_chunks_text}}
     connect-timeout-ms: ${LLM_CONNECT_TIMEOUT_MS:3000}
@@ -125,3 +153,10 @@ logging:
   level:
     root: INFO
     com.bidding: INFO
+    # 召回/重排 hits 明细、逐条审查耗时已改 DEBUG；需要时打开：
+    # com.bidding.review.application.ReviewComparePipeline: DEBUG
+    # com.bidding.review.application.RecallAppService: DEBUG
+    # com.bidding.review.application.RerankAppService: DEBUG
+    # com.bidding.review.application.ChecklistBuildPipeline: DEBUG
+  # 文件目录可用环境变量 LOG_PATH（默认相对工作目录 logs/）
+  # error → logs/error.log；一键审查节点 → logs/ai.log

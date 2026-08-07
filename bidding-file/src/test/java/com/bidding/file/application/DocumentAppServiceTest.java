@@ -144,7 +144,7 @@ class DocumentAppServiceTest {
                 "org/2/package/50/x_招标.pdf", "SUCCESS", "ACTIVE",
                 10L, Instant.now(), Instant.now());
         when(documentRepository.findById(1L)).thenReturn(java.util.Optional.of(saved));
-        when(projectArtifactInvalidationPort.hasActiveAiWork(100L)).thenReturn(false);
+        when(projectArtifactInvalidationPort.hasActiveChecklistOrReviewWork(100L)).thenReturn(false);
 
         documentAppService.delete(50L, 1L);
 
@@ -158,7 +158,7 @@ class DocumentAppServiceTest {
     }
 
     @Test
-    void deleteBidFileOnlyCleansIndex() {
+    void deleteBidFileObsoletesReviewOnly() {
         PackageLookupPort.PackageRef pkg = new PackageLookupPort.PackageRef();
         pkg.setId(60L);
         pkg.setOrgId(2L);
@@ -171,6 +171,7 @@ class DocumentAppServiceTest {
                 "org/2/package/60/x_投标.pdf", "SUCCESS", "ACTIVE",
                 10L, Instant.now(), Instant.now());
         when(documentRepository.findById(2L)).thenReturn(java.util.Optional.of(saved));
+        when(projectArtifactInvalidationPort.hasActiveChecklistOrReviewWork(100L)).thenReturn(false);
 
         documentAppService.delete(60L, 2L);
 
@@ -178,8 +179,8 @@ class DocumentAppServiceTest {
         verify(documentIndexStorePort).deleteByDocumentId(2L);
         verify(projectArtifactInvalidationPort, never())
                 .obsoleteChecklistsByProjectId(anyLong(), anyString());
-        verify(projectArtifactInvalidationPort, never())
-                .obsoleteReviewsByProjectId(anyLong(), anyString());
+        verify(projectArtifactInvalidationPort).obsoleteReviewsByProjectId(
+                eq(100L), anyString());
     }
 
     @Test
@@ -196,7 +197,7 @@ class DocumentAppServiceTest {
                 "org/2/package/50/x_招标.pdf", "SUCCESS", "ACTIVE",
                 10L, Instant.now(), Instant.now());
         when(documentRepository.findById(1L)).thenReturn(java.util.Optional.of(saved));
-        when(projectArtifactInvalidationPort.hasActiveAiWork(100L)).thenReturn(true);
+        when(projectArtifactInvalidationPort.hasActiveChecklistOrReviewWork(100L)).thenReturn(true);
 
         BizException ex = assertThrows(BizException.class,
                 () -> documentAppService.delete(50L, 1L));
@@ -210,7 +211,9 @@ class DocumentAppServiceTest {
         pkg.setId(50L);
         pkg.setOrgId(2L);
         pkg.setProjectId(100L);
+        pkg.setType("TENDER");
         when(packageLookupPort.findActiveById(50L)).thenReturn(pkg);
+        when(projectArtifactInvalidationPort.hasActiveChecklistOrReviewWork(100L)).thenReturn(false);
         when(documentRepository.countActiveByPackageId(50L)).thenReturn(0L);
         when(documentRepository.insert(eq(2L), eq(100L), eq(50L), eq("招标.pdf"),
                 eq("application/pdf"), eq("pdf"), eq("招标正文"), eq(3L), anyString(),
@@ -233,6 +236,10 @@ class DocumentAppServiceTest {
         assertEquals("招标正文", summary.getFileType());
         assertEquals("PENDING", summary.getIndexStatus());
         verify(objectStoragePort).put(anyString(), any(), eq(3L), eq("application/pdf"));
+        verify(projectArtifactInvalidationPort).obsoleteChecklistsByProjectId(
+                eq(100L), anyString());
+        verify(projectArtifactInvalidationPort).obsoleteReviewsByProjectId(
+                eq(100L), anyString());
     }
 
     @Test
@@ -414,6 +421,7 @@ class DocumentAppServiceTest {
         when(documentRepository.listByPackageId(60L)).thenReturn(sourceDocs);
         when(documentRepository.countActiveByPackageId(50L)).thenReturn(0L);
         when(documentRepository.listByPackageId(50L)).thenReturn(new ArrayList<>());
+        when(projectArtifactInvalidationPort.hasActiveChecklistOrReviewWork(10L)).thenReturn(false);
 
         when(objectStoragePort.open("src-key"))
                 .thenReturn(new ByteArrayInputStream(new byte[]{1, 2, 3}));
@@ -437,6 +445,10 @@ class DocumentAppServiceTest {
         assertEquals(1001L, result.getJobIds().get(0).longValue());
         verify(objectStoragePort).put(anyString(), any(), eq(3L), eq("application/pdf"));
         verify(documentIndexJobPort).enqueueIndex(2L, 10L, 99L, 10L);
+        verify(projectArtifactInvalidationPort).obsoleteChecklistsByProjectId(
+                eq(10L), anyString());
+        verify(projectArtifactInvalidationPort).obsoleteReviewsByProjectId(
+                eq(10L), anyString());
     }
 
     @Test
@@ -513,6 +525,7 @@ class DocumentAppServiceTest {
         sourceDocs.add(src);
         when(documentRepository.listByPackageId(71L)).thenReturn(sourceDocs);
         when(documentRepository.countActiveByPackageId(80L)).thenReturn(1L);
+        when(projectArtifactInvalidationPort.hasActiveChecklistOrReviewWork(10L)).thenReturn(false);
 
         Document existing = doc(50L, 80L, "已有.pdf", "old-key");
         List<Document> targetExisting = new ArrayList<>();
@@ -540,6 +553,10 @@ class DocumentAppServiceTest {
         assertEquals(1, result.getCopiedCount());
         assertEquals(2001L, result.getJobIds().get(0).longValue());
         assertEquals(80L, result.getItems().get(0).getPackageId());
+        verify(projectArtifactInvalidationPort, never())
+                .obsoleteChecklistsByProjectId(anyLong(), anyString());
+        verify(projectArtifactInvalidationPort).obsoleteReviewsByProjectId(
+                eq(10L), anyString());
     }
 
     private static ProjectLookupPort.ProjectRef project(long id, String name) {

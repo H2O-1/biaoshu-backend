@@ -972,7 +972,7 @@ Authorization: Bearer <accessToken>
 | `AI_REVIEW_SUCCESS` | AI审查完成 | 最新 `biz_review.status=SUCCESS` |
 | `AI_REVIEW_FAILED` | AI审查失败 | 最新 `biz_review.status=FAILED` |
 
-> 不做「待AI重新审查」：删投标包 / 删招标文件后会将相关审查（及招标文件对应的清单）标为 `OBSOLETE`，派生状态回到 `READY_FOR_AI_REVIEW`（或待补文件）；重新发起审查仍用一键审查接口。
+> 不做单独的「待AI重新审查」状态码：项目下**上传 / 复制 / 删除**任一招标或投标文件时，若建清单/审查/一键审查进行中 → `40900`；否则将相关产物标为 `OBSOLETE`（**招标**：清单+审查；**仅投标**：只作废审查，清单可复用）。`OBSOLETE` 记录保留，详情仍可按 id 查看。文件解析齐后 `workflowStatus` 回到 `READY_FOR_AI_REVIEW`（或待补文件）；重新发起仍用一键审查。删投标包同理作废审查。
 
 **成功响应**
 
@@ -1267,4 +1267,4 @@ Authorization: Bearer <accessToken>
 - 停用项目仍可改基本信息；已删项目不可查。
 - `agency` / `projectType` / `leaderName` 创建与更新均可空；空白存 `null`；更新时传空白会清空。
 - 列表/详情派生：`mainTenderFileName`（`fileType=招标文件`）、`bidPackageCount` / `bidPackageUploadedCount` / `bidFileCount`。
-- `workflowStatus` 为派生字段（不落库）：待补充招标/投标（含解析中、解析失败）、待AI审查、AI审查中/完成/失败；与 `status` 启停分离；不做「待AI重新审查」。删投标包 / 删招标文件会将相关审查（及清单）标为 `OBSOLETE`，从而回到待审查或待补文件。
+- `workflowStatus` 为派生字段（不落库）：待补充招标/投标（含解析中、解析失败）、待AI审查、AI审查中/完成/失败；与 `status` 启停分离。项目下上传/复制/删除招标或投标文件会作废相关审查（改招标另作废清单）；`OBSOLETE` 详情仍可查看；解析齐后回到待审查或待补文件。

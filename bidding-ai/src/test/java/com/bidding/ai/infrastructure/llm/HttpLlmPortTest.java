@@ -59,6 +59,9 @@ class HttpLlmPortTest {
                 "qwen3.7-plus",
                 "",
                 "",
+                "",
+                "",
+                "",
                 3000L,
                 10000L
         );
@@ -72,7 +75,7 @@ class HttpLlmPortTest {
     }
 
     @Test
-    void extractChecklistParsesLegacyItems() throws Exception {
+    void parseChecklistParsesLegacyItems() throws Exception {
         String json = "{"
                 + "\"items\":[{"
                 + "\"title\":\"资质等级\","
@@ -182,6 +185,58 @@ class HttpLlmPortTest {
     }
 
     @Test
+    void parseFlatArtifactItemsWithChunkIdsString() throws Exception {
+        String json = "{\"items\":[{"
+                + "\"id\":\"Q1\","
+                + "\"title\":\"资质等级\","
+                + "\"mainType\":\"资格要求\","
+                + "\"subType\":\"资质证书\","
+                + "\"content\":\"须具备二级资质\","
+                + "\"chunkIds\":\"11,12\""
+                + "}]}";
+        List<LlmPort.ExtractedRequirement> items = llmPort.parseChecklistFromContent(json);
+        assertEquals(1, items.size());
+        assertEquals("须具备二级资质", items.get(0).getText());
+        assertEquals(2, items.get(0).getChunkIds().size());
+        assertEquals(11L, items.get(0).getChunkIds().get(0).longValue());
+        assertEquals(12L, items.get(0).getChunkIds().get(1).longValue());
+        assertTrue(items.get(0).getBidSearch() == null || items.get(0).getBidSearch().isEmpty());
+    }
+
+    @Test
+    void parseBidSearchRowsFromFlatQFields() throws Exception {
+        String json = "{\"rows\":[{"
+                + "\"id\":\"Q1\",\"q1\":\"资质证书\",\"q2\":\"资质扫描件\",\"q3\":\"\",\"q4\":\"\""
+                + "},{"
+                + "\"id\":\"S1\",\"q1\":\"技术方案\",\"q2\":\"实施方案\",\"q3\":\"总体方案\",\"q4\":\"\""
+                + "}]}";
+        List<LlmPort.BidSearchRow> rows = llmPort.parseBidSearchFromContent(json);
+        assertEquals(2, rows.size());
+        assertEquals("Q1", rows.get(0).getId());
+        assertEquals(2, rows.get(0).getQueries().size());
+        assertEquals("资质证书", rows.get(0).getQueries().get(0));
+        assertEquals("S1", rows.get(1).getId());
+        assertEquals(3, rows.get(1).getQueries().size());
+    }
+
+    @Test
+    void parseEvidenceRowsFromFlatFields() throws Exception {
+        String json = "{\"rows\":[{"
+                + "\"id\":\"Q1\",\"fragmentId\":101,\"page\":12,\"quote\":\"须具备二级资质\""
+                + "},{"
+                + "\"id\":\"S1\",\"chunkId\":201,\"page\":20,\"quote\":\"满分15分\""
+                + "}]}";
+        List<LlmPort.EvidenceRow> rows = llmPort.parseEvidenceFromContent(json);
+        assertEquals(2, rows.size());
+        assertEquals("Q1", rows.get(0).getId());
+        assertEquals(Long.valueOf(101L), rows.get(0).getFragmentId());
+        assertEquals(Integer.valueOf(12), rows.get(0).getPage());
+        assertEquals("须具备二级资质", rows.get(0).getQuote());
+        assertEquals("S1", rows.get(1).getId());
+        assertEquals(Long.valueOf(201L), rows.get(1).getFragmentId());
+    }
+
+    @Test
     void parseCompareFromContent() throws Exception {
         String json = "{\"requirementId\":\"Q1\",\"title\":\"资质\",\"reviewType\":\"响应性审查\","
                 + "\"status\":\"符合\",\"vetoRisk\":false,\"judgement\":\"已响应\","
@@ -196,11 +251,52 @@ class HttpLlmPortTest {
     }
 
     @Test
-    void extractChecklistReturnsRawContent() {
-        LlmPort.ExtractChecklistResult result = llmPort.extractChecklist("候选原文…");
+    void extractQualificationReturnsRawContent() {
+        LlmPort.ExtractChecklistResult result = llmPort.extractQualificationChecklist("候选原文…");
         assertEquals(1, result.getItems().size());
         assertEquals("须具备二级资质", result.getItems().get(0).getText());
         assertEquals(2, result.getItems().get(0).getBidSearch().size());
         assertTrue(result.getRawContent() != null && result.getRawContent().contains("须具备二级资质"));
+    }
+
+    @Test
+    void extractQualificationForcesMainType() {
+        LlmPort.ExtractChecklistResult result = llmPort.extractQualificationChecklist("候选原文…");
+        assertEquals(1, result.getItems().size());
+        assertEquals("QUALIFICATION", result.getItems().get(0).getMainType());
+        assertTrue(result.getItems().get(0).isMust());
+        assertTrue(result.getRawContent() != null && result.getRawContent().contains("须具备二级资质"));
+    }
+
+    @Test
+    void extractScoringDropsQualificationItemsFromWrongShape() {
+        // mock 返回资格外形；评分拆分路径丢弃另一侧，避免误改主类
+        LlmPort.ExtractChecklistResult result = llmPort.extractScoringChecklist("候选原文…");
+        assertEquals(0, result.getItems().size());
+        assertTrue(result.getRawContent() != null && result.getRawContent().contains("须具备二级资质"));
+    }
+
+    @Test
+    void parseQualOnlyAndScoreOnlyShapes() throws Exception {
+        String qualOnly = "{\"qualificationRequirements\":[{"
+                + "\"id\":\"Q1\",\"title\":\"资质\",\"mainType\":\"资格要求\",\"subType\":\"资质证书\","
+                + "\"content\":\"须具备二级资质\","
+                + "\"bidSearch\":{\"queries\":[\"资质证书\"]},"
+                + "\"evidence\":[{\"fragmentId\":1,\"page\":1,\"quote\":\"二级\"}]"
+                + "}]}";
+        List<LlmPort.ExtractedRequirement> quals = llmPort.parseChecklistFromContent(qualOnly);
+        assertEquals(1, quals.size());
+        assertEquals("QUALIFICATION", quals.get(0).getMainType());
+
+        String scoreOnly = "{\"scoring\":{\"totalScore\":15,\"scoreSumMatches\":true,\"items\":[{"
+                + "\"id\":\"S1\",\"title\":\"技术方案\",\"mainType\":\"评分项\",\"subType\":\"技术评分\","
+                + "\"content\":\"满分15分\",\"fullScore\":15,"
+                + "\"bidSearch\":{\"queries\":[\"技术方案\"]},"
+                + "\"evidence\":[{\"fragmentId\":2,\"page\":2,\"quote\":\"15分\"}]"
+                + "}]}}";
+        List<LlmPort.ExtractedRequirement> scores = llmPort.parseChecklistFromContent(scoreOnly);
+        assertEquals(1, scores.size());
+        assertEquals("SCORING", scores.get(0).getMainType());
+        assertEquals(0, scores.get(0).getScoreTotal().compareTo(new BigDecimal("15")));
     }
 }

@@ -1,0 +1,18 @@
+spring:
+  datasource:
+    # 与 bidding-api 的 application-dev.yml 对齐；服务器仍应用 EnvironmentFile 里的 DB_* 覆盖
+    url: "${DB_URL:jdbc:postgresql://localhost:5432/bidding_dev}"
+    username: ${DB_USER:bidding}
+    password: ${DB_PASSWORD:bidding123}
+
+bidding:
+  jwt:
+    secret: ${JWT_SECRET:dev-only-jwt-secret-at-least-32-bytes}
+  storage:
+    type: ${STORAGE_TYPE:s3}
+    s3:
+      endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+      access-key: ${MINIO_ACCESS_KEY:minioadmin}
+      secret-key: ${MINIO_SECRET_KEY:minioadmin}
+      bucket: ${MINIO_BUCKET:bidding-dev}
+      region: ${MINIO_REGION:us-east-1}

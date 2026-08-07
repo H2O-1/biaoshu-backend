@@ -56,6 +56,7 @@ public class BuildChecklistJobExecutor {
     public void execute(JobPort.JobRef job) {
         long jobId = job.getId();
         Long checklistId = null;
+        long tAll = System.currentTimeMillis();
         try {
             Payload payload = parsePayload(job.getPayloadJson());
             if (payload.checklistId == null || payload.projectId == null) {
@@ -126,7 +127,8 @@ public class BuildChecklistJobExecutor {
             checklistPort.insertItems(cid, items);
             checklistPort.markSuccess(cid, pipelineResult.getLlmRawJson());
             jobPort.markSuccess(jobId, "建清单完成 items=" + items.size());
-            log.info("BUILD_CHECKLIST 成功 jobId={} checklistId={} items={}", jobId, cid, items.size());
+            log.info("BUILD_CHECKLIST 成功 jobId={} checklistId={} items={} costMs={}",
+                    jobId, cid, items.size(), System.currentTimeMillis() - tAll);
         } catch (Exception ex) {
             log.error("BUILD_CHECKLIST 失败 jobId={}", jobId, ex);
             String msg = ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage();

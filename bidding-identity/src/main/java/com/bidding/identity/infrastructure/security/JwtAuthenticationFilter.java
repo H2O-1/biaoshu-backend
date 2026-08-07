@@ -11,6 +11,7 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -27,8 +28,10 @@ import java.util.Optional;
 /**
  * 解析 JWT，并用数据库校验 token_version / 停用状态。
  * 若 must_change_password=true，仅允许改密与退出。
+ * 仅 API（Servlet Web）装配；Worker 无 HTTP 请求，不加载。
  */
 @Component
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtTokenService jwtTokenService;

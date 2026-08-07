@@ -1,0 +1,137 @@
+# 异步任务 Worker 进程配置：执行 INDEX / BUILD_CHECKLIST / REVIEW / AI_REVIEW_PIPELINE。
+# 不启动 HTTP（WebApplicationType.NONE）；HTTP 相关配置（端口、CORS、SSE、上传）只在 API 进程需要。
+spring:
+  # 本地可放 application-secret.yml（gitignore）写 api-key；发版用环境变量 DASHSCOPE_API_KEY
+  config:
+    import: optional:classpath:application-secret.yml
+  application:
+    name: bidding-worker
+  main:
+    # 无 Web 容器时，主线程结束后若只剩 daemon 线程，JVM 会立刻退出。
+    # keep-alive 挂住进程，让 @Scheduled Poller 持续跑。
+    keep-alive: true
+  task:
+    scheduling:
+      # INDEX / 清单 / 审查 / 一键审查 多个 Poller 共用，避免单线程互相饿死
+      pool:
+        size: ${SCHEDULING_POOL_SIZE:6}
+  datasource:
+    url: "${DB_URL:jdbc:postgresql://localhost:5432/bidding}"
+    username: ${DB_USER:bidding}
+    password: ${DB_PASSWORD:}
+  flyway:
+    enabled: true
+    # 迁移脚本在 bidding-common 模块，API 与 Worker 共用同一份
+    locations: classpath:db/migration
+
+bidding:
+  jwt:
+    secret: ${JWT_SECRET:}
+    expire-seconds: ${JWT_EXPIRE_SECONDS:28800}
+  bootstrap-admin:
+    # 引导管理员只由 API 进程写入，Worker 关闭避免多实例并发建号
+    enabled: false
+  storage:
+    # 独立 Worker 必须与 API 共享同一对象存储；WorkerStorageGuard 会在非 s3 时拒绝启动
+    type: ${STORAGE_TYPE:s3}
+    s3:
+      endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+      access-key: ${MINIO_ACCESS_KEY:minioadmin}
+      secret-key: ${MINIO_SECRET_KEY:minioadmin}
+      bucket: ${MINIO_BUCKET:bidding-dev}
+      region: ${MINIO_REGION:us-east-1}
+  file:
+    max-size-bytes: ${UPLOAD_MAX_SIZE_BYTES:104857600}
+    max-files-per-package: 5
+  # INDEX：fake=假向量；real=百炼 text-embedding-v4
+  # worker-enabled 在本进程写死 true：API/Worker 共用 .env 时，若把 INDEX_WORKER_ENABLED=false
+  # 给 API 用，会连带把 Worker 的 Poller 关掉（表现为 Started 后无「INDEX Worker 已启用」、任务一直 PENDING）。
+  index:
+    mode: ${INDEX_MODE:real}
+    worker-enabled: true
+    poll-ms: ${INDEX_POLL_MS:2000}
+    worker-id: ${INDEX_WORKER_ID:}
+    fake-chunk-count: ${INDEX_FAKE_CHUNK_COUNT:3}
+    embedding-dim: ${INDEX_EMBEDDING_DIM:8}
+    embedding:
+      base-url: ${EMBEDDING_BASE_URL:https://ws-jbb2t4ahvyzwxo9b.cn-beijing.maas.aliyuncs.com/compatible-mode/v1}
+      model: ${EMBEDDING_MODEL:text-embedding-v4}
+      dimensions: ${EMBEDDING_DIMENSIONS:1024}
+      batch-size: ${EMBEDDING_BATCH_SIZE:10}
+      connect-timeout-ms: ${EMBEDDING_CONNECT_TIMEOUT_MS:3000}
+      read-timeout-ms: ${EMBEDDING_READ_TIMEOUT_MS:120000}
+    chunk:
+      max-chars: ${INDEX_CHUNK_MAX_CHARS:2000}
+      fallback-window: ${INDEX_CHUNK_FALLBACK_WINDOW:500}
+      fallback-overlap: ${INDEX_CHUNK_FALLBACK_OVERLAP:50}
+  # 向量召回；hybrid：向量 ∥ BM25 + RRF（bm25-top-k=0 表示与向量 topK 相同）
+  recall:
+    debug-enabled: ${RECALL_DEBUG:false}
+    default-top-k: ${RECALL_DEFAULT_TOP_K:40}
+    hybrid-enabled: ${RECALL_HYBRID_ENABLED:true}
+    bm25-top-k: ${RECALL_BM25_TOP_K:0}
+    rrf-k: ${RECALL_RRF_K:60}
+  # 重排：qwen3-rerank（compatible-api，与 embedding 的 compatible-mode 不同）
+  rerank:
+    debug-enabled: ${RERANK_DEBUG:false}
+    base-url: ${RERANK_BASE_URL:https://ws-jbb2t4ahvyzwxo9b.cn-beijing.maas.aliyuncs.com/compatible-api/v1}
+    model: ${RERANK_MODEL:qwen3-rerank}
+    tender-top-n: ${RERANK_TENDER_TOP_N:15}
+    bid-top-n: ${RERANK_BID_TOP_N:15}
+    connect-timeout-ms: ${RERANK_CONNECT_TIMEOUT_MS:3000}
+    read-timeout-ms: ${RERANK_READ_TIMEOUT_MS:120000}
+    # 空 = 请求不传 instruct，走百炼官网默认问答检索策略；需要定制时再设环境变量
+    tender-instruct: ${RERANK_TENDER_INSTRUCT:}
+    bid-instruct: ${RERANK_BID_INSTRUCT:}
+    default-instruct: ${RERANK_DEFAULT_INSTRUCT:}
+  # 建清单 BUILD_CHECKLIST（本进程写死开启，原因同 index.worker-enabled）
+  checklist:
+    worker-enabled: true
+    poll-ms: ${CHECKLIST_POLL_MS:3000}
+    worker-id: ${CHECKLIST_WORKER_ID:}
+    recall-top-k: ${CHECKLIST_RECALL_TOP_K:40}
+    rerank-top-n: ${CHECKLIST_RERANK_TOP_N:15}
+    bid-search-batch-size: ${CHECKLIST_BID_SEARCH_BATCH_SIZE:10}
+  # 审查 REVIEW（本进程写死开启，原因同 index.worker-enabled）
+  review:
+    worker-enabled: true
+    poll-ms: ${REVIEW_POLL_MS:3000}
+    worker-id: ${REVIEW_WORKER_ID:}
+    recall-top-k: ${REVIEW_RECALL_TOP_K:30}
+    rerank-top-n: ${REVIEW_RERANK_TOP_N:15}
+  # 一键审查总流程（本进程写死开启，原因同 index.worker-enabled）
+  ai-review-pipeline:
+    worker-enabled: true
+    poll-ms: ${AI_REVIEW_PIPELINE_POLL_MS:5000}
+    worker-id: ${AI_REVIEW_PIPELINE_WORKER_ID:}
+    # 单次调度最多连续推进的任务数，避免调度线程长期占用
+    batch-size: ${AI_REVIEW_PIPELINE_BATCH_SIZE:3}
+    # 多实例租约秒数：租约过期后其他 Worker 可接管续跑
+    lease-seconds: ${AI_REVIEW_PIPELINE_LEASE_SECONDS:60}
+    # 等待阶段的下次运行间隔（不占用线程、不计重试）
+    wait-poll-ms: ${AI_REVIEW_PIPELINE_WAIT_POLL_MS:3000}
+    index-wait-timeout-ms: ${AI_REVIEW_PIPELINE_INDEX_WAIT_TIMEOUT_MS:7200000}
+    child-wait-timeout-ms: ${AI_REVIEW_PIPELINE_CHILD_WAIT_TIMEOUT_MS:7200000}
+    # 瞬时错误（网络超时、限流等）：retry_count + 1 并指数退避，达到上限转 FAILED
+    max-retries: ${AI_REVIEW_PIPELINE_MAX_RETRIES:3}
+    retry-backoff-ms: ${AI_REVIEW_PIPELINE_RETRY_BACKOFF_MS:10000}
+  # 僵尸子任务回收：临时管理功能，API 与 Worker 一律默认关闭，仅人工显式开启；
+  # 普通子任务租约化之前不允许启动时自动全局回收（可能误杀长任务）
+  recovery:
+    enabled: ${STALE_RECOVERY_ENABLED:false}
+    stale-minutes: ${STALE_RECOVERY_STALE_MINUTES:30}
+  # 抽取 / 对照 LLM（compatible-mode chat）
+  llm:
+    base-url: ${LLM_BASE_URL:${EMBEDDING_BASE_URL:https://ws-jbb2t4ahvyzwxo9b.cn-beijing.maas.aliyuncs.com/compatible-mode/v1}}
+    model: ${LLM_MODEL:qwen3.7-plus}
+    prompt-version: ${LLM_PROMPT_VERSION:extract-artifact-v1}
+    review-prompt-version: ${LLM_REVIEW_PROMPT_VERSION:review-v2}
+    connect-timeout-ms: ${LLM_CONNECT_TIMEOUT_MS:3000}
+    read-timeout-ms: ${LLM_READ_TIMEOUT_MS:180000}
+
+logging:
+  level:
+    root: INFO
+    com.bidding: INFO
+  # 文件目录可用环境变量 LOG_PATH（默认相对工作目录 logs/）
+  # error → logs/error.log；一键审查节点 → logs/ai.log

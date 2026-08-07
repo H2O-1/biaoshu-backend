@@ -12,6 +12,8 @@ import com.bidding.common.security.TendererAuth;
 import com.bidding.file.domain.model.Document;
 import com.bidding.file.domain.port.DocumentRepository;
 import com.bidding.file.domain.port.ObjectStoragePort;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,6 +38,8 @@ import java.util.UUID;
  */
 @Service
 public class DocumentAppService {
+
+    private static final Logger log = LoggerFactory.getLogger(DocumentAppService.class);
 
     private static final String STATUS_ACTIVE = "ACTIVE";
     private static final String INDEX_PENDING = "PENDING";
@@ -85,9 +89,11 @@ public class DocumentAppService {
 
     @Transactional
     public DocumentSummary upload(long packageId, String fileType, MultipartFile file) {
+        long t0 = System.currentTimeMillis();
         CurrentUser operator = TendererAuth.requireTenderer("仅招标方可操作文件");
         PackageLookupPort.PackageRef pkg = TendererAuth.requireOwnedPackage(
                 packageLookupPort, packageId, operator.getOrgId());
+        requireNoActiveChecklistOrReview(pkg.getProjectId(), "项目审查进行中，请稍后再上传文件");
 
         String safeFileType = normalizeFileType(fileType);
 
@@ -125,8 +131,10 @@ public class DocumentAppService {
         try (InputStream in = file.getInputStream()) {
             objectStoragePort.put(objectKey, in, size, contentType);
         } catch (IOException e) {
+            log.error("上传读流失败 packageId={} fileName={}", packageId, safeName, e);
             throw new BizException(ErrorCode.INTERNAL, "读取上传文件失败");
         } catch (RuntimeException e) {
+            log.error("上传写对象存储失败 packageId={} fileName={}", packageId, safeName, e);
             throw new BizException(ErrorCode.INTERNAL, "文件写入对象存储失败");
         }
 
@@ -155,6 +163,9 @@ public class DocumentAppService {
             throw e;
         }
 
+        log.info("上传文件成功 packageId={} projectId={} documentId={} fileName={} sizeBytes={} costMs={}",
+                packageId, pkg.getProjectId(), id, safeName, size, System.currentTimeMillis() - t0);
+        invalidateArtifactsAfterFileChange(pkg, "项目文件已变更");
         return toSummary(requireOwnedDocument(id, operator.getOrgId()));
     }
 
@@ -205,6 +216,7 @@ public class DocumentAppService {
      */
     @Transactional
     public TenderCopyResult copyTenderFilesFromProject(long targetProjectId, long sourceProjectId) {
+        long t0 = System.currentTimeMillis();
         CurrentUser operator = TendererAuth.requireTenderer("仅招标方可操作文件");
         TendererAuth.requireOwnedProject(projectLookupPort, targetProjectId, operator.getOrgId());
         TendererAuth.requireOwnedProject(projectLookupPort, sourceProjectId, operator.getOrgId());
@@ -212,6 +224,7 @@ public class DocumentAppService {
         if (targetProjectId == sourceProjectId) {
             throw new BizException(ErrorCode.BAD_REQUEST, "不能从当前项目复制到自身");
         }
+        requireNoActiveChecklistOrReview(targetProjectId, "项目审查进行中，请稍后再复制文件");
 
         PackageLookupPort.PackageRef targetPkg = packageLookupPort.findActiveByProjectIdAndType(
                 targetProjectId, PACKAGE_TYPE_TENDER);
@@ -265,6 +278,10 @@ public class DocumentAppService {
                     jobIds
             );
         } catch (RuntimeException ex) {
+            if (!(ex instanceof BizException)) {
+                log.error("复制招标文件失败 targetProjectId={} sourceProjectId={} putCount={}",
+                        targetProjectId, sourceProjectId, putKeys.size(), ex);
+            }
             for (int k = 0; k < putKeys.size(); k++) {
                 try {
                     objectStoragePort.delete(putKeys.get(k));
@@ -279,6 +296,9 @@ public class DocumentAppService {
         result.setItems(copied);
         result.setJobIds(jobIds);
         result.setCopiedCount(copied.size());
+        log.info("复制招标文件成功 targetProjectId={} sourceProjectId={} copiedCount={} costMs={}",
+                targetProjectId, sourceProjectId, copied.size(), System.currentTimeMillis() - t0);
+        invalidateArtifactsAfterFileChange(targetPkg, "招标文件已复制变更");
         return result;
     }
 
@@ -351,8 +371,10 @@ public class DocumentAppService {
     public BidCopyResult copyBidPackageFrom(long targetProjectId,
                                             long sourcePackageId,
                                             long targetPackageId) {
+        long t0 = System.currentTimeMillis();
         CurrentUser operator = TendererAuth.requireTenderer("仅招标方可操作文件");
         TendererAuth.requireOwnedProject(projectLookupPort, targetProjectId, operator.getOrgId());
+        requireNoActiveChecklistOrReview(targetProjectId, "项目审查进行中，请稍后再复制文件");
 
         PackageLookupPort.PackageRef sourcePkg = packageLookupPort.findActiveById(sourcePackageId);
         if (sourcePkg == null || sourcePkg.getOrgId() != operator.getOrgId()) {
@@ -418,6 +440,10 @@ public class DocumentAppService {
                     jobIds
             );
         } catch (RuntimeException ex) {
+            if (!(ex instanceof BizException)) {
+                log.error("复制投标文件失败 targetProjectId={} sourcePackageId={} targetPackageId={} putCount={}",
+                        targetProjectId, sourcePackageId, targetPackageId, putKeys.size(), ex);
+            }
             for (int k = 0; k < putKeys.size(); k++) {
                 try {
                     objectStoragePort.delete(putKeys.get(k));
@@ -434,6 +460,10 @@ public class DocumentAppService {
         result.setItems(copied);
         result.setJobIds(jobIds);
         result.setCopiedCount(copied.size());
+        log.info("复制投标文件成功 targetProjectId={} sourcePackageId={} targetPackageId={} copiedCount={} costMs={}",
+                targetProjectId, sourcePackageId, targetPackageId, copied.size(),
+                System.currentTimeMillis() - t0);
+        invalidateArtifactsAfterFileChange(targetPkg, "投标文件已复制变更");
         return result;
     }
 
@@ -459,8 +489,11 @@ public class DocumentAppService {
             try (InputStream in = objectStoragePort.open(src.getObjectKey())) {
                 objectStoragePort.put(objectKey, in, src.getSizeBytes(), src.getContentType());
             } catch (IOException e) {
+                log.error("复制文件流失败 sourceDocumentId={} objectKey={}", src.getId(), src.getObjectKey(), e);
                 throw new BizException(ErrorCode.INTERNAL, "复制文件流失败");
             } catch (RuntimeException e) {
+                log.error("复制对象存储失败 sourceDocumentId={} sourceKey={} targetKey={}",
+                        src.getId(), src.getObjectKey(), objectKey, e);
                 throw new BizException(ErrorCode.INTERNAL, "复制对象存储文件失败");
             }
             putKeys.add(objectKey);
@@ -521,29 +554,57 @@ public class DocumentAppService {
             return;
         }
 
-        boolean tenderDoc = PACKAGE_TYPE_TENDER.equalsIgnoreCase(pkg.getType());
         Long projectId = doc.getProjectId();
         if (projectId == null) {
             projectId = pkg.getProjectId();
         }
-        if (tenderDoc && projectId != null
-                && projectArtifactInvalidationPort.hasActiveAiWork(projectId)) {
-            throw new BizException(ErrorCode.CONFLICT, "项目审查进行中，请稍后再删招标文件");
-        }
+        requireNoActiveChecklistOrReview(projectId, "项目审查进行中，请稍后再删文件");
 
         try {
             objectStoragePort.delete(doc.getObjectKey());
         } catch (RuntimeException e) {
+            log.error("删除对象存储失败 packageId={} documentId={} objectKey={}",
+                    packageId, documentId, doc.getObjectKey(), e);
             throw new BizException(ErrorCode.INTERNAL, "删除对象存储中的文件失败");
         }
         documentRepository.markDeleted(documentId);
         documentIndexStorePort.deleteByDocumentId(documentId);
 
-        if (tenderDoc && projectId != null) {
+        invalidateArtifactsAfterFileChange(pkg, "项目文件已删除");
+        log.info("删除文件成功 packageId={} documentId={} type={} projectId={}",
+                packageId, documentId, pkg.getType(), projectId);
+    }
+
+    /**
+     * 已绑项目且建清单/审查进行中时禁止改文件（不含 INDEX）。
+     */
+    private void requireNoActiveChecklistOrReview(Long projectId, String message) {
+        if (projectId == null) {
+            return;
+        }
+        if (projectArtifactInvalidationPort.hasActiveChecklistOrReviewWork(projectId)) {
+            throw new BizException(ErrorCode.CONFLICT, message);
+        }
+    }
+
+    /**
+     * 文件变更后作废产物：招标 → 清单+审查；投标 → 仅审查。未绑项目跳过。
+     * OBSOLETE 不删行，详情仍可按 id 查看。
+     */
+    private void invalidateArtifactsAfterFileChange(PackageLookupPort.PackageRef pkg, String reason) {
+        if (pkg == null || pkg.getProjectId() == null) {
+            return;
+        }
+        long projectId = pkg.getProjectId();
+        String msg = reason == null ? "项目文件已变更" : reason.trim();
+        if (PACKAGE_TYPE_TENDER.equalsIgnoreCase(pkg.getType())) {
             projectArtifactInvalidationPort.obsoleteChecklistsByProjectId(
-                    projectId, "招标文件已删除，请重新解析并审查");
+                    projectId, msg + "，请重新解析并审查");
             projectArtifactInvalidationPort.obsoleteReviewsByProjectId(
-                    projectId, "招标文件已删除，请重新审查");
+                    projectId, msg + "，请重新审查");
+        } else if (PACKAGE_TYPE_BID.equalsIgnoreCase(pkg.getType())) {
+            projectArtifactInvalidationPort.obsoleteReviewsByProjectId(
+                    projectId, msg + "，请重新审查");
         }
     }
 

@@ -24,5 +24,6 @@ D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\
 D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\infrastructure\security\CorsConfig.java
 D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\infrastructure\security\JwtAuthenticationFilter.java
 D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\infrastructure\security\JwtTokenService.java
+D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\infrastructure\security\PasswordEncoderConfig.java
 D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\infrastructure\security\SecurityConfig.java
 D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\package-info.java

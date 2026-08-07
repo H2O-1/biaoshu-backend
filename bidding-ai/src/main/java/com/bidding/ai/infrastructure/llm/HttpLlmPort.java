@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -23,27 +24,48 @@ import java.util.List;
 
 /**
  * 百炼 OpenAI 兼容 Chat（compatible-mode/v1/chat/completions）：建清单抽取 + 审查对照。
+ * 建清单按产物拆分：资格条目 A ∥ 评分条目 B → bidSearch C。
  */
 @Component
 public class HttpLlmPort implements LlmPort {
 
     private static final Logger log = LoggerFactory.getLogger(HttpLlmPort.class);
 
+    private static final String SYSTEM_EXTRACT_QUAL =
+            "你是招标资格要求归纳专家。只依据给定招标原文归纳资格/准入/否决类条目，不得编造。只输出 JSON。";
+
+    private static final String SYSTEM_EXTRACT_SCORE =
+            "你是招标评分项归纳专家。只依据给定招标原文归纳含分值的评分条目，不得编造。只输出 JSON。";
+
+    private static final String SYSTEM_BID_SEARCH =
+            "你是投标侧检索词专家。根据已编号的招标清单条目生成投标文件召回词，不得编造条目。只输出 JSON。";
+
+    private static final String SYSTEM_EVIDENCE =
+            "你是招标原文证据摘录专家。只从给定候选原文摘录支撑条目的证据，不得编造。只输出 JSON。";
+
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
     private final String chatUrl;
     private final String apiKey;
     private final String modelName;
-    private final String promptTemplate;
+    private final String qualPromptTemplate;
+    private final String scorePromptTemplate;
+    private final String bidSearchPromptTemplate;
+    private final String evidencePromptTemplate;
     private final String reviewPromptTemplate;
     private final Duration requestTimeout;
 
+    /** Spring 注入入口（多构造器时必须显式指定）。 */
+    @Autowired
     public HttpLlmPort(
             ObjectMapper objectMapper,
             @Value("${bidding.llm.base-url:${bidding.index.embedding.base-url}}") String baseUrl,
             @Value("${bidding.llm.api-key:${bidding.index.embedding.api-key:${DASHSCOPE_API_KEY:}}}") String apiKey,
             @Value("${bidding.llm.model:qwen3.7-plus}") String modelName,
-            @Value("${bidding.llm.extract-prompt-template:}") String promptTemplate,
+            @Value("${bidding.llm.extract-qual-prompt-template:}") String qualPromptTemplate,
+            @Value("${bidding.llm.extract-score-prompt-template:}") String scorePromptTemplate,
+            @Value("${bidding.llm.bid-search-prompt-template:}") String bidSearchPromptTemplate,
+            @Value("${bidding.llm.evidence-prompt-template:}") String evidencePromptTemplate,
             @Value("${bidding.llm.review-prompt-template:}") String reviewPromptTemplate,
             @Value("${bidding.llm.connect-timeout-ms:3000}") long connectTimeoutMs,
             @Value("${bidding.llm.read-timeout-ms:180000}") long readTimeoutMs) {
@@ -55,10 +77,25 @@ public class HttpLlmPort implements LlmPort {
         this.chatUrl = normalized + "/chat/completions";
         this.apiKey = apiKey == null ? "" : apiKey.trim();
         this.modelName = modelName == null || modelName.isBlank() ? "qwen3.7-plus" : modelName.trim();
-        if (promptTemplate == null || promptTemplate.isBlank()) {
-            this.promptTemplate = defaultPromptTemplate();
+        if (qualPromptTemplate == null || qualPromptTemplate.isBlank()) {
+            this.qualPromptTemplate = defaultQualPromptTemplate();
         } else {
-            this.promptTemplate = promptTemplate;
+            this.qualPromptTemplate = qualPromptTemplate;
+        }
+        if (scorePromptTemplate == null || scorePromptTemplate.isBlank()) {
+            this.scorePromptTemplate = defaultScorePromptTemplate();
+        } else {
+            this.scorePromptTemplate = scorePromptTemplate;
+        }
+        if (bidSearchPromptTemplate == null || bidSearchPromptTemplate.isBlank()) {
+            this.bidSearchPromptTemplate = defaultBidSearchPromptTemplate();
+        } else {
+            this.bidSearchPromptTemplate = bidSearchPromptTemplate;
+        }
+        if (evidencePromptTemplate == null || evidencePromptTemplate.isBlank()) {
+            this.evidencePromptTemplate = defaultEvidencePromptTemplate();
+        } else {
+            this.evidencePromptTemplate = evidencePromptTemplate;
         }
         if (reviewPromptTemplate == null || reviewPromptTemplate.isBlank()) {
             this.reviewPromptTemplate = defaultReviewPromptTemplate();
@@ -79,23 +116,104 @@ public class HttpLlmPort implements LlmPort {
     }
 
     @Override
-    public ExtractChecklistResult extractChecklist(String chunksText) {
+    public ExtractChecklistResult extractQualificationChecklist(String chunksText) {
+        ExtractChecklistResult result = runExtract(
+                SYSTEM_EXTRACT_QUAL, qualPromptTemplate, chunksText, "资格建清单");
+        keepOnlyMainType(result, "QUALIFICATION");
+        return result;
+    }
+
+    @Override
+    public ExtractChecklistResult extractScoringChecklist(String chunksText) {
+        ExtractChecklistResult result = runExtract(
+                SYSTEM_EXTRACT_SCORE, scorePromptTemplate, chunksText, "评分建清单");
+        keepOnlyMainType(result, "SCORING");
+        return result;
+    }
+
+    @Override
+    public BidSearchResult generateBidSearch(String checklistItemsText) {
+        if (apiKey.isEmpty()) {
+            throw new IllegalStateException("未配置 DASHSCOPE_API_KEY / bidding.llm.api-key");
+        }
+        String items = checklistItemsText == null ? "" : checklistItemsText;
+        String userPrompt = bidSearchPromptTemplate.replace("{{checklist_items}}", items);
+        String content = chatJsonContent(SYSTEM_BID_SEARCH, userPrompt);
+        try {
+            BidSearchResult result = new BidSearchResult();
+            result.setRawContent(content);
+            result.setRows(parseBidSearchFromContent(content));
+            return result;
+        } catch (IOException ex) {
+            throw new IllegalStateException("解析 LLM bidSearch 结果失败: " + ex.getMessage(), ex);
+        }
+    }
+
+    @Override
+    public EvidenceResult generateEvidence(String checklistItemsText, String relatedChunksText) {
+        if (apiKey.isEmpty()) {
+            throw new IllegalStateException("未配置 DASHSCOPE_API_KEY / bidding.llm.api-key");
+        }
+        String items = checklistItemsText == null ? "" : checklistItemsText;
+        String chunks = relatedChunksText == null ? "" : relatedChunksText;
+        String userPrompt = evidencePromptTemplate
+                .replace("{{checklist_items}}", items)
+                .replace("{{related_chunks}}", chunks);
+        String content = chatJsonContent(SYSTEM_EVIDENCE, userPrompt);
+        try {
+            EvidenceResult result = new EvidenceResult();
+            result.setRawContent(content);
+            result.setRows(parseEvidenceFromContent(content));
+            return result;
+        } catch (IOException ex) {
+            throw new IllegalStateException("解析 LLM evidence 结果失败: " + ex.getMessage(), ex);
+        }
+    }
+
+    private ExtractChecklistResult runExtract(
+            String system, String template, String chunksText, String scene) {
         if (apiKey.isEmpty()) {
             throw new IllegalStateException("未配置 DASHSCOPE_API_KEY / bidding.llm.api-key");
         }
         String chunks = chunksText == null ? "" : chunksText;
-        String userPrompt = promptTemplate.replace("{{recalled_chunks}}", chunks);
-        String content = chatJsonContent(
-                "你是招标投标规则归纳专家。只依据给定招标原文归纳，不得编造。只输出 JSON。",
-                userPrompt);
+        String userPrompt = template.replace("{{recalled_chunks}}", chunks);
+        String content = chatJsonContent(system, userPrompt);
         try {
             ExtractChecklistResult result = new ExtractChecklistResult();
             result.setRawContent(content);
             result.setItems(parseChecklistFromContent(content));
             return result;
         } catch (IOException ex) {
-            throw new IllegalStateException("解析 LLM 建清单结果失败: " + ex.getMessage(), ex);
+            throw new IllegalStateException("解析 LLM " + scene + "结果失败: " + ex.getMessage(), ex);
         }
+    }
+
+    /**
+     * 拆分路径：只保留目标主类；若模型误出另一侧则丢弃。
+     * 未标主类或主类与目标一致的条目强制为 mainType。
+     */
+    private static void keepOnlyMainType(ExtractChecklistResult result, String mainType) {
+        if (result == null || result.getItems() == null) {
+            return;
+        }
+        String other = "QUALIFICATION".equals(mainType) ? "SCORING" : "QUALIFICATION";
+        List<ExtractedRequirement> kept = new ArrayList<>();
+        List<ExtractedRequirement> items = result.getItems();
+        for (int i = 0; i < items.size(); i++) {
+            ExtractedRequirement item = items.get(i);
+            if (item == null) {
+                continue;
+            }
+            String mt = item.getMainType();
+            if (mt != null && other.equalsIgnoreCase(mt.trim())) {
+                continue;
+            }
+            item.setMainType(mainType);
+            item.setMust("QUALIFICATION".equals(mainType));
+            item.setCategory(mainType);
+            kept.add(item);
+        }
+        result.setItems(kept);
     }
 
     @Override
@@ -181,8 +299,25 @@ public class HttpLlmPort implements LlmPort {
             if (ex instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }
-            throw new IllegalStateException("调用 LLM 失败: " + ex.getMessage(), ex);
+            log.error("调用 LLM 失败 model={} url={} cause={}",
+                    modelName, chatUrl, describeThrowable(ex), ex);
+            throw new IllegalStateException("调用 LLM 失败: " + describeThrowable(ex), ex);
         }
+    }
+
+    /** 避免 InterruptedException 等 getMessage() 为 null 时日志/任务失败原因不可读。 */
+    private static String describeThrowable(Throwable ex) {
+        if (ex == null) {
+            return "unknown";
+        }
+        if (ex instanceof InterruptedException) {
+            return "请求被中断（常见于服务重启或线程取消）";
+        }
+        String msg = ex.getMessage();
+        if (msg == null || msg.isBlank()) {
+            return ex.getClass().getSimpleName();
+        }
+        return msg;
     }
 
     /**
@@ -305,6 +440,23 @@ public class HttpLlmPort implements LlmPort {
         }
         fillEvidence(item, evidenceNode);
 
+        // 产物拆分扁平字段：chunkIds 可为 "101,108" 或 [101,108]；与 evidence 抽取的 id 合并
+        List<Long> flatChunkIds = parseChunkIdsField(node.get("chunkIds"));
+        if (flatChunkIds.isEmpty()) {
+            flatChunkIds = parseChunkIdsField(node.get("chunk_ids"));
+        }
+        if (!flatChunkIds.isEmpty()) {
+            List<Long> merged = item.getChunkIds() == null
+                    ? new ArrayList<>() : new ArrayList<>(item.getChunkIds());
+            for (int i = 0; i < flatChunkIds.size(); i++) {
+                Long id = flatChunkIds.get(i);
+                if (id != null && !merged.contains(id)) {
+                    merged.add(id);
+                }
+            }
+            item.setChunkIds(merged);
+        }
+
         // 评分满分：产品 fullScore / 旧 scoreTotal；未明确保持 null，不用 0 顶替
         java.math.BigDecimal score = decimalOf(node, "fullScore");
         if (score == null) {
@@ -335,6 +487,225 @@ public class HttpLlmPort implements LlmPort {
         }
 
         return item;
+    }
+
+    /**
+     * 解析扁平 chunkIds：数字数组，或逗号分隔字符串。
+     */
+    private List<Long> parseChunkIdsField(JsonNode node) {
+        List<Long> result = new ArrayList<>();
+        if (node == null || node.isNull()) {
+            return result;
+        }
+        if (node.isArray()) {
+            for (int i = 0; i < node.size(); i++) {
+                JsonNode el = node.get(i);
+                if (el == null || el.isNull()) {
+                    continue;
+                }
+                if (el.isNumber()) {
+                    result.add(el.asLong());
+                } else {
+                    String t = el.asText();
+                    if (t != null && !t.isBlank()) {
+                        try {
+                            result.add(Long.parseLong(t.trim()));
+                        } catch (NumberFormatException ignored) {
+                            // 跳过非法 id
+                        }
+                    }
+                }
+            }
+            return result;
+        }
+        if (node.isNumber()) {
+            result.add(node.asLong());
+            return result;
+        }
+        String text = node.asText();
+        if (text == null || text.isBlank()) {
+            return result;
+        }
+        String[] parts = text.split(",");
+        for (int i = 0; i < parts.length; i++) {
+            String p = parts[i].trim();
+            if (p.isEmpty()) {
+                continue;
+            }
+            try {
+                result.add(Long.parseLong(p));
+            } catch (NumberFormatException ignored) {
+                // 跳过非法 id
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 解析 bidSearch 产物 C：{"rows":[{"id":"Q1","q1":"...","q2":"...","q3":"","q4":""}]}。
+     * 亦兼容 items[] / 纯数组，以及 requirementId、queries 数组。
+     */
+    List<BidSearchRow> parseBidSearchFromContent(String trimmed) throws IOException {
+        JsonNode parsed = objectMapper.readTree(trimmed);
+        JsonNode arrayNode = null;
+        if (parsed.isArray()) {
+            arrayNode = parsed;
+        } else if (parsed.isObject()) {
+            if (parsed.has("rows") && parsed.get("rows").isArray()) {
+                arrayNode = parsed.get("rows");
+            } else if (parsed.has("items") && parsed.get("items").isArray()) {
+                arrayNode = parsed.get("items");
+            }
+        }
+        if (arrayNode == null) {
+            throw new IllegalStateException("bidSearch LLM JSON 须含 rows/items 数组或为纯数组");
+        }
+        List<BidSearchRow> rows = new ArrayList<>();
+        for (int i = 0; i < arrayNode.size(); i++) {
+            BidSearchRow row = parseOneBidSearchRow(arrayNode.get(i));
+            if (row != null) {
+                rows.add(row);
+            }
+        }
+        return rows;
+    }
+
+    private BidSearchRow parseOneBidSearchRow(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return null;
+        }
+        String id = textOf(node, "id");
+        if (id == null || id.isBlank()) {
+            id = textOf(node, "requirementId");
+        }
+        if (id == null || id.isBlank()) {
+            id = textOf(node, "requirement_id");
+        }
+        if (id == null || id.isBlank()) {
+            return null;
+        }
+        List<String> queries = new ArrayList<>();
+        appendNonBlankQuery(queries, textOf(node, "q1"));
+        appendNonBlankQuery(queries, textOf(node, "q2"));
+        appendNonBlankQuery(queries, textOf(node, "q3"));
+        appendNonBlankQuery(queries, textOf(node, "q4"));
+        if (queries.isEmpty()) {
+            List<String> fromArray = parseBidSearchQueries(node.get("bidSearch"));
+            if (fromArray.isEmpty()) {
+                fromArray = parseBidSearchQueries(node.get("queries"));
+            }
+            for (int i = 0; i < fromArray.size(); i++) {
+                appendNonBlankQuery(queries, fromArray.get(i));
+            }
+        }
+        BidSearchRow row = new BidSearchRow();
+        row.setId(id.trim());
+        row.setQueries(queries);
+        return row;
+    }
+
+    private static void appendNonBlankQuery(List<String> queries, String raw) {
+        if (raw == null) {
+            return;
+        }
+        String t = raw.trim();
+        if (t.isEmpty()) {
+            return;
+        }
+        if (t.length() > 30) {
+            t = t.substring(0, 30);
+        }
+        if (!queries.contains(t)) {
+            queries.add(t);
+        }
+    }
+
+    /**
+     * 解析 evidence 产物 D：{"rows":[{"id":"Q1","fragmentId":101,"page":12,"quote":"..."}]}。
+     */
+    List<EvidenceRow> parseEvidenceFromContent(String trimmed) throws IOException {
+        JsonNode parsed = objectMapper.readTree(trimmed);
+        JsonNode arrayNode = null;
+        if (parsed.isArray()) {
+            arrayNode = parsed;
+        } else if (parsed.isObject()) {
+            if (parsed.has("rows") && parsed.get("rows").isArray()) {
+                arrayNode = parsed.get("rows");
+            } else if (parsed.has("items") && parsed.get("items").isArray()) {
+                arrayNode = parsed.get("items");
+            } else if (parsed.has("evidence") && parsed.get("evidence").isArray()) {
+                arrayNode = parsed.get("evidence");
+            }
+        }
+        if (arrayNode == null) {
+            throw new IllegalStateException("evidence LLM JSON 须含 rows/items/evidence 数组或为纯数组");
+        }
+        List<EvidenceRow> rows = new ArrayList<>();
+        for (int i = 0; i < arrayNode.size(); i++) {
+            EvidenceRow row = parseOneEvidenceRow(arrayNode.get(i));
+            if (row != null) {
+                rows.add(row);
+            }
+        }
+        return rows;
+    }
+
+    private EvidenceRow parseOneEvidenceRow(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return null;
+        }
+        String id = textOf(node, "id");
+        if (id == null || id.isBlank()) {
+            id = textOf(node, "requirementId");
+        }
+        if (id == null || id.isBlank()) {
+            id = textOf(node, "requirement_id");
+        }
+        if (id == null || id.isBlank()) {
+            return null;
+        }
+        String quote = textOf(node, "quote");
+        if (quote == null || quote.isBlank()) {
+            return null;
+        }
+        Long fragmentId = null;
+        if (node.has("fragmentId") && !node.get("fragmentId").isNull()) {
+            JsonNode fid = node.get("fragmentId");
+            if (fid.isNumber()) {
+                fragmentId = fid.asLong();
+            } else {
+                try {
+                    fragmentId = Long.parseLong(fid.asText().trim());
+                } catch (NumberFormatException ignored) {
+                    // 非法 id
+                }
+            }
+        }
+        if (fragmentId == null && node.has("chunkId") && !node.get("chunkId").isNull()) {
+            JsonNode cid = node.get("chunkId");
+            if (cid.isNumber()) {
+                fragmentId = cid.asLong();
+            }
+        }
+        if (fragmentId == null && node.has("chunk_id") && !node.get("chunk_id").isNull()
+                && node.get("chunk_id").isNumber()) {
+            fragmentId = node.get("chunk_id").asLong();
+        }
+        if (fragmentId == null) {
+            return null;
+        }
+        Integer page = null;
+        if (node.has("page") && !node.get("page").isNull() && node.get("page").isNumber()) {
+            page = node.get("page").asInt();
+        } else if (node.has("pageNo") && !node.get("pageNo").isNull() && node.get("pageNo").isNumber()) {
+            page = node.get("pageNo").asInt();
+        }
+        EvidenceRow row = new EvidenceRow();
+        row.setId(id.trim());
+        row.setFragmentId(fragmentId);
+        row.setPage(page);
+        row.setQuote(truncateByCodePoint(quote.trim(), 200));
+        return row;
     }
 
     /**
@@ -799,49 +1170,76 @@ public class HttpLlmPort implements LlmPort {
     }
 
     /**
-     * 建清单默认提示词：产品外形（资格列表 + 评分块）+ 规则；落库前由程序展平。
+     * 资格条目默认提示词（产物 A）：扁平 items，不含 bidSearch / evidence。
      */
-    private static String defaultPromptTemplate() {
-        return "【角色】招投标规则归纳专家。把 RAG 召回并重排后的招标文件片段，"
-                + "整理成结构化的「招标要求清单」和「评分项清单」。只依据原文，不得编造。只输出 JSON 本体。\n"
-                + "【任务】\n"
-                + "1) 阅读全部片段；\n"
-                + "2) 按主类规则判「资格要求」或「评分项」；\n"
-                + "3) 再判子类；\n"
-                + "4) 评分项须给出各条目满分 fullScore，并给出评分块 totalScore；\n"
-                + "5) 同类归纳、合并、去重；同一规则多出处时 evidence 保留全部；\n"
-                + "6) 每条生成 bidSearch.queries（2～4 个词）；\n"
-                + "7) 按产品外形输出 qualificationRequirements 与 scoring。\n"
-                + "【主类规则】\n"
-                + "- 含★号/否则否决/不予受理等 → 资格要求，子类优先「废标否决」；\n"
-                + "- 含分值/权重/打分 → 评分项；\n"
-                + "- 既无否决也无分值但含须/应/应当 → 资格要求；\n"
-                + "- 其余默认可归资格要求。\n"
-                + "【子类】资格（判不出→资格要求）：资格要求、资质证书、人员要求、废标否决、商务条款、"
-                + "技术要求、报价要求、格式封装、证明材料、电子标流程、合规风险。"
-                + "评分（判不出→评分项）：技术评分、商务评分、价格评分、售后服务评分、业绩评分等。\n"
-                + "【输出规则】\n"
-                + "1) 标题≤15字，content≤200字（尽量原文）；\n"
-                + "2) 评分项须有 fullScore；scoring.totalScore 为各项满分合计目标；\n"
-                + "3) 字段未明确（含满分、总分）一律 null，禁止用 0 或编造顶替；\n"
-                + "4) 各项满分合计与 totalScore 一致则 scoreSumMatches=true，否则 false（不得自行调平）；"
-                + "总分或任一满分缺失则 scoreSumMatches=null；\n"
-                + "5) bidSearch.queries 每条 2～4 词：第1个原文术语，其余投标侧措辞"
-                + "（承诺函/扫描件/附件/偏离表/方案章节名/关键指标值），每词≤30字，只含检索对象，"
-                + "不含「否则否决」「不得」等后果语；不同条目检索词不得复用拼凑；\n"
-                + "6) evidence 用 fragmentId（=候选 chunkId）、page、quote；quote 须摘自原文。\n"
-                + "【约束】只输出 JSON；不编造片段中不存在的信息；无内容则 "
-                + "{\"qualificationRequirements\":[],\"scoring\":{\"totalScore\":null,\"scoreSumMatches\":null,\"items\":[]}}。\n"
+    private static String defaultQualPromptTemplate() {
+        return "【任务】从候选招标原文中归纳「资格/准入/否决」类条目。"
+                + "只输出资格侧，不要输出评分项、bidSearch、evidence。\n"
+                + "【纳入】★号/否则否决/不予受理/废标；须/应/应当/必须等强制性资格、资质、人员、商务、"
+                + "技术、报价、格式、证明、电子标、合规要求。含分值/权重/打分的条款一律跳过。\n"
+                + "【拆分原则】\n"
+                + "- 一条 = 一个独立的、可单独响应的要求\n"
+                + "- 同一段落中出现多个独立要求时，必须拆为多条，不得粘连\n"
+                + "- 判定「独立要求」的标准：该要求可以单独提供证明材料 / 单独响应 / 单独不满足时产生不同后果\n"
+                + "- 仅当同一要求在文档不同位置重复表述时才合并为一条\n"
+                + "- 逐句扫描，遇到「须/应/应当/不得/须具备/须提供」等要求性表述时，"
+                + "每个独立要求拆为一条；禁止将多个不同要求塞入同一条 content\n"
+                + "【子类】判不出→资格要求：资格要求、资质证书、人员要求、废标否决、商务条款、"
+                + "技术要求、报价要求、格式封装、证明材料、电子标流程、合规风险。\n"
+                + "【输出规则】title≤15字；content≤200字尽量原文；字段未明确填 null；"
+                + "chunkIds 填出处 chunkId，多个用逗号拼接（如 \"101,108\"）；禁止嵌套对象。\n"
+                + "【约束】只输出 JSON；不编造；无资格内容则 {\"items\":[]}。\n"
                 + "【候选原文】\n{{recalled_chunks}}\n"
                 + "【输出外形】\n"
-                + "{\"qualificationRequirements\":[{"
-                + "\"id\":\"Q1\",\"title\":\"...\",\"mainType\":\"资格要求\",\"subType\":\"...\","
-                + "\"content\":\"...\",\"bidSearch\":{\"queries\":[\"...\"]},"
-                + "\"evidence\":[{\"fragmentId\":1,\"page\":1,\"quote\":\"...\"}]}],"
-                + "\"scoring\":{\"totalScore\":100,\"scoreSumMatches\":true,\"items\":[{"
-                + "\"id\":\"S1\",\"title\":\"...\",\"mainType\":\"评分项\",\"subType\":\"...\","
-                + "\"content\":\"...\",\"fullScore\":15,\"bidSearch\":{\"queries\":[\"...\"]},"
-                + "\"evidence\":[{\"fragmentId\":2,\"page\":2,\"quote\":\"...\"}]}]}}";
+                + "{\"items\":[{\"id\":\"Q1\",\"title\":\"...\",\"mainType\":\"资格要求\","
+                + "\"subType\":\"...\",\"content\":\"...\",\"chunkIds\":\"101,108\"}]}";
+    }
+
+    /**
+     * 评分条目默认提示词（产物 B / extract-score-v2）：扁平 items，不含 bidSearch / evidence。
+     */
+    private static String defaultScorePromptTemplate() {
+        return "【任务】从候选招标原文中归纳「评分项」。"
+                + "只输出含分值/权重/打分的条目，不要输出资格/否决、bidSearch、evidence。\n"
+                + "【子类】判不出→评分项：技术评分、商务评分、价格评分、售后服务评分、业绩评分等。\n"
+                + "【输出规则】title≤15字；content≤200字尽量原文；每条须有 fullScore（未明确则 null，禁止用 0 顶替）；"
+                + "可另给 scoreSumMatches（各项满分合计与文中总分一致 true/false，缺失则 null）；"
+                + "chunkIds 填出处 chunkId，多个用逗号拼接；禁止嵌套对象。\n"
+                + "【约束】只输出 JSON；不编造；无评分内容则 {\"items\":[]}。\n"
+                + "【候选原文】\n{{recalled_chunks}}\n"
+                + "【输出外形】\n"
+                + "{\"items\":[{\"id\":\"S1\",\"title\":\"...\",\"mainType\":\"评分项\","
+                + "\"subType\":\"...\",\"content\":\"...\",\"fullScore\":15,\"chunkIds\":\"201\"}]}";
+    }
+
+    /**
+     * bidSearch 默认提示词（产物 C）：输入已编号条目摘要，输出扁平 q1~q4。
+     */
+    private static String defaultBidSearchPromptTemplate() {
+        return "【任务】为每条已编号清单条目生成投标文件侧召回词 q1~q4（可空字符串表示不用）。\n"
+                + "【规则】每条有效词 2～4 个；第1个优先用原文术语；其余用投标侧常见措辞"
+                + "（承诺函/扫描件/附件/偏离表/方案章节名等）；每词≤30字；只含检索对象，"
+                + "不含「否则否决」「不得」等后果语；不同条目检索词不得简单复用拼凑；"
+                + "id 必须与输入一致（Q1/S1…）。\n"
+                + "【约束】只输出 JSON；不编造条目；输入为空则 {\"rows\":[]}。\n"
+                + "【清单条目】\n{{checklist_items}}\n"
+                + "【输出外形】\n"
+                + "{\"rows\":[{\"id\":\"Q1\",\"q1\":\"...\",\"q2\":\"...\",\"q3\":\"...\",\"q4\":\"\"}]}";
+    }
+
+    /**
+     * evidence 默认提示词（产物 D）：条目 + 相关候选原文 → 扁平 fragmentId/page/quote。
+     */
+    private static String defaultEvidencePromptTemplate() {
+        return "【任务】为每条已编号清单条目，从相关候选原文中摘录支撑该条的证据。\n"
+                + "【规则】fragmentId 必须等于输入中出现的 chunkId；quote 须是原文连续摘录（≤200字）；"
+                + "page 用候选段 pageNo，未知则 null；一条可多条证据；无对应原文则该 id 不输出；"
+                + "不得编造、不得跨条目混用证据；id 必须与输入一致。\n"
+                + "【约束】只输出 JSON；输入为空则 {\"rows\":[]}。\n"
+                + "【清单条目】\n{{checklist_items}}\n"
+                + "【相关原文】\n{{related_chunks}}\n"
+                + "【输出外形】\n"
+                + "{\"rows\":[{\"id\":\"Q1\",\"fragmentId\":101,\"page\":12,\"quote\":\"...\"}]}";
     }
 
     private static String defaultReviewPromptTemplate() {
@@ -867,6 +1265,8 @@ public class HttpLlmPort implements LlmPort {
                 + "【输出规则】requirementId 关联 Q/S；judgement≤200 字先结论后依据；"
                 + "资格无证据→status=无法判断；评分不设 status；"
                 + "评分无响应→suggestedScore=0 且 judgement 含「未检索到响应，按未响应计 0 分」；"
+                + "bidEvidence.quote 必须从【投标候选原文】逐字连续摘录，禁止改写、概括或补字；"
+                + "做不到则 status=无法判断，judgement 不得写「符合」；"
                 + "多处证据全部保留；不同条目证据不得混用；未明确字段填 null。\n"
                 + "【输出字段】requirementId,title,reviewType(响应性审查|废标风险|评分建议),"
                 + "status(仅资格),vetoRisk,judgement,bidEvidence([{fragmentId,page,quote}]),note,"

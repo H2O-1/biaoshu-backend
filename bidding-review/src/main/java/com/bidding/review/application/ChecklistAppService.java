@@ -49,8 +49,8 @@ public class ChecklistAppService {
             JobPort jobPort,
             ObjectMapper objectMapper,
             @Value("${bidding.checklist.recall-top-k:${bidding.recall.default-top-k:40}}") int recallTopK,
-            @Value("${bidding.checklist.rerank-top-n:${bidding.rerank.tender-top-n:8}}") int rerankTopN,
-            @Value("${bidding.llm.prompt-version:extract-v2}") String promptVersion) {
+            @Value("${bidding.checklist.rerank-top-n:${bidding.rerank.tender-top-n:15}}") int rerankTopN,
+            @Value("${bidding.llm.prompt-version:extract-artifact-v1}") String promptVersion) {
         this.checklistPort = checklistPort;
         this.reviewDimensionPort = reviewDimensionPort;
         this.projectLookupPort = projectLookupPort;
@@ -60,7 +60,8 @@ public class ChecklistAppService {
         this.objectMapper = objectMapper;
         this.recallTopK = recallTopK < 1 ? 40 : recallTopK;
         this.rerankTopN = rerankTopN < 1 ? 8 : rerankTopN;
-        this.promptVersion = promptVersion == null || promptVersion.isBlank() ? "extract-v2" : promptVersion.trim();
+        this.promptVersion = promptVersion == null || promptVersion.isBlank()
+                ? "extract-artifact-v1" : promptVersion.trim();
     }
 
     /**

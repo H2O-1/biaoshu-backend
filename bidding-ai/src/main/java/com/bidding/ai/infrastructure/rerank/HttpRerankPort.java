@@ -24,6 +24,7 @@ import java.util.List;
  * 调阿里云百炼 OpenAI 兼容重排（qwen3-rerank）。
  * 路径为 compatible-api/v1/reranks（与 embedding 的 compatible-mode 不同）。
  * 单次最多 500 段；响应 results[].index / relevance_score。
+ * instruct 为空时请求体不带该字段，走官网默认问答检索策略。
  */
 @Component
 public class HttpRerankPort implements RerankPort {
@@ -46,7 +47,7 @@ public class HttpRerankPort implements RerankPort {
             @Value("${bidding.rerank.base-url}") String baseUrl,
             @Value("${bidding.rerank.api-key:${bidding.index.embedding.api-key:${DASHSCOPE_API_KEY:}}}") String apiKey,
             @Value("${bidding.rerank.model:qwen3-rerank}") String modelName,
-            @Value("${bidding.rerank.default-instruct:给定检索查询，找出能够回答该查询的相关段落。}")
+            @Value("${bidding.rerank.default-instruct:}")
             String defaultInstruct,
             @Value("${bidding.rerank.connect-timeout-ms:3000}") long connectTimeoutMs,
             @Value("${bidding.rerank.read-timeout-ms:120000}") long readTimeoutMs) {
@@ -58,9 +59,8 @@ public class HttpRerankPort implements RerankPort {
         this.rerankUrl = normalized + "/reranks";
         this.apiKey = apiKey == null ? "" : apiKey.trim();
         this.modelName = modelName == null || modelName.isBlank() ? "qwen3-rerank" : modelName.trim();
-        this.defaultInstruct = defaultInstruct == null || defaultInstruct.isBlank()
-                ? "给定检索查询，找出能够回答该查询的相关段落。"
-                : defaultInstruct.trim();
+        // 空则请求不传 instruct，走百炼 qwen3-rerank 官网默认（问答检索策略）
+        this.defaultInstruct = defaultInstruct == null ? "" : defaultInstruct.trim();
         this.requestTimeout = Duration.ofMillis(readTimeoutMs < 1 ? 120000L : readTimeoutMs);
         Duration connectTimeout = Duration.ofMillis(connectTimeoutMs < 1 ? 3000L : connectTimeoutMs);
         this.httpClient = HttpClient.newBuilder()
@@ -116,7 +116,9 @@ public class HttpRerankPort implements RerankPort {
             root.put("model", modelName);
             root.put("query", safeQuery);
             root.put("top_n", safeTopN);
-            root.put("instruct", safeInstruct);
+            if (!safeInstruct.isBlank()) {
+                root.put("instruct", safeInstruct);
+            }
             ArrayNode docsNode = root.putArray("documents");
             for (int i = 0; i < docs.size(); i++) {
                 docsNode.add(docs.get(i));
