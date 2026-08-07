@@ -11,8 +11,10 @@ D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\re
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\BuildChecklistJobExecutor.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\ChecklistAppService.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\ChecklistBuildPipeline.java
+D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\ChecklistRecallDebugAppService.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\IndexJobExecutor.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\JobAppService.java
+D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\JobSseService.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\RecallAppService.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\RerankAppService.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\ReviewAppService.java
@@ -29,9 +31,14 @@ D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\re
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\persistence\ProjectReviewProgressPortAdapter.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\persistence\ReviewStatusCountPortAdapter.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\port\DocumentIndexJobPortAdapter.java
+D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\recall\Bm25LexicalRecall.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\recall\JdbcCosineVectorRecallPort.java
+D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\recall\OkapiBm25.java
+D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\recall\RrfFusion.java
+D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\recall\SimpleTextTokenizer.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\worker\AiReviewPipelineJobPoller.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\worker\BuildChecklistJobPoller.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\worker\IndexJobPoller.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\worker\ReviewJobPoller.java
+D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\worker\StaleAiWorkRecovery.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\package-info.java

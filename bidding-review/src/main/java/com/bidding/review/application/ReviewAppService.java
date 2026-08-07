@@ -49,7 +49,7 @@ public class ReviewAppService {
             JobPort jobPort,
             ObjectMapper objectMapper,
             @Value("${bidding.review.recall-top-k:30}") int recallTopK,
-            @Value("${bidding.review.rerank-top-n:${bidding.rerank.bid-top-n:6}}") int rerankTopN,
+            @Value("${bidding.review.rerank-top-n:${bidding.rerank.bid-top-n:15}}") int rerankTopN,
             @Value("${bidding.llm.review-prompt-version:review-v2}") String promptVersion) {
         this.reviewPort = reviewPort;
         this.checklistPort = checklistPort;

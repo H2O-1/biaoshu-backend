@@ -16,6 +16,7 @@ import java.util.List;
 /**
  * 基于 embedding_json 的应用层余弦召回（暂不依赖 pgvector）。
  * 范围：org + project；可选 packageIds / documentIds 过滤。
+ * 多 query 时候选只加载解析一次，再在内存打分。
  */
 @Component
 public class JdbcCosineVectorRecallPort implements VectorRecallPort {
@@ -36,14 +37,59 @@ public class JdbcCosineVectorRecallPort implements VectorRecallPort {
         if (query == null || query.getQueryEmbedding() == null || query.getQueryEmbedding().length == 0) {
             return empty;
         }
-        int topK = query.getTopK();
-        if (topK < 1) {
-            topK = 1;
+        int topK = query.getTopK() < 1 ? 1 : query.getTopK();
+        List<Candidate> candidates = loadCandidates(
+                query.getOrgId(),
+                query.getProjectId(),
+                VectorRecallPort.copyIds(query.getPackageIds()),
+                VectorRecallPort.copyIds(query.getDocumentIds()));
+        return rankTopK(query.getQueryEmbedding(), candidates, topK);
+    }
+
+    @Override
+    public RecallMultiResult recallMulti(RecallMultiQuery query) {
+        RecallMultiResult result = new RecallMultiResult();
+        List<List<RecallHit>> perQuery = new ArrayList<>();
+        result.setPerQueryHits(perQuery);
+        if (query == null) {
+            return result;
         }
+        List<float[]> embeddings = query.getQueryEmbeddings();
+        if (embeddings == null || embeddings.isEmpty()) {
+            return result;
+        }
+        int topK = query.getTopK() < 1 ? 1 : query.getTopK();
 
-        List<Long> packageIds = VectorRecallPort.copyIds(query.getPackageIds());
-        List<Long> documentIds = VectorRecallPort.copyIds(query.getDocumentIds());
+        long t0 = System.currentTimeMillis();
+        List<Candidate> candidates = loadCandidates(
+                query.getOrgId(),
+                query.getProjectId(),
+                VectorRecallPort.copyIds(query.getPackageIds()),
+                VectorRecallPort.copyIds(query.getDocumentIds()));
+        long loadMs = System.currentTimeMillis() - t0;
+        result.setCandidateCount(candidates.size());
+        result.setLoadMs(loadMs);
 
+        t0 = System.currentTimeMillis();
+        for (int i = 0; i < embeddings.size(); i++) {
+            float[] qv = embeddings.get(i);
+            if (qv == null || qv.length == 0) {
+                perQuery.add(new ArrayList<>());
+                continue;
+            }
+            perQuery.add(rankTopK(qv, candidates, topK));
+        }
+        long scoreMs = System.currentTimeMillis() - t0;
+        result.setScoreMs(scoreMs);
+        log.info("向量多query召回 projectId={} queryCount={} candidates={} loadMs={} scoreMs={}",
+                query.getProjectId(), embeddings.size(), candidates.size(), loadMs, scoreMs);
+        return result;
+    }
+
+    private List<Candidate> loadCandidates(long orgId,
+                                           long projectId,
+                                           List<Long> packageIds,
+                                           List<Long> documentIds) {
         StringBuilder sql = new StringBuilder();
         sql.append("SELECT c.id AS chunk_id, c.chunk_index, c.page_no, c.content, ");
         sql.append("c.document_id, c.package_id, ");
@@ -56,8 +102,8 @@ public class JdbcCosineVectorRecallPort implements VectorRecallPort {
         sql.append("WHERE c.org_id = ? AND c.project_id = ? AND d.index_status = 'SUCCESS'");
 
         List<Object> args = new ArrayList<>();
-        args.add(query.getOrgId());
-        args.add(query.getProjectId());
+        args.add(orgId);
+        args.add(projectId);
 
         if (!packageIds.isEmpty()) {
             sql.append(" AND c.package_id IN (");
@@ -76,7 +122,7 @@ public class JdbcCosineVectorRecallPort implements VectorRecallPort {
             }
         }
 
-        List<Candidate> candidates = jdbcTemplate.query(
+        List<Candidate> raw = jdbcTemplate.query(
                 sql.toString(),
                 args.toArray(),
                 (rs, rowNum) -> {
@@ -101,21 +147,33 @@ public class JdbcCosineVectorRecallPort implements VectorRecallPort {
                 }
         );
 
-        float[] queryVec = query.getQueryEmbedding();
-        List<RecallHit> scored = new ArrayList<>();
-        for (int i = 0; i < candidates.size(); i++) {
-            Candidate c = candidates.get(i);
+        List<Candidate> ready = new ArrayList<>();
+        for (int i = 0; i < raw.size(); i++) {
+            Candidate c = raw.get(i);
             float[] vec = parseEmbedding(c.embeddingJson, c.embeddingDim);
             if (vec == null) {
                 log.warn("跳过无法解析的向量 chunkId={}", c.chunkId);
                 continue;
             }
-            if (vec.length != queryVec.length) {
-                log.warn("跳过维度不一致的向量 chunkId={} vecDim={} queryDim={}",
-                        c.chunkId, vec.length, queryVec.length);
+            c.embedding = vec;
+            c.embeddingJson = null;
+            ready.add(c);
+        }
+        return ready;
+    }
+
+    private List<RecallHit> rankTopK(float[] queryVec, List<Candidate> candidates, int topK) {
+        List<RecallHit> scored = new ArrayList<>();
+        for (int i = 0; i < candidates.size(); i++) {
+            Candidate c = candidates.get(i);
+            if (c.embedding == null || c.embedding.length != queryVec.length) {
+                if (c.embedding != null) {
+                    log.warn("跳过维度不一致的向量 chunkId={} vecDim={} queryDim={}",
+                            c.chunkId, c.embedding.length, queryVec.length);
+                }
                 continue;
             }
-            float score = cosine(queryVec, vec);
+            float score = cosine(queryVec, c.embedding);
             RecallHit hit = new RecallHit();
             hit.setChunkId(c.chunkId);
             hit.setChunkIndex(c.chunkIndex);
@@ -213,5 +271,6 @@ public class JdbcCosineVectorRecallPort implements VectorRecallPort {
         private String packageName;
         private int embeddingDim;
         private String embeddingJson;
+        private float[] embedding;
     }
 }

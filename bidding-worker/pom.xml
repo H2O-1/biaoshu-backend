@@ -10,7 +10,7 @@
     </parent>
     <artifactId>bidding-worker</artifactId>
     <packaging>jar</packaging>
-    <description>架构骨架模块（无业务实现）</description>
+    <description>异步任务 Worker 进程（INDEX / BUILD_CHECKLIST / REVIEW / AI_REVIEW_PIPELINE）</description>
     <dependencies>
         <dependency>
             <groupId>com.bidding</groupId>
@@ -36,12 +36,33 @@
             <groupId>com.bidding</groupId>
             <artifactId>bidding-ai</artifactId>
         </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
     <build>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

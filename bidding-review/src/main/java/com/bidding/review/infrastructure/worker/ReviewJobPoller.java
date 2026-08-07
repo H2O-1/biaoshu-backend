@@ -11,10 +11,11 @@ import org.springframework.stereotype.Component;
 import java.util.UUID;
 
 /**
- * 同进程轮询认领 REVIEW 任务。
+ * 轮询认领 REVIEW 任务。默认关闭：仅在配置 bidding.review.worker-enabled=true
+ * 的进程（bidding-worker 或单进程本地调试）中加载。
  */
 @Component
-@ConditionalOnProperty(prefix = "bidding.review", name = "worker-enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(prefix = "bidding.review", name = "worker-enabled", havingValue = "true", matchIfMissing = false)
 public class ReviewJobPoller {
 
     private static final Logger log = LoggerFactory.getLogger(ReviewJobPoller.class);

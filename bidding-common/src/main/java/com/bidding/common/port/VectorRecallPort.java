@@ -15,7 +15,13 @@ public interface VectorRecallPort {
      */
     List<RecallHit> recall(RecallQuery query);
 
-    /** 召回请求。 */
+    /**
+     * 多 query 召回：范围内切块向量只加载并解析一次，再对每个 query 做内存余弦 topK。
+     * 返回与 {@link RecallMultiQuery#getQueryEmbeddings()} 等长的列表。
+     */
+    RecallMultiResult recallMulti(RecallMultiQuery query);
+
+    /** 单 query 召回请求。 */
     class RecallQuery {
         private long orgId;
         private long projectId;
@@ -70,6 +76,104 @@ public interface VectorRecallPort {
 
         public void setDocumentIds(List<Long> documentIds) {
             this.documentIds = documentIds;
+        }
+    }
+
+    /** 多 query 召回请求（queryEmbeddings 已由调用方批量 embed）。 */
+    class RecallMultiQuery {
+        private long orgId;
+        private long projectId;
+        private List<float[]> queryEmbeddings;
+        private int topK;
+        private List<Long> packageIds;
+        private List<Long> documentIds;
+
+        public long getOrgId() {
+            return orgId;
+        }
+
+        public void setOrgId(long orgId) {
+            this.orgId = orgId;
+        }
+
+        public long getProjectId() {
+            return projectId;
+        }
+
+        public void setProjectId(long projectId) {
+            this.projectId = projectId;
+        }
+
+        public List<float[]> getQueryEmbeddings() {
+            return queryEmbeddings;
+        }
+
+        public void setQueryEmbeddings(List<float[]> queryEmbeddings) {
+            this.queryEmbeddings = queryEmbeddings;
+        }
+
+        public int getTopK() {
+            return topK;
+        }
+
+        public void setTopK(int topK) {
+            this.topK = topK;
+        }
+
+        public List<Long> getPackageIds() {
+            return packageIds;
+        }
+
+        public void setPackageIds(List<Long> packageIds) {
+            this.packageIds = packageIds;
+        }
+
+        public List<Long> getDocumentIds() {
+            return documentIds;
+        }
+
+        public void setDocumentIds(List<Long> documentIds) {
+            this.documentIds = documentIds;
+        }
+    }
+
+    /** 多 query 召回结果（含加载/打分耗时，便于运维）。 */
+    class RecallMultiResult {
+        private List<List<RecallHit>> perQueryHits = new ArrayList<>();
+        private int candidateCount;
+        private long loadMs;
+        private long scoreMs;
+
+        public List<List<RecallHit>> getPerQueryHits() {
+            return perQueryHits;
+        }
+
+        public void setPerQueryHits(List<List<RecallHit>> perQueryHits) {
+            this.perQueryHits = perQueryHits == null ? new ArrayList<>() : perQueryHits;
+        }
+
+        public int getCandidateCount() {
+            return candidateCount;
+        }
+
+        public void setCandidateCount(int candidateCount) {
+            this.candidateCount = candidateCount;
+        }
+
+        public long getLoadMs() {
+            return loadMs;
+        }
+
+        public void setLoadMs(long loadMs) {
+            this.loadMs = loadMs;
+        }
+
+        public long getScoreMs() {
+            return scoreMs;
+        }
+
+        public void setScoreMs(long scoreMs) {
+            this.scoreMs = scoreMs;
         }
     }
 

@@ -23,6 +23,7 @@ public class JdbcJobRepository implements JobPort {
 
     private static final String COLUMNS = "id, org_id, project_id, type, status, progress, message, "
             + "payload_json, error_message, retry_count, created_by, worker_id, "
+            + "phase, next_run_at, lease_expires_at, phase_started_at, checklist_id, review_id, "
             + "created_at, started_at, finished_at, updated_at";
 
     private final JdbcTemplate jdbcTemplate;
@@ -42,6 +43,14 @@ public class JdbcJobRepository implements JobPort {
         job.setRetryCount(rs.getInt("retry_count"));
         job.setCreatedBy(rs.getLong("created_by"));
         job.setWorkerId(rs.getString("worker_id"));
+        job.setPhase(rs.getString("phase"));
+        job.setNextRunAt(toInstant(rs.getTimestamp("next_run_at")));
+        job.setLeaseExpiresAt(toInstant(rs.getTimestamp("lease_expires_at")));
+        job.setPhaseStartedAt(toInstant(rs.getTimestamp("phase_started_at")));
+        long checklistId = rs.getLong("checklist_id");
+        job.setChecklistId(rs.wasNull() ? null : checklistId);
+        long reviewId = rs.getLong("review_id");
+        job.setReviewId(rs.wasNull() ? null : reviewId);
         job.setCreatedAt(toInstant(rs.getTimestamp("created_at")));
         job.setStartedAt(toInstant(rs.getTimestamp("started_at")));
         job.setFinishedAt(toInstant(rs.getTimestamp("finished_at")));
@@ -129,6 +138,106 @@ public class JdbcJobRepository implements JobPort {
     }
 
     @Override
+    @Transactional
+    public Optional<JobRef> claimNextRunnablePipeline(String type, String workerId, int leaseSeconds) {
+        List<Long> ids = jdbcTemplate.query(
+                "SELECT id FROM biz_job WHERE type = ? AND status IN ('PENDING', 'RUNNING') "
+                        + "AND COALESCE(next_run_at, CURRENT_TIMESTAMP) <= CURRENT_TIMESTAMP "
+                        + "AND (status = 'PENDING' OR lease_expires_at IS NULL "
+                        + "OR lease_expires_at <= CURRENT_TIMESTAMP) "
+                        + "ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1",
+                (rs, rowNum) -> rs.getLong(1), type);
+        if (ids.isEmpty()) {
+            return Optional.empty();
+        }
+        long id = ids.get(0);
+        // UPDATE 必须在最新行版本上重查全部可领取条件：
+        // READ COMMITTED 下并发 SELECT 可能基于提交前的快照返回 id，
+        // 仅靠 id 更新会让两个 Worker 都认领成功（二次认领竞态）
+        int updated = jdbcTemplate.update(
+                "UPDATE biz_job SET status = 'RUNNING', phase = COALESCE(phase, ?), "
+                        + "worker_id = ?, locked_at = CURRENT_TIMESTAMP, "
+                        + "lease_expires_at = CURRENT_TIMESTAMP + (? * INTERVAL '1 second'), "
+                        + "started_at = COALESCE(started_at, CURRENT_TIMESTAMP), "
+                        + "phase_started_at = COALESCE(phase_started_at, CURRENT_TIMESTAMP), "
+                        + "updated_at = CURRENT_TIMESTAMP "
+                        + "WHERE id = ? AND status IN ('PENDING', 'RUNNING') "
+                        + "AND COALESCE(next_run_at, CURRENT_TIMESTAMP) <= CURRENT_TIMESTAMP "
+                        + "AND (status = 'PENDING' OR lease_expires_at IS NULL "
+                        + "OR lease_expires_at <= CURRENT_TIMESTAMP)",
+                PHASE_INDEX_SUBMIT, workerId, Math.max(leaseSeconds, 10), id);
+        return updated == 1 ? findById(id) : Optional.empty();
+    }
+
+    @Override
+    public boolean advancePipeline(long jobId, String workerId, String expectedPhase,
+                                   String nextPhase, int progress, String message,
+                                   Instant nextRunAt, Long checklistId, Long reviewId,
+                                   String payloadJson) {
+        int updated = jdbcTemplate.update(
+                "UPDATE biz_job SET phase = ?, progress = ?, message = ?, next_run_at = ?, "
+                        + "checklist_id = COALESCE(?, checklist_id), review_id = COALESCE(?, review_id), "
+                        + "payload_json = COALESCE(?, payload_json), "
+                        + "phase_started_at = CASE WHEN phase <> ? THEN CURRENT_TIMESTAMP ELSE phase_started_at END, "
+                        + "worker_id = NULL, locked_at = NULL, lease_expires_at = NULL, "
+                        + "updated_at = CURRENT_TIMESTAMP "
+                        + "WHERE id = ? AND status = 'RUNNING' AND worker_id = ? AND phase = ? "
+                        + "AND lease_expires_at > CURRENT_TIMESTAMP",
+                nextPhase, progress, message, Timestamp.from(nextRunAt), checklistId, reviewId,
+                payloadJson, nextPhase, jobId, workerId, expectedPhase);
+        return updated == 1;
+    }
+
+    @Override
+    public boolean retryPipeline(long jobId, String workerId, String expectedPhase,
+                                 String errorMessage, Instant nextRunAt) {
+        int updated = jdbcTemplate.update(
+                "UPDATE biz_job SET retry_count = retry_count + 1, message = '等待重试', "
+                        + "error_message = ?, next_run_at = ?, "
+                        + "worker_id = NULL, locked_at = NULL, lease_expires_at = NULL, "
+                        + "updated_at = CURRENT_TIMESTAMP "
+                        + "WHERE id = ? AND status = 'RUNNING' AND worker_id = ? AND phase = ? "
+                        + "AND lease_expires_at > CURRENT_TIMESTAMP",
+                truncate(errorMessage), Timestamp.from(nextRunAt), jobId, workerId, expectedPhase);
+        return updated == 1;
+    }
+
+    @Override
+    public boolean succeedPipeline(long jobId, String workerId, String expectedPhase,
+                                   String message, String payloadJson) {
+        int updated = jdbcTemplate.update(
+                "UPDATE biz_job SET status = 'SUCCESS', phase = '" + PHASE_SUCCESS + "', progress = 100, "
+                        + "message = ?, payload_json = COALESCE(?, payload_json), error_message = NULL, "
+                        + "worker_id = NULL, locked_at = NULL, lease_expires_at = NULL, "
+                        + "finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
+                        + "WHERE id = ? AND status = 'RUNNING' AND worker_id = ? AND phase = ? "
+                        + "AND lease_expires_at > CURRENT_TIMESTAMP",
+                message, payloadJson, jobId, workerId, expectedPhase);
+        return updated == 1;
+    }
+
+    @Override
+    public boolean failPipeline(long jobId, String workerId, String expectedPhase, String errorMessage) {
+        int updated = jdbcTemplate.update(
+                "UPDATE biz_job SET status = 'FAILED', phase = '" + PHASE_FAILED + "', message = '失败', "
+                        + "error_message = ?, "
+                        + "worker_id = NULL, locked_at = NULL, lease_expires_at = NULL, "
+                        + "finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
+                        + "WHERE id = ? AND status = 'RUNNING' AND worker_id = ? AND phase = ? "
+                        + "AND lease_expires_at > CURRENT_TIMESTAMP",
+                truncate(errorMessage), jobId, workerId, expectedPhase);
+        return updated == 1;
+    }
+
+    /** 错误信息最多保留 2000 字符。 */
+    private static String truncate(String errorMessage) {
+        if (errorMessage != null && errorMessage.length() > 2000) {
+            return errorMessage.substring(0, 2000);
+        }
+        return errorMessage;
+    }
+
+    @Override
     public void markRunningProgress(long jobId, int progress, String message) {
         jdbcTemplate.update(
                 "UPDATE biz_job SET progress = ?, message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -142,7 +251,9 @@ public class JdbcJobRepository implements JobPort {
     public void markSuccess(long jobId, String message) {
         jdbcTemplate.update(
                 "UPDATE biz_job SET status = 'SUCCESS', progress = 100, message = ?, error_message = NULL, "
-                        + "finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        + "phase = CASE WHEN type = 'AI_REVIEW_PIPELINE' THEN 'SUCCESS' ELSE phase END, "
+                        + "worker_id = NULL, lease_expires_at = NULL, finished_at = CURRENT_TIMESTAMP, "
+                        + "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 message,
                 jobId
         );
@@ -156,9 +267,41 @@ public class JdbcJobRepository implements JobPort {
         }
         jdbcTemplate.update(
                 "UPDATE biz_job SET status = 'FAILED', message = '失败', error_message = ?, "
-                        + "finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        + "phase = CASE WHEN type = 'AI_REVIEW_PIPELINE' THEN 'FAILED' ELSE phase END, "
+                        + "worker_id = NULL, lease_expires_at = NULL, finished_at = CURRENT_TIMESTAMP, "
+                        + "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 truncated,
                 jobId
+        );
+    }
+
+    @Override
+    public int failRunningByTypes(String reason, String... types) {
+        if (types == null || types.length == 0) {
+            return 0;
+        }
+        String truncated = reason;
+        if (truncated != null && truncated.length() > 2000) {
+            truncated = truncated.substring(0, 2000);
+        }
+        StringBuilder inClause = new StringBuilder();
+        for (int i = 0; i < types.length; i++) {
+            if (i > 0) {
+                inClause.append(',');
+            }
+            inClause.append('?');
+        }
+        Object[] args = new Object[types.length + 2];
+        args[0] = truncated;
+        args[1] = STATUS_RUNNING;
+        for (int i = 0; i < types.length; i++) {
+            args[i + 2] = types[i];
+        }
+        return jdbcTemplate.update(
+                "UPDATE biz_job SET status = 'FAILED', message = '失败', error_message = ?, "
+                        + "finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
+                        + "WHERE status = ? AND type IN (" + inClause + ")",
+                args
         );
     }
 

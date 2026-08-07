@@ -68,6 +68,9 @@ public class JobAppService {
 
     /**
      * 查询任务详情（仅本组织；招标方）。
+     * <p>
+     * 前端既可短轮询本接口，也可改用 {@code GET /api/jobs/{jobId}/events}（SSE）收进度；
+     * 刷新/断线后仍建议先调本接口拿当前快照。
      */
     @Transactional(readOnly = true)
     public JobSummary getJob(long jobId) {
@@ -130,7 +133,8 @@ public class JobAppService {
         jobPort.markRunningProgress(jobId, progress, message);
     }
 
-    private JobSummary toSummary(JobPort.JobRef job) {
+    /** 供 SSE 等同包组件复用摘要映射。 */
+    JobSummary toSummary(JobPort.JobRef job) {
         JobSummary summary = new JobSummary();
         summary.setId(job.getId());
         summary.setOrgId(job.getOrgId());

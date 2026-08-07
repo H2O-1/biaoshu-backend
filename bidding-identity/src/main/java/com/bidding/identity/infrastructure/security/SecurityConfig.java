@@ -3,6 +3,7 @@ package com.bidding.identity.infrastructure.security;
 import com.bidding.common.api.ApiResponse;
 import com.bidding.common.error.ErrorCode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -12,16 +13,20 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 /**
- * 安全配置：哪些接口要登录、哪些只要管理员。
+ * HTTP 安全链：只给 API 用。
+ * <p>
+ * Worker 启动类通过 {@code excludeFilters} 不扫描本类；
+ * 另加 {@link ConditionalOnWebApplication}，防止其它无 Web 进程误装
+ * {@code SecurityFilterChain}（依赖 MVC {@code mvcHandlerMappingIntrospector}）。
+ * 密码哈希见 {@link PasswordEncoderConfig}（API/Worker 共用）。
  */
 @Configuration
 @EnableWebSecurity
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
@@ -53,11 +58,6 @@ public class SecurityConfig {
 
         http.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
-    }
-
-    @Bean
-    public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
     }
 
     private void writeJson(jakarta.servlet.http.HttpServletResponse res,

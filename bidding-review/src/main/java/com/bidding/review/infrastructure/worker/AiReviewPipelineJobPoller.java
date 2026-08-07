@@ -9,32 +9,33 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.util.UUID;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 同进程轮询认领 AI_REVIEW_PIPELINE 总任务。
- * 总任务会长时间等待子任务，故放到独立线程执行，避免占满调度线程导致 INDEX 等 Poller 饿死。
+ * 定时认领并推进 AI_REVIEW_PIPELINE 总任务。
+ * <p>
+ * 状态机每次 {@code claimAndRunOnce} 只推进一个阶段、执行时间很短，
+ * 不再需要独立线程或忙标志；单次调度内可连续处理多条任务，
+ * 但设有批量上限（batch-size），避免调度线程被长期占用。
+ * 默认关闭：API 进程不配或配 false 时不加载；Worker 进程配 true 开启。
  */
 @Component
 @ConditionalOnProperty(
         prefix = "bidding.ai-review-pipeline",
         name = "worker-enabled",
         havingValue = "true",
-        matchIfMissing = true)
+        matchIfMissing = false)
 public class AiReviewPipelineJobPoller {
 
     private static final Logger log = LoggerFactory.getLogger(AiReviewPipelineJobPoller.class);
 
     private final AiReviewPipelineJobExecutor executor;
     private final String workerId;
-    private final AtomicBoolean busy = new AtomicBoolean(false);
-    private final ExecutorService runner;
+    private final int batchSize;
 
     public AiReviewPipelineJobPoller(
             AiReviewPipelineJobExecutor executor,
-            @Value("${bidding.ai-review-pipeline.worker-id:}") String configuredWorkerId) {
+            @Value("${bidding.ai-review-pipeline.worker-id:}") String configuredWorkerId,
+            @Value("${bidding.ai-review-pipeline.batch-size:3}") int batchSize) {
         this.executor = executor;
         if (configuredWorkerId != null && !configuredWorkerId.trim().isEmpty()) {
             this.workerId = configuredWorkerId.trim();
@@ -42,27 +43,20 @@ public class AiReviewPipelineJobPoller {
             this.workerId = "ai-pipe-"
                     + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
         }
-        this.runner = Executors.newSingleThreadExecutor(r -> {
-            Thread t = new Thread(r, "ai-review-pipeline-worker");
-            t.setDaemon(true);
-            return t;
-        });
-        log.info("AI_REVIEW_PIPELINE Worker 已启用，workerId={}", this.workerId);
+        this.batchSize = Math.max(batchSize, 1);
+        log.info("AI_REVIEW_PIPELINE Worker 已启用，workerId={} batchSize={}", this.workerId, this.batchSize);
     }
 
     @Scheduled(fixedDelayString = "${bidding.ai-review-pipeline.poll-ms:5000}")
     public void poll() {
-        if (!busy.compareAndSet(false, true)) {
-            return;
-        }
-        runner.submit(() -> {
-            try {
-                executor.claimAndRunOnce(workerId);
-            } catch (Exception ex) {
-                log.error("AI_REVIEW_PIPELINE Worker 执行异常", ex);
-            } finally {
-                busy.set(false);
+        try {
+            for (int i = 0; i < batchSize; i++) {
+                if (!executor.claimAndRunOnce(workerId)) {
+                    break;
+                }
             }
-        });
+        } catch (Exception ex) {
+            log.error("AI_REVIEW_PIPELINE Worker 轮询异常 workerId={}", workerId, ex);
+        }
     }
 }

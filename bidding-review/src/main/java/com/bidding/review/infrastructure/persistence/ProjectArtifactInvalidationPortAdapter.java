@@ -38,6 +38,30 @@ public class ProjectArtifactInvalidationPortAdapter implements ProjectArtifactIn
         if (jobCount != null && jobCount > 0) {
             return true;
         }
+        return hasBuildingChecklistOrReview(projectId);
+    }
+
+    @Override
+    public boolean hasActiveChecklistOrReviewWork(long projectId) {
+        Long jobCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM biz_job "
+                        + "WHERE project_id = ? AND type IN (?, ?, ?) "
+                        + "AND status IN (?, ?)",
+                Long.class,
+                projectId,
+                JobPort.TYPE_BUILD_CHECKLIST,
+                JobPort.TYPE_REVIEW,
+                JobPort.TYPE_AI_REVIEW_PIPELINE,
+                JobPort.STATUS_PENDING,
+                JobPort.STATUS_RUNNING
+        );
+        if (jobCount != null && jobCount > 0) {
+            return true;
+        }
+        return hasBuildingChecklistOrReview(projectId);
+    }
+
+    private boolean hasBuildingChecklistOrReview(long projectId) {
         Long buildingReview = jdbcTemplate.queryForObject(
                 "SELECT COUNT(1) FROM biz_review WHERE project_id = ? AND status = ?",
                 Long.class,
@@ -64,11 +88,12 @@ public class ProjectArtifactInvalidationPortAdapter implements ProjectArtifactIn
         return jdbcTemplate.update(
                 "UPDATE biz_review SET status = ?, error_message = ?, "
                         + "updated_at = CURRENT_TIMESTAMP "
-                        + "WHERE project_id = ? AND status IN (?, ?)",
+                        + "WHERE project_id = ? AND status IN (?, ?, ?)",
                 ReviewPort.STATUS_OBSOLETE,
                 msg.isEmpty() ? null : msg,
                 projectId,
                 ReviewPort.STATUS_SUCCESS,
+                ReviewPort.STATUS_FAILED,
                 ReviewPort.STATUS_BUILDING
         );
     }
@@ -91,11 +116,12 @@ public class ProjectArtifactInvalidationPortAdapter implements ProjectArtifactIn
         return jdbcTemplate.update(
                 "UPDATE biz_requirement_checklist SET status = ?, error_message = ?, "
                         + "updated_at = CURRENT_TIMESTAMP "
-                        + "WHERE project_id = ? AND status IN (?, ?)",
+                        + "WHERE project_id = ? AND status IN (?, ?, ?)",
                 RequirementChecklistPort.STATUS_OBSOLETE,
                 msg.isEmpty() ? null : msg,
                 projectId,
                 RequirementChecklistPort.STATUS_SUCCESS,
+                RequirementChecklistPort.STATUS_FAILED,
                 RequirementChecklistPort.STATUS_BUILDING
         );
     }

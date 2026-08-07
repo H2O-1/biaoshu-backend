@@ -113,7 +113,7 @@ public class RecallAppService {
                     .append(",score=").append(hit.getScore());
         }
         sb.append(']');
-        log.info(sb.toString());
+        log.debug(sb.toString());
     }
 
     private HitSummary toSummary(VectorRecallPort.RecallHit hit) {

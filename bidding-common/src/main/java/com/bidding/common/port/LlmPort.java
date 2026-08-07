@@ -10,13 +10,42 @@ import java.util.List;
 public interface LlmPort {
 
     /**
-     * 从候选原文归纳资格要求与评分项（提示词 extract-v2）。
-     * 不按单一维度抽取；主类由模型判定。
+     * 仅归纳资格要求（产物 A：扁平 items）。
+     * 与评分抽取并行调用；失败时整单建清单 FAILED。
+     * 本步不产出 bidSearch / evidence（由后续 generateBidSearch 等补齐）。
      *
      * @param chunksText 已格式化的候选原文（须含 chunkId）
-     * @return 解析后的条目 + 模型原始 content
+     * @return 解析后的资格条目 + 模型原始 content
      */
-    ExtractChecklistResult extractChecklist(String chunksText);
+    ExtractChecklistResult extractQualificationChecklist(String chunksText);
+
+    /**
+     * 仅归纳评分项（产物 B：扁平 items）。
+     * 与资格抽取并行调用；失败时整单建清单 FAILED。
+     * 本步不产出 bidSearch / evidence（由后续 generateBidSearch 等补齐）。
+     *
+     * @param chunksText 已格式化的候选原文（须含 chunkId）
+     * @return 解析后的评分条目 + 模型原始 content
+     */
+    ExtractChecklistResult extractScoringChecklist(String chunksText);
+
+    /**
+     * 为已编号的清单条目生成投标侧召回词（产物 C）。
+     * 输入为程序拼接的条目摘要行；输出扁平 rows（id + q1~q4）。
+     *
+     * @param checklistItemsText 每行：id | subType | title | content
+     */
+    BidSearchResult generateBidSearch(String checklistItemsText);
+
+    /**
+     * 为已编号清单条目摘录招标侧证据（产物 D）。
+     * 输入条目摘要 + 相关候选原文；输出扁平 rows（id + fragmentId + page + quote）。
+     * 失败时由调用方决定是否整单 FAILED。
+     *
+     * @param checklistItemsText 每行：id | title | content | chunkIds=…
+     * @param relatedChunksText  仅含这些条目 chunkIds 对应的候选原文
+     */
+    EvidenceResult generateEvidence(String checklistItemsText, String relatedChunksText);
 
     /** 建清单抽取结果（含 LLM 原文）。 */
     class ExtractChecklistResult {
@@ -42,6 +71,124 @@ public interface LlmPort {
 
         public void setRawContent(String rawContent) {
             this.rawContent = rawContent;
+        }
+    }
+
+    /** bidSearch 生成结果。 */
+    class BidSearchResult {
+        private List<BidSearchRow> rows = new ArrayList<>();
+        private String rawContent;
+
+        public List<BidSearchRow> getRows() {
+            return rows;
+        }
+
+        public void setRows(List<BidSearchRow> rows) {
+            if (rows == null) {
+                this.rows = new ArrayList<>();
+            } else {
+                this.rows = rows;
+            }
+        }
+
+        public String getRawContent() {
+            return rawContent;
+        }
+
+        public void setRawContent(String rawContent) {
+            this.rawContent = rawContent;
+        }
+    }
+
+    /** 单条 bidSearch（扁平 q1~q4 解析后的有效词列表）。 */
+    class BidSearchRow {
+        private String id;
+        private List<String> queries = new ArrayList<>();
+
+        public String getId() {
+            return id;
+        }
+
+        public void setId(String id) {
+            this.id = id;
+        }
+
+        public List<String> getQueries() {
+            return queries;
+        }
+
+        public void setQueries(List<String> queries) {
+            if (queries == null) {
+                this.queries = new ArrayList<>();
+            } else {
+                this.queries = queries;
+            }
+        }
+    }
+
+    /** evidence 生成结果。 */
+    class EvidenceResult {
+        private List<EvidenceRow> rows = new ArrayList<>();
+        private String rawContent;
+
+        public List<EvidenceRow> getRows() {
+            return rows;
+        }
+
+        public void setRows(List<EvidenceRow> rows) {
+            if (rows == null) {
+                this.rows = new ArrayList<>();
+            } else {
+                this.rows = rows;
+            }
+        }
+
+        public String getRawContent() {
+            return rawContent;
+        }
+
+        public void setRawContent(String rawContent) {
+            this.rawContent = rawContent;
+        }
+    }
+
+    /** 单条招标侧证据（扁平）。 */
+    class EvidenceRow {
+        private String id;
+        private Long fragmentId;
+        private Integer page;
+        private String quote;
+
+        public String getId() {
+            return id;
+        }
+
+        public void setId(String id) {
+            this.id = id;
+        }
+
+        public Long getFragmentId() {
+            return fragmentId;
+        }
+
+        public void setFragmentId(Long fragmentId) {
+            this.fragmentId = fragmentId;
+        }
+
+        public Integer getPage() {
+            return page;
+        }
+
+        public void setPage(Integer page) {
+            this.page = page;
+        }
+
+        public String getQuote() {
+            return quote;
+        }
+
+        public void setQuote(String quote) {
+            this.quote = quote;
         }
     }
 

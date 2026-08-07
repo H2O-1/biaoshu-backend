@@ -17,8 +17,8 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class HttpRerankPortTest {
 
@@ -51,7 +51,7 @@ class HttpRerankPortTest {
                 "http://127.0.0.1:" + port,
                 "test-key",
                 "qwen3-rerank",
-                "给定检索查询，找出能够回答该查询的相关段落。",
+                "",
                 3000L,
                 10000L
         );
@@ -80,7 +80,18 @@ class HttpRerankPortTest {
         assertEquals("qwen3-rerank", req.path("model").asText());
         assertEquals(2, req.path("top_n").asInt());
         assertEquals(3, req.path("documents").size());
-        assertTrue(req.path("instruct").asText().length() > 0);
+        assertFalse(req.has("instruct"));
+    }
+
+    @Test
+    void rerankIncludesInstructWhenProvided() throws Exception {
+        List<String> docs = new ArrayList<>();
+        docs.add("a");
+        docs.add("b");
+        docs.add("c");
+        rerankPort.rerank("q", docs, 1, "Retrieve semantically similar text.");
+        JsonNode req = new ObjectMapper().readTree(lastBody.get());
+        assertEquals("Retrieve semantically similar text.", req.path("instruct").asText());
     }
 
     @Test

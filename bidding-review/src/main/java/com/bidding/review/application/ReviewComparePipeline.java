@@ -7,6 +7,8 @@ import com.bidding.common.port.RerankPort;
 import com.bidding.common.port.RequirementChecklistPort;
 import com.bidding.common.port.ReviewPort;
 import com.bidding.common.port.VectorRecallPort;
+import com.bidding.review.infrastructure.recall.Bm25LexicalRecall;
+import com.bidding.review.infrastructure.recall.RrfFusion;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -19,10 +21,16 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 审查管线：按投标包全量对照（包 × 清单条目）。
- * 召回仅用 bidSearch（无则不召回）；产品向 LLM（review-v2）落库；无项目级 overallVerdict。
+ * 召回仅用 bidSearch（无则不召回）；向量 ∥ BM25（RRF）后再重排；产品向 LLM（review-v2）落库。
+ * 条目对照默认最多 4 路并行（含召回/重排/LLM）。
  */
 @Service
 public class ReviewComparePipeline {
@@ -31,6 +39,7 @@ public class ReviewComparePipeline {
 
     private final EmbeddingPort embeddingPort;
     private final VectorRecallPort vectorRecallPort;
+    private final Bm25LexicalRecall bm25LexicalRecall;
     private final RerankPort rerankPort;
     private final LlmPort llmPort;
     private final PackageLookupPort packageLookupPort;
@@ -38,20 +47,31 @@ public class ReviewComparePipeline {
     private final int defaultRecallTopK;
     private final int bidRerankTopN;
     private final String bidInstruct;
+    private final boolean hybridEnabled;
+    private final int bm25TopK;
+    private final int rrfK;
+    /** 条目并行度，硬上限 4。 */
+    private final int compareParallelism;
 
     public ReviewComparePipeline(
             EmbeddingPort embeddingPort,
             VectorRecallPort vectorRecallPort,
+            Bm25LexicalRecall bm25LexicalRecall,
             RerankPort rerankPort,
             LlmPort llmPort,
             PackageLookupPort packageLookupPort,
             ObjectMapper objectMapper,
             @Value("${bidding.review.recall-top-k:30}") int defaultRecallTopK,
-            @Value("${bidding.review.rerank-top-n:${bidding.rerank.bid-top-n:6}}") int bidRerankTopN,
-            @Value("${bidding.rerank.bid-instruct:给定一条招标要求，从投标文件中检索对该要求作出响应、举证或说明的相关段落。}")
-            String bidInstruct) {
+            @Value("${bidding.review.rerank-top-n:${bidding.rerank.bid-top-n:15}}") int bidRerankTopN,
+            @Value("${bidding.rerank.bid-instruct:}")
+            String bidInstruct,
+            @Value("${bidding.recall.hybrid-enabled:true}") boolean hybridEnabled,
+            @Value("${bidding.recall.bm25-top-k:0}") int bm25TopK,
+            @Value("${bidding.recall.rrf-k:60}") int rrfK,
+            @Value("${bidding.review.compare-parallelism:4}") int compareParallelism) {
         this.embeddingPort = embeddingPort;
         this.vectorRecallPort = vectorRecallPort;
+        this.bm25LexicalRecall = bm25LexicalRecall;
         this.rerankPort = rerankPort;
         this.llmPort = llmPort;
         this.packageLookupPort = packageLookupPort;
@@ -59,6 +79,10 @@ public class ReviewComparePipeline {
         this.defaultRecallTopK = defaultRecallTopK < 1 ? 30 : defaultRecallTopK;
         this.bidRerankTopN = bidRerankTopN < 1 ? 6 : bidRerankTopN;
         this.bidInstruct = bidInstruct;
+        this.hybridEnabled = hybridEnabled;
+        this.bm25TopK = bm25TopK;
+        this.rrfK = rrfK < 1 ? 60 : rrfK;
+        this.compareParallelism = compareParallelism < 1 ? 1 : Math.min(4, compareParallelism);
     }
 
     /**
@@ -84,35 +108,83 @@ public class ReviewComparePipeline {
             supplierByPackage.put(packageId, name);
         }
 
-        List<ReviewPort.ItemDraft> drafts = new ArrayList<>();
         int reqCount = requirements == null ? 0 : requirements.size();
         int totalSteps = Math.max(reqCount * pkgCount, 1);
-        int done = 0;
+        long tAll = System.currentTimeMillis();
 
+        List<CompareTask> tasks = new ArrayList<>();
         for (int p = 0; p < pkgCount; p++) {
             long packageId = bidPackageIds.get(p);
             String supplier = supplierByPackage.get(packageId);
             for (int i = 0; i < reqCount; i++) {
-                RequirementChecklistPort.ItemView req = requirements.get(i);
-                if (progress != null) {
-                    int pct = 10 + (int) ((75.0 * done) / totalSteps);
-                    progress.onProgress(pct, "AI审查中");
-                }
-                ReviewPort.ItemDraft draft = compareOne(
-                        orgId, projectId, packageId, supplier, req, safeRecallTopK, safeRerankTopN);
-                draft.setSortOrder(drafts.size());
-                drafts.add(draft);
-                done++;
+                CompareTask task = new CompareTask();
+                task.sortIndex = tasks.size();
+                task.packageId = packageId;
+                task.supplier = supplier;
+                task.req = requirements.get(i);
+                tasks.add(task);
             }
+        }
+
+        ReviewPort.ItemDraft[] slots = new ReviewPort.ItemDraft[tasks.size()];
+        if (!tasks.isEmpty()) {
+            ExecutorService pool = Executors.newFixedThreadPool(compareParallelism);
+            AtomicInteger done = new AtomicInteger(0);
+            Object progressLock = new Object();
+            List<CompletableFuture<Void>> futures = new ArrayList<>(tasks.size());
+            try {
+                for (int t = 0; t < tasks.size(); t++) {
+                    CompareTask task = tasks.get(t);
+                    futures.add(CompletableFuture.runAsync(() -> {
+                        ReviewPort.ItemDraft draft = compareOne(
+                                orgId, projectId, task.packageId, task.supplier, task.req,
+                                safeRecallTopK, safeRerankTopN);
+                        draft.setSortOrder(task.sortIndex);
+                        slots[task.sortIndex] = draft;
+                        int finished = done.incrementAndGet();
+                        if (progress != null) {
+                            int pct = 10 + (int) ((75.0 * finished) / totalSteps);
+                            synchronized (progressLock) {
+                                progress.onProgress(pct, "AI审查中");
+                            }
+                        }
+                    }, pool));
+                }
+                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+            } catch (CompletionException ex) {
+                Throwable cause = ex.getCause() == null ? ex : ex.getCause();
+                if (cause instanceof RuntimeException) {
+                    throw (RuntimeException) cause;
+                }
+                throw new IllegalStateException("审查并行对照失败: " + cause.getMessage(), cause);
+            } finally {
+                pool.shutdownNow();
+            }
+        }
+
+        List<ReviewPort.ItemDraft> drafts = new ArrayList<>(slots.length);
+        for (int i = 0; i < slots.length; i++) {
+            drafts.add(slots[i]);
         }
 
         if (progress != null) {
             progress.onProgress(90, "AI审查中");
         }
+        log.info("审查管线完成 projectId={} packages={} requirements={} items={} "
+                        + "parallelism={} totalMs={}",
+                projectId, pkgCount, reqCount, drafts.size(),
+                compareParallelism, System.currentTimeMillis() - tAll);
         PipelineResult result = new PipelineResult();
         result.setItems(drafts);
         result.setOverallVerdict(null);
         return result;
+    }
+
+    private static final class CompareTask {
+        private int sortIndex;
+        private long packageId;
+        private String supplier;
+        private RequirementChecklistPort.ItemView req;
     }
 
     private ReviewPort.ItemDraft compareOne(
@@ -143,6 +215,8 @@ public class ReviewComparePipeline {
 
         List<String> recallQueries = resolveRecallQueries(req);
         if (recallQueries.isEmpty()) {
+            log.info("审查无bidSearch projectId={} packageId={} reqItemId={} code={} bidSearchJson={}",
+                    projectId, packageId, req.getId(), requirementCode, req.getBidSearchJson());
             return fillNoEvidence(draft, mainType, "无 bidSearch，跳过投标召回");
         }
 
@@ -150,14 +224,18 @@ public class ReviewComparePipeline {
         onlyThisPackage.add(packageId);
 
         long t0 = System.currentTimeMillis();
-        List<VectorRecallPort.RecallHit> hits = recallMergeByQueries(
+        BidRecallResult recalled = recallMergeByQueries(
                 orgId, projectId, onlyThisPackage, recallQueries, recallTopK);
         long recallMs = System.currentTimeMillis() - t0;
-        log.info("审查召回 projectId={} packageId={} reqItemId={} code={} queryCount={} hitCount={} costMs={}",
-                projectId, packageId, req.getId(), requirementCode, recallQueries.size(),
-                hits == null ? 0 : hits.size(), recallMs);
+        List<VectorRecallPort.RecallHit> hits = recalled.hits;
+        log.info("审查bidSearch召回 projectId={} packageId={} reqItemId={} code={} "
+                        + "bidSearch={} perQueryHits={} mergedHits={} recallTopK={} recallMs={}",
+                projectId, packageId, req.getId(), requirementCode,
+                recallQueries, recalled.perQueryHits, hits.size(), recallTopK, recallMs);
 
-        if (hits == null || hits.isEmpty()) {
+        if (hits.isEmpty()) {
+            log.info("审查无召回 projectId={} packageId={} reqItemId={} code={} bidSearch={} recallMs={}",
+                    projectId, packageId, req.getId(), requirementCode, recallQueries, recallMs);
             return fillNoEvidence(draft, mainType, null);
         }
 
@@ -180,9 +258,11 @@ public class ReviewComparePipeline {
                 top.add(hits.get(idx));
             }
         }
-        log.info("审查重排 projectId={} packageId={} reqItemId={} code={} inDocs={} outTop={} costMs={}",
-                projectId, packageId, req.getId(), requirementCode, docs.size(), top.size(), rerankMs);
         if (top.isEmpty()) {
+            log.info("审查重排为空 projectId={} packageId={} reqItemId={} code={} "
+                            + "bidSearch={} hitCount={} recallMs={} rerankMs={}",
+                    projectId, packageId, req.getId(), requirementCode,
+                    recallQueries, hits.size(), recallMs, rerankMs);
             return fillNoEvidence(draft, mainType, "重排后无候选段落");
         }
 
@@ -200,8 +280,11 @@ public class ReviewComparePipeline {
         LlmPort.CompareResult compared = llmPort.compareRequirement(request);
         long llmMs = System.currentTimeMillis() - t0;
         applyCompareResult(draft, compared, top, mainType);
-        log.info("审查对照完成 projectId={} packageId={} reqItemId={} code={} recallMs={} rerankMs={} llmMs={} totalMs={}",
+        log.info("审查对照完成 projectId={} packageId={} reqItemId={} code={} "
+                        + "bidSearch={} perQueryHits={} hitCount={} topN={} "
+                        + "recallMs={} rerankMs={} llmMs={} totalMs={}",
                 projectId, packageId, req.getId(), requirementCode,
+                recallQueries, recalled.perQueryHits, hits.size(), top.size(),
                 recallMs, rerankMs, llmMs, recallMs + rerankMs + llmMs);
         return draft;
     }
@@ -329,12 +412,20 @@ public class ReviewComparePipeline {
                 status = safeEvidence.isEmpty() ? ReviewPort.STATUS_UNKNOWN : ReviewPort.STATUS_MISMATCH;
             }
             if (safeEvidence.isEmpty() && !ReviewPort.STATUS_UNKNOWN.equals(status)) {
-                // 除无法判断外须有证据
+                // 除无法判断外须有可核对原文证据；强制改状态时同步结论文，避免标签与 judgement 打架
+                String llmStatus = status;
                 status = ReviewPort.STATUS_UNKNOWN;
+                int rawCount = compared.getBidEvidence() == null ? 0 : compared.getBidEvidence().size();
+                log.warn("资格项证据未通过原文校验，强制无法判断 requirementCode={} llmStatus={} "
+                                + "rawEvidenceCount={} recallHits={}",
+                        draft.getRequirementCode(), llmStatus, rawCount, top == null ? 0 : top.size());
+                draft.setJudgement(truncateJudgement(
+                        "模型倾向「" + llmStatus + "」，但未能绑定可核对的投标原文证据，故判定为无法判断。"));
+                draft.setReason(draft.getJudgement());
             }
             draft.setStatus(status);
-            draft.setVerdict(compared.getVerdict() == null
-                    ? mapStatusToVerdict(status) : compared.getVerdict());
+            // verdict 以最终 status 为准，不沿用模型可能过时的 PASS/FAIL
+            draft.setVerdict(mapStatusToVerdict(status));
             draft.setSuggestedScore(null);
             draft.setDeductionReason(null);
             if (draft.getReviewType() == null) {
@@ -393,16 +484,22 @@ public class ReviewComparePipeline {
                 matched = findHitContaining(top, quote);
             }
             if (matched == null) {
+                log.debug("投标证据未匹配召回片段 fragmentId={} quoteLen={}",
+                        ev.getFragmentId(), quote.length());
                 continue;
             }
             String content = matched.getContent();
-            if (content == null || !content.contains(quote)) {
+            if (!quoteInContent(content, quote)) {
+                log.debug("投标证据 quote 非召回块原文子串 chunkId={} quoteLen={}",
+                        matched.getChunkId(), quote.length());
                 continue;
             }
+            // 落库尽量用块内原文子串（空白归一匹配时回填真实片段）
+            String canonical = canonicalQuoteFromContent(content, quote);
             LlmPort.BidEvidence copy = new LlmPort.BidEvidence();
             copy.setFragmentId(matched.getChunkId());
             copy.setPage(ev.getPage() != null ? ev.getPage() : matched.getPageNo());
-            copy.setQuote(quote);
+            copy.setQuote(canonical);
             result.add(copy);
         }
         return result;
@@ -427,12 +524,83 @@ public class ReviewComparePipeline {
             return null;
         }
         for (int i = 0; i < top.size(); i++) {
-            String c = top.get(i).getContent();
-            if (c != null && c.contains(quote)) {
+            if (quoteInContent(top.get(i).getContent(), quote)) {
                 return top.get(i);
             }
         }
         return null;
+    }
+
+    /**
+     * quote 须能在召回块中找到：先精确 contains，再空白归一后 contains。
+     * 仍要求是原文（禁止语义改写），仅容忍空白/换行差异。
+     */
+    static boolean quoteInContent(String content, String quote) {
+        if (content == null || quote == null || quote.isEmpty()) {
+            return false;
+        }
+        if (content.contains(quote)) {
+            return true;
+        }
+        String normalizedContent = normalizeWhitespace(content);
+        String normalizedQuote = normalizeWhitespace(quote);
+        return !normalizedQuote.isEmpty() && normalizedContent.contains(normalizedQuote);
+    }
+
+    /**
+     * 若精确命中则返回 quote；若仅空白归一命中，尽量回填 content 中对应原文片段。
+     */
+    static String canonicalQuoteFromContent(String content, String quote) {
+        if (content == null || quote == null) {
+            return quote;
+        }
+        if (content.contains(quote)) {
+            return quote;
+        }
+        String normalizedContent = normalizeWhitespace(content);
+        String normalizedQuote = normalizeWhitespace(quote);
+        int idx = normalizedContent.indexOf(normalizedQuote);
+        if (idx < 0) {
+            return quote;
+        }
+        // 按「非空白字符序号」映射回原文下标，取覆盖该段的原文切片
+        int start = mapNormalizedIndexToOriginal(content, idx);
+        int end = mapNormalizedIndexToOriginal(content, idx + normalizedQuote.length());
+        if (start < 0 || end < start || end > content.length()) {
+            return quote;
+        }
+        return content.substring(start, end).trim();
+    }
+
+    static String normalizeWhitespace(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text.replaceAll("\\s+", "");
+    }
+
+    /**
+     * 将「去掉空白后的下标」映射回原文字符下标（指向第 normalizedIndex 个非空白字符；
+     * 若 normalizedIndex == 非空白总数，则返回原文 length）。
+     */
+    static int mapNormalizedIndexToOriginal(String original, int normalizedIndex) {
+        if (original == null || normalizedIndex < 0) {
+            return -1;
+        }
+        int seen = 0;
+        for (int i = 0; i < original.length(); i++) {
+            if (Character.isWhitespace(original.charAt(i))) {
+                continue;
+            }
+            if (seen == normalizedIndex) {
+                return i;
+            }
+            seen++;
+        }
+        if (seen == normalizedIndex) {
+            return original.length();
+        }
+        return -1;
     }
 
     static boolean isPlaceholderExcerpt(String text) {
@@ -488,13 +656,14 @@ public class ReviewComparePipeline {
         return result;
     }
 
-    private List<VectorRecallPort.RecallHit> recallMergeByQueries(
+    private BidRecallResult recallMergeByQueries(
             long orgId,
             long projectId,
             List<Long> packageIds,
             List<String> queries,
             int topK) {
         Map<Long, VectorRecallPort.RecallHit> byChunk = new LinkedHashMap<>();
+        List<Integer> perQueryHits = new ArrayList<>();
         for (int q = 0; q < queries.size(); q++) {
             String query = queries.get(q);
             List<String> texts = new ArrayList<>();
@@ -510,7 +679,16 @@ public class ReviewComparePipeline {
             rq.setTopK(topK);
             rq.setPackageIds(packageIds);
             rq.setDocumentIds(null);
-            List<VectorRecallPort.RecallHit> hits = vectorRecallPort.recall(rq);
+            List<VectorRecallPort.RecallHit> vectorHits = vectorRecallPort.recall(rq);
+            List<VectorRecallPort.RecallHit> hits = vectorHits;
+            if (hybridEnabled && bm25LexicalRecall != null) {
+                int lexicalTopK = bm25TopK < 1 ? topK : bm25TopK;
+                List<VectorRecallPort.RecallHit> bm25Hits = bm25LexicalRecall.search(
+                        orgId, projectId, query, packageIds, null, lexicalTopK);
+                hits = RrfFusion.fuse(vectorHits, bm25Hits, rrfK, topK);
+            }
+            int hitCount = hits == null ? 0 : hits.size();
+            perQueryHits.add(hitCount);
             if (hits == null) {
                 continue;
             }
@@ -527,7 +705,15 @@ public class ReviewComparePipeline {
         for (Map.Entry<Long, VectorRecallPort.RecallHit> e : byChunk.entrySet()) {
             merged.add(e.getValue());
         }
-        return merged;
+        BidRecallResult result = new BidRecallResult();
+        result.hits = merged;
+        result.perQueryHits = perQueryHits;
+        return result;
+    }
+
+    private static final class BidRecallResult {
+        private List<VectorRecallPort.RecallHit> hits = new ArrayList<>();
+        private List<Integer> perQueryHits = new ArrayList<>();
     }
 
     /** judgement 产品上限 200 字。 */

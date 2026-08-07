@@ -9,6 +9,7 @@ import com.bidding.common.port.ProjectLookupPort;
 import com.bidding.common.security.CurrentUser;
 import com.bidding.common.security.TendererAuth;
 import com.bidding.review.infrastructure.logging.AiPipelineLog;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,6 +24,8 @@ public class AiReviewPipelineAppService {
 
     public static final String PACKAGE_TYPE_TENDER = "TENDER";
     public static final String PACKAGE_TYPE_BID = "BID";
+    /** V31 部分唯一索引名：同项目最多一条活跃一键审查任务。 */
+    private static final String ACTIVE_PIPELINE_UNIQUE_INDEX = "uk_biz_job_active_ai_review_pipeline";
 
     private final JobPort jobPort;
     private final ProjectLookupPort projectLookupPort;
@@ -82,14 +85,24 @@ public class AiReviewPipelineAppService {
                 + ",\"phase\":\"INDEX\""
                 + ",\"createdBy\":" + operator.getUserId()
                 + "}";
-        long jobId = jobPort.insert(
-                operator.getOrgId(),
-                projectId,
-                JobPort.TYPE_AI_REVIEW_PIPELINE,
-                JobPort.STATUS_PENDING,
-                payload,
-                operator.getUserId()
-        );
+        long jobId;
+        try {
+            jobId = jobPort.insert(
+                    operator.getOrgId(),
+                    projectId,
+                    JobPort.TYPE_AI_REVIEW_PIPELINE,
+                    JobPort.STATUS_PENDING,
+                    payload,
+                    operator.getUserId()
+            );
+        } catch (DuplicateKeyException ex) {
+            // 并发双开被 V31 部分唯一索引拦截。只识别本约束的冲突，
+            // 不把其它数据完整性异常误判成重复任务；命中则与前置检查同一 409 语义
+            if (ex.getMessage() != null && ex.getMessage().contains(ACTIVE_PIPELINE_UNIQUE_INDEX)) {
+                throw new BizException(ErrorCode.CONFLICT, "该项目已有进行中的一键审查任务，请勿重复提交");
+            }
+            throw ex;
+        }
 
         AiPipelineLog.info(projectId, jobId, "START",
                 "一键审查已入队 tenderDocs=" + tenderDocCount + " bidDocs=" + bidDocCount

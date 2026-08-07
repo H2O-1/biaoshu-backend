@@ -52,7 +52,7 @@ class ChecklistAppServiceTest {
     void setUp() {
         service = new ChecklistAppService(
                 checklistPort, reviewDimensionPort, projectLookupPort, packageLookupPort,
-                documentAccessPort, jobPort, new ObjectMapper(), 40, 8, "extract-v2");
+                documentAccessPort, jobPort, new ObjectMapper(), 40, 8, "extract-artifact-v1");
         Set<String> roles = new HashSet<>();
         roles.add("TENDERER");
         UserContext.set(new CurrentUser(9L, 2L, "u", roles, 0, false));
@@ -102,7 +102,7 @@ class ChecklistAppServiceTest {
 
         when(checklistPort.nextVersion(2L, 100L)).thenReturn(1);
         when(checklistPort.createBuilding(
-                eq(2L), eq(100L), eq(1), anyString(), anyString(), eq("extract-v2"),
+                eq(2L), eq(100L), eq(1), anyString(), anyString(), eq("extract-artifact-v1"),
                 eq(40), eq(8), eq(9L))).thenReturn(88L);
         when(jobPort.insert(eq(2L), eq(100L), eq(JobPort.TYPE_BUILD_CHECKLIST),
                 eq(JobPort.STATUS_PENDING), anyString(), eq(9L))).thenReturn(99L);
@@ -114,7 +114,7 @@ class ChecklistAppServiceTest {
 
         ArgumentCaptor<String> codesCaptor = ArgumentCaptor.forClass(String.class);
         verify(checklistPort).createBuilding(
-                eq(2L), eq(100L), eq(1), codesCaptor.capture(), anyString(), eq("extract-v2"),
+                eq(2L), eq(100L), eq(1), codesCaptor.capture(), anyString(), eq("extract-artifact-v1"),
                 eq(40), eq(8), eq(9L));
         assertEquals(true, codesCaptor.getValue().contains("QUALIFICATION"));
         assertEquals(true, codesCaptor.getValue().contains("SCORING"));

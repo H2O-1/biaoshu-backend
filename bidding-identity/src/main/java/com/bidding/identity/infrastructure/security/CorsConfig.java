@@ -2,6 +2,7 @@ package com.bidding.identity.infrastructure.security;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
@@ -16,8 +17,10 @@ import java.util.List;
 /**
  * 前端联调 CORS：允许配置的 Origin 跨域访问 API。
  * 浏览器会拦截跨域；Apifox 不检查 CORS，所以会出现「工具能调、页面不能调」。
+ * 仅 API（Servlet Web）需要；Worker 无 HTTP 入口，不加载。
  */
 @Configuration
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 public class CorsConfig {
 
     private static final Logger log = LoggerFactory.getLogger(CorsConfig.class);
