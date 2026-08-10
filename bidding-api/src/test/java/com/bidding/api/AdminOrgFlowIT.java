@@ -209,6 +209,50 @@ class AdminOrgFlowIT {
     }
 
     @Test
+    void orgListSearchMatchesCityAndUserFields() throws Exception {
+        String token = loginAsAdmin();
+
+        MvcResult created = mockMvc.perform(post("/api/admin/orgs")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"组织搜索覆盖公司","city":"香港特别行政区"}
+                                """))
+                .andExpect(status().isOk())
+                .andReturn();
+        long orgId = Long.parseLong(created.getResponse().getContentAsString()
+                .replaceAll("(?s).*\"id\"\\s*:\\s*(\\d+).*", "$1"));
+
+        mockMvc.perform(post("/api/admin/users")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "orgId": %d,
+                                  "username": "org_search_owner",
+                                  "password": "Passw0rd!",
+                                  "displayName": "搜索负责人",
+                                  "phone": "13920000021",
+                                  "email": "org_search_owner@example.com",
+                                  "roleCodes": ["TENDERER"]
+                                }
+                                """.formatted(orgId)))
+                .andExpect(status().isOk());
+
+        assertOrgSearchByNameParam(token, "香港特别行政区", orgId);
+        assertOrgSearchByNameParam(token, "搜索负责人", orgId);
+        assertOrgSearchByNameParam(token, "13920000021", orgId);
+        assertOrgSearchByNameParam(token, "org_search_owner", orgId);
+
+        mockMvc.perform(get("/api/admin/orgs")
+                        .header("Authorization", "Bearer " + token)
+                        .param("keyword", "org_search_owner@example.com"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.items[0].id").value((int) orgId));
+    }
+
+    @Test
     void disableOrgRevokesUserSessionImmediately() throws Exception {
         String adminToken = loginAsAdmin();
 
@@ -315,6 +359,15 @@ class AdminOrgFlowIT {
                 .andExpect(status().isOk())
                 .andReturn();
         return extractToken(login);
+    }
+
+    private void assertOrgSearchByNameParam(String token, String keyword, long orgId) throws Exception {
+        mockMvc.perform(get("/api/admin/orgs")
+                        .header("Authorization", "Bearer " + token)
+                        .param("name", keyword))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.items[0].id").value((int) orgId));
     }
 
     private static String extractToken(MvcResult login) throws Exception {

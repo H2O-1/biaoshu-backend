@@ -658,8 +658,9 @@ Authorization: Bearer <accessToken>
 
 | 参数 | 类型 | 必填 | 默认 | 说明 |
 |------|------|------|------|------|
-| name | string | 否 | `""` | 公司名称模糊搜 |
-| city | string | 否 | `""` | 所在城市模糊搜 |
+| keyword | string | 否 | `""` | 统一关键字：公司名称 / 城市 / 负责人 / 手机号 / 账号 / 邮箱模糊搜 |
+| name | string | 否 | `""` | 兼容旧前端；`keyword` 为空时按统一关键字处理 |
+| city | string | 否 | `""` | 所在城市附加筛选 |
 | status | string | 否 | `""` | `ACTIVE` / `DISABLED`；空=全部未删除（不含 `DELETED`） |
 | page | number | 否 | 1 | 页码，从 1 起 |
 | size | number | 否 | 20 | 每页条数，最大 500 |
@@ -700,7 +701,7 @@ Authorization: Bearer <accessToken>
 
 | 字段 | 说明 |
 |------|------|
-| total | 当前筛选（name + city + status）下的条数 |
+| total | 当前筛选（keyword/name + city + status）下的条数 |
 | activeCount | 全量正常组织数（不受筛选影响） |
 | disabledCount | 全量停用组织数（不受筛选影响） |
 | pendingConfigCount | 全量待配置：未删除且下属无未删除账号的组织数（不受筛选影响） |
@@ -972,7 +973,7 @@ Authorization: Bearer <accessToken>
 | `AI_REVIEW_SUCCESS` | AI审查完成 | 最新 `biz_review.status=SUCCESS` |
 | `AI_REVIEW_FAILED` | AI审查失败 | 最新 `biz_review.status=FAILED` |
 
-> 不做单独的「待AI重新审查」状态码：项目下**上传 / 复制 / 删除**任一招标或投标文件时，若建清单/审查/一键审查进行中 → `40900`；否则将相关产物标为 `OBSOLETE`（**招标**：清单+审查；**仅投标**：只作废审查，清单可复用）。`OBSOLETE` 记录保留，详情仍可按 id 查看。文件解析齐后 `workflowStatus` 回到 `READY_FOR_AI_REVIEW`（或待补文件）；重新发起仍用一键审查。删投标包同理作废审查。
+> 不做单独的「待AI重新审查」状态码：项目下**上传 / 复制 / 删除**任一招标或投标文件时，若建清单/审查/一键审查进行中 → `40900`；否则将相关产物标为 `OBSOLETE`（**招标**：清单+审查；**仅投标**：只作废审查，清单可复用）。`OBSOLETE` 记录保留，详情仍可按 id 查看。文件解析齐后 `workflowStatus` 回到 `READY_FOR_AI_REVIEW`（或待补文件）；重新发起仍用一键审查。删投标包时，仅包内有文件才同理作废审查；空投标包删除不影响审查状态。
 
 **成功响应**
 
@@ -986,11 +987,13 @@ Authorization: Bearer <accessToken>
         "id": 1,
         "orgId": 2,
         "name": "市政道路改造工程",
+        "tendererOrgName": "某某招标单位",
         "agency": "某某招标代理",
         "projectType": "公开招标",
         "leaderName": "张三",
         "status": "ACTIVE",
         "workflowStatus": "READY_FOR_AI_REVIEW",
+        "workflowMessage": "待AI审查",
         "createdBy": 10,
         "createdAt": "2026-07-21T08:00:00Z",
         "updatedAt": "2026-07-21T08:00:00Z",
@@ -1013,7 +1016,9 @@ Authorization: Bearer <accessToken>
 | 字段 | 说明 |
 |------|------|
 | status | 启停：`ACTIVE` / `DISABLED` |
+| tendererOrgName | 招标单位名称（项目所属组织名称） |
 | workflowStatus | 派生业务进度（见上表） |
+| workflowMessage | 面向页面展示的进度文案；招标文件解析失败时为 `{招标单位名称}招标文件解析失败` |
 | aiReviewJobId | 最新一键 AI 审查总任务 id；无则为 null；可 `GET /api/jobs/{aiReviewJobId}` 续查 |
 | tenderPackageId | 已绑招标包 ID；无则为 null |
 | tenderPackageCount | 已绑招标包数量（通常 0/1） |
@@ -1063,11 +1068,13 @@ Authorization: Bearer <accessToken>
   "id": 1,
   "orgId": 2,
   "name": "市政道路改造工程",
+  "tendererOrgName": "某某招标单位",
   "agency": "某某招标代理",
   "projectType": "公开招标",
   "leaderName": "张三",
   "status": "ACTIVE",
   "workflowStatus": "NEED_TENDER_FILES",
+  "workflowMessage": "某某招标单位招标文件解析失败",
   "createdBy": 10,
   "createdAt": "2026-07-21T08:00:00Z",
   "updatedAt": "2026-07-21T08:00:00Z",
@@ -1191,7 +1198,7 @@ Authorization: Bearer <accessToken>
 
 `GET /api/projects/{projectId}/bid-packages?page=1&size=20`
 
-返回已绑定到该项目的投标包分页；每条摘要含 **`indexStatus`**（包内文件解析汇总，规则同项目详情）。
+返回已绑定到该项目的投标包分页；每条摘要含 **`indexStatus`**（包内文件解析汇总，规则同项目详情），以及最新成功审查下的 AI 建议分与资格要求统计。
 
 **成功响应**
 
@@ -1218,7 +1225,12 @@ Authorization: Bearer <accessToken>
         "createdAt": "2026-07-22T06:10:00Z",
         "updatedAt": "2026-07-22T06:10:00Z",
         "fileCount": 3,
-        "indexStatus": "SUCCESS"
+        "indexStatus": "SUCCESS",
+        "suggestedScoreTotal": 88.50,
+        "fullScoreTotal": 100.00,
+        "qualificationMatchCount": 4,
+        "qualificationMismatchCount": 1,
+        "qualificationUnknownCount": 0
       }
     ],
     "total": 1,
@@ -1233,6 +1245,11 @@ Authorization: Bearer <accessToken>
 | status | 包启停：`ACTIVE`（列表不含已删） |
 | fileCount | 包内未删除文件数 |
 | indexStatus | 解析汇总：`PENDING`/`PROCESSING`/`SUCCESS`/`FAILED`；无文件为 `null` |
+| suggestedScoreTotal | 最新成功审查下该投标包评分建议分合计；无成功审查或无评分项为 `null` |
+| fullScoreTotal | 最新成功审查下该投标包评分满分合计；无成功审查或无评分项为 `null` |
+| qualificationMatchCount | 最新成功审查下该投标包资格项「符合」数量 |
+| qualificationMismatchCount | 最新成功审查下该投标包资格项「不符合」数量 |
+| qualificationUnknownCount | 最新成功审查下该投标包资格项「无法判断」数量 |
 
 
 ---
@@ -1267,4 +1284,4 @@ Authorization: Bearer <accessToken>
 - 停用项目仍可改基本信息；已删项目不可查。
 - `agency` / `projectType` / `leaderName` 创建与更新均可空；空白存 `null`；更新时传空白会清空。
 - 列表/详情派生：`mainTenderFileName`（`fileType=招标文件`）、`bidPackageCount` / `bidPackageUploadedCount` / `bidFileCount`。
-- `workflowStatus` 为派生字段（不落库）：待补充招标/投标（含解析中、解析失败）、待AI审查、AI审查中/完成/失败；与 `status` 启停分离。项目下上传/复制/删除招标或投标文件会作废相关审查（改招标另作废清单）；`OBSOLETE` 详情仍可查看；解析齐后回到待审查或待补文件。
+- `workflowStatus` 为派生字段（不落库）：待补充招标/投标（含解析中、解析失败）、待AI审查、AI审查中/完成/失败；与 `status` 启停分离。项目下上传/复制/删除招标或投标文件会作废相关审查（改招标另作废清单）；删除有文件的投标包同理作废审查，删除空投标包不影响审查状态；`OBSOLETE` 详情仍可查看；解析齐后回到待审查或待补文件。

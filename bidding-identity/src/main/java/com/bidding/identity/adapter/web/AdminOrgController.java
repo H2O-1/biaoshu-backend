@@ -36,12 +36,14 @@ public class AdminOrgController {
 
     @GetMapping
     public ApiResponse<AdminOrgAppService.OrgPage> listOrgs(
+            @RequestParam(required = false, defaultValue = "") String keyword,
             @RequestParam(required = false, defaultValue = "") String name,
             @RequestParam(required = false, defaultValue = "") String city,
             @RequestParam(required = false, defaultValue = "") String status,
             @RequestParam(required = false, defaultValue = "1") int page,
             @RequestParam(required = false, defaultValue = "20") int size) {
-        return ApiResponse.ok(adminOrgAppService.listOrgs(name, city, status, page, size));
+        String effectiveKeyword = keyword == null || keyword.trim().isEmpty() ? name : keyword;
+        return ApiResponse.ok(adminOrgAppService.listOrgs(effectiveKeyword, city, status, page, size));
     }
 
     @PostMapping

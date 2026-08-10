@@ -120,14 +120,20 @@ public class JdbcOrgRepository implements OrgRepository {
         String nameLike = "%" + nameKw + "%";
         String cityLike = "%" + cityKw + "%";
         return jdbcTemplate.query(
-                "SELECT " + ORG_COLUMNS + " FROM sys_org "
-                        + "WHERE status <> 'DELETED' "
-                        + "AND (? = '' OR name LIKE ?) "
-                        + "AND (? = '' OR city LIKE ?) "
-                        + "AND (? = '' OR status = ?) "
-                        + "ORDER BY id DESC LIMIT ? OFFSET ?",
+                "SELECT " + ORG_COLUMNS + " FROM sys_org o "
+                        + "WHERE o.status <> 'DELETED' "
+                        + "AND (? = '' OR o.name LIKE ? OR o.city LIKE ? "
+                        + "  OR EXISTS ("
+                        + "    SELECT 1 FROM sys_user u "
+                        + "    WHERE u.org_id = o.id AND u.status <> 'DELETED' "
+                        + "    AND (u.display_name LIKE ? OR u.phone LIKE ? OR u.username LIKE ? OR u.email LIKE ?)"
+                        + "  )"
+                        + ") "
+                        + "AND (? = '' OR o.city LIKE ?) "
+                        + "AND (? = '' OR o.status = ?) "
+                        + "ORDER BY o.id DESC LIMIT ? OFFSET ?",
                 orgRowMapper,
-                nameKw, nameLike,
+                nameKw, nameLike, nameLike, nameLike, nameLike, nameLike, nameLike,
                 cityKw, cityLike,
                 statusKw, statusKw,
                 limit, offset
@@ -142,13 +148,19 @@ public class JdbcOrgRepository implements OrgRepository {
         String nameLike = "%" + nameKw + "%";
         String cityLike = "%" + cityKw + "%";
         Long count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(1) FROM sys_org "
-                        + "WHERE status <> 'DELETED' "
-                        + "AND (? = '' OR name LIKE ?) "
-                        + "AND (? = '' OR city LIKE ?) "
-                        + "AND (? = '' OR status = ?)",
+                "SELECT COUNT(1) FROM sys_org o "
+                        + "WHERE o.status <> 'DELETED' "
+                        + "AND (? = '' OR o.name LIKE ? OR o.city LIKE ? "
+                        + "  OR EXISTS ("
+                        + "    SELECT 1 FROM sys_user u "
+                        + "    WHERE u.org_id = o.id AND u.status <> 'DELETED' "
+                        + "    AND (u.display_name LIKE ? OR u.phone LIKE ? OR u.username LIKE ? OR u.email LIKE ?)"
+                        + "  )"
+                        + ") "
+                        + "AND (? = '' OR o.city LIKE ?) "
+                        + "AND (? = '' OR o.status = ?)",
                 Long.class,
-                nameKw, nameLike,
+                nameKw, nameLike, nameLike, nameLike, nameLike, nameLike, nameLike,
                 cityKw, cityLike,
                 statusKw, statusKw
         );

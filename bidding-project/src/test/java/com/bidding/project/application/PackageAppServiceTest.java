@@ -179,17 +179,17 @@ class PackageAppServiceTest {
     }
 
     @Test
-    void deleteBidAllowedWhenBound() {
+    void deleteBoundBidWithoutFilesKeepsReview() {
         when(packageRepository.findById(60L)).thenReturn(Optional.of(
                 bid(60L, 2L, 100L, "华建集团")));
         when(projectArtifactInvalidationPort.hasActiveAiWork(100L)).thenReturn(false);
+        when(documentCountPort.countActiveByPackageId(60L)).thenReturn(0L);
 
         packageAppService.delete(60L);
 
         verify(documentCascadePort).softDeleteAllActiveByPackageId(60L);
-        verify(projectArtifactInvalidationPort).deleteReviewItemsByPackageId(100L, 60L);
-        verify(projectArtifactInvalidationPort).obsoleteReviewsByProjectId(
-                eq(100L), anyString());
+        verify(projectArtifactInvalidationPort, never()).deleteReviewItemsByPackageId(anyLong(), anyLong());
+        verify(projectArtifactInvalidationPort, never()).obsoleteReviewsByProjectId(anyLong(), anyString());
         verify(packageRepository).updateStatus(60L, "DELETED");
     }
 
@@ -198,10 +198,14 @@ class PackageAppServiceTest {
         when(packageRepository.findById(60L)).thenReturn(Optional.of(
                 bid(60L, 2L, 100L, "华建集团")));
         when(projectArtifactInvalidationPort.hasActiveAiWork(100L)).thenReturn(false);
+        when(documentCountPort.countActiveByPackageId(60L)).thenReturn(1L);
 
         packageAppService.delete(60L);
 
         verify(documentCascadePort).softDeleteAllActiveByPackageId(60L);
+        verify(projectArtifactInvalidationPort).deleteReviewItemsByPackageId(100L, 60L);
+        verify(projectArtifactInvalidationPort).obsoleteReviewsByProjectId(
+                eq(100L), anyString());
         verify(packageRepository).updateStatus(60L, "DELETED");
     }
 

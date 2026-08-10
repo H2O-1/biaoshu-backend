@@ -28,6 +28,9 @@ class CityCatalogTest {
         assertTrue(cityCatalog.size() > 300);
         assertTrue(cityCatalog.containsName("北京市"));
         assertTrue(cityCatalog.containsName("深圳市"));
+        assertTrue(cityCatalog.containsName("台北市"));
+        assertTrue(cityCatalog.containsName("香港特别行政区"));
+        assertTrue(cityCatalog.containsName("澳门特别行政区"));
         assertFalse(cityCatalog.containsName("深圳"));
         assertFalse(cityCatalog.containsName("不存在市"));
     }
@@ -44,5 +47,8 @@ class CityCatalogTest {
         List<String> provinces = cityCatalog.listProvinces();
         assertTrue(provinces.contains("广东省"));
         assertTrue(provinces.contains("北京市"));
+        assertTrue(provinces.contains("台湾省"));
+        assertTrue(provinces.contains("香港特别行政区"));
+        assertTrue(provinces.contains("澳门特别行政区"));
     }
 }

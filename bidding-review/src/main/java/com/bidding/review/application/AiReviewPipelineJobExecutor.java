@@ -219,7 +219,7 @@ public class AiReviewPipelineJobExecutor {
             AiPipelineLog.info(projectId, job.getId(), "CHECKLIST",
                     "复用清单 checklistId=" + existing.getId() + " version=" + existing.getVersion());
             advanceOrThrow(job, workerId, JobPort.PHASE_REVIEW_SUBMIT, 55,
-                    "复用清单 checklistId=" + existing.getId(), Instant.now(),
+                    "复用清单", Instant.now(),
                     existing.getId(), null, checklistPayload(projectId, existing.getId(), true));
             return;
         }
@@ -230,7 +230,7 @@ public class AiReviewPipelineJobExecutor {
                 "新建清单 checklistId=" + created.getChecklistId()
                         + " childJobId=" + created.getJobId());
         advanceOrThrow(job, workerId, JobPort.PHASE_CHECKLIST_WAIT, 45,
-                "建清单中 checklistId=" + created.getChecklistId(), nextRunFromNow(waitIntervalMs),
+                "建清单中", nextRunFromNow(waitIntervalMs),
                 created.getChecklistId(), null, checklistPayload(projectId, created.getChecklistId(), false));
     }
 
@@ -255,7 +255,7 @@ public class AiReviewPipelineJobExecutor {
                 throw new PipelineFatalException("清单成功但无条目 checklistId=" + checklistId);
             }
             advanceOrThrow(job, workerId, JobPort.PHASE_REVIEW_SUBMIT, 55,
-                    "清单完成 checklistId=" + checklistId, Instant.now(), null, null, null);
+                    "清单完成", Instant.now(), null, null, null);
             return;
         }
         if (RequirementChecklistPort.STATUS_FAILED.equals(status)) {
@@ -268,7 +268,7 @@ public class AiReviewPipelineJobExecutor {
             throw new PipelineFatalException("等待建清单超时 checklistId=" + checklistId);
         }
         advanceOrThrow(job, workerId, JobPort.PHASE_CHECKLIST_WAIT, 50,
-                "建清单中 checklistId=" + checklistId, nextRunFromNow(waitIntervalMs), null, null, null);
+                "建清单中", nextRunFromNow(waitIntervalMs), null, null, null);
     }
 
     /**
@@ -286,7 +286,7 @@ public class AiReviewPipelineJobExecutor {
         AiPipelineLog.info(projectId, job.getId(), "REVIEW",
                 "已创建审查 reviewId=" + created.getReviewId() + " childJobId=" + created.getJobId());
         advanceOrThrow(job, workerId, JobPort.PHASE_REVIEW_WAIT, 70,
-                "AI审查中 reviewId=" + created.getReviewId(), nextRunFromNow(waitIntervalMs),
+                "AI审查中", nextRunFromNow(waitIntervalMs),
                 null, created.getReviewId(), null);
     }
 
@@ -312,7 +312,7 @@ public class AiReviewPipelineJobExecutor {
                     + ",\"reviewId\":" + reviewId
                     + ",\"reusedChecklist\":" + reusedChecklist(job)
                     + "}";
-            String message = "审查完成 reviewId=" + reviewId + " checklistId=" + job.getChecklistId();
+            String message = "审查完成";
             boolean updated = jobPort.succeedPipeline(
                     job.getId(), workerId, phaseOf(job), message, payload);
             if (!updated) {
@@ -331,7 +331,7 @@ public class AiReviewPipelineJobExecutor {
             throw new PipelineFatalException("等待审查超时 reviewId=" + reviewId);
         }
         advanceOrThrow(job, workerId, JobPort.PHASE_REVIEW_WAIT, 80,
-                "AI审查中 reviewId=" + reviewId, nextRunFromNow(waitIntervalMs), null, null, null);
+                "AI审查中", nextRunFromNow(waitIntervalMs), null, null, null);
     }
 
     /**

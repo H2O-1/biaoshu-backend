@@ -223,7 +223,7 @@ public class PackageAppService {
      * 逻辑删除标包。
      * 招标包：已绑定项目不可删；未绑则可删，并级联删包内文件。
      * 投标包：可直接删（已绑则从项目侧消失）；级联删包内文件；
-     * 已绑项目时作废该包审查条目并将项目审查标为 OBSOLETE（需重新审查）。
+     * 已绑项目且包内有文件时作废该包审查条目并将项目审查标为 OBSOLETE（需重新审查）。
      * 项目存在进行中的 AI 任务时禁止删投标包。
      */
     @Transactional
@@ -243,9 +243,13 @@ public class PackageAppService {
             throw new BizException(ErrorCode.CONFLICT, "项目审查进行中，请稍后再删投标包");
         }
 
+        boolean bidWithFiles = pkg.isBid()
+                && projectId != null
+                && documentCountPort.countActiveByPackageId(packageId) > 0;
+
         documentCascadePort.softDeleteAllActiveByPackageId(packageId);
 
-        if (pkg.isBid() && projectId != null) {
+        if (bidWithFiles) {
             projectArtifactInvalidationPort.deleteReviewItemsByPackageId(projectId, packageId);
             projectArtifactInvalidationPort.obsoleteReviewsByProjectId(
                     projectId, "投标包已删除，请重新审查");
@@ -412,6 +416,16 @@ public class PackageAppService {
          * 多文件时按最差：FAILED &gt; PROCESSING &gt; PENDING &gt; SUCCESS。
          */
         private String indexStatus;
+        /** 最新成功审查下该投标包 AI 建议分合计；无审查或无评分项为 null。 */
+        private BigDecimal suggestedScoreTotal;
+        /** 最新成功审查下该投标包评分满分合计；无审查或无评分项为 null。 */
+        private BigDecimal fullScoreTotal;
+        /** 最新成功审查下该投标包资格项「符合」数量。 */
+        private int qualificationMatchCount;
+        /** 最新成功审查下该投标包资格项「不符合」数量。 */
+        private int qualificationMismatchCount;
+        /** 最新成功审查下该投标包资格项「无法判断」数量。 */
+        private int qualificationUnknownCount;
 
         public long getId() {
             return id;
@@ -547,6 +561,46 @@ public class PackageAppService {
 
         public void setIndexStatus(String indexStatus) {
             this.indexStatus = indexStatus;
+        }
+
+        public BigDecimal getSuggestedScoreTotal() {
+            return suggestedScoreTotal;
+        }
+
+        public void setSuggestedScoreTotal(BigDecimal suggestedScoreTotal) {
+            this.suggestedScoreTotal = suggestedScoreTotal;
+        }
+
+        public BigDecimal getFullScoreTotal() {
+            return fullScoreTotal;
+        }
+
+        public void setFullScoreTotal(BigDecimal fullScoreTotal) {
+            this.fullScoreTotal = fullScoreTotal;
+        }
+
+        public int getQualificationMatchCount() {
+            return qualificationMatchCount;
+        }
+
+        public void setQualificationMatchCount(int qualificationMatchCount) {
+            this.qualificationMatchCount = qualificationMatchCount;
+        }
+
+        public int getQualificationMismatchCount() {
+            return qualificationMismatchCount;
+        }
+
+        public void setQualificationMismatchCount(int qualificationMismatchCount) {
+            this.qualificationMismatchCount = qualificationMismatchCount;
+        }
+
+        public int getQualificationUnknownCount() {
+            return qualificationUnknownCount;
+        }
+
+        public void setQualificationUnknownCount(int qualificationUnknownCount) {
+            this.qualificationUnknownCount = qualificationUnknownCount;
         }
     }
 }

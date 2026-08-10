@@ -660,8 +660,9 @@ Authorization: Bearer <accessToken>
 
 | 参数 | 类型 | 必填 | 默认 | 说明 |
 |------|------|------|------|------|
-| name | string | 否 | `""` | 公司名称模糊搜 |
-| city | string | 否 | `""` | 所在城市模糊搜 |
+| keyword | string | 否 | `""` | 统一关键字：公司名称 / 城市 / 负责人 / 手机号 / 账号 / 邮箱模糊搜 |
+| name | string | 否 | `""` | 兼容旧前端；`keyword` 为空时按统一关键字处理 |
+| city | string | 否 | `""` | 所在城市附加筛选 |
 | status | string | 否 | `""` | `ACTIVE` / `DISABLED`；空=全部未删除（不含 `DELETED`） |
 | page | number | 否 | 1 | 页码，从 1 起 |
 | size | number | 否 | 20 | 每页条数，最大 100 |
@@ -1084,7 +1085,7 @@ Authorization: Bearer <accessToken>
 
 `GET /api/projects/{projectId}/bid-packages?page=1&size=20`
 
-返回已绑定到该项目的投标包分页。
+返回已绑定到该项目的投标包分页；每条摘要含文件数/解析状态，以及最新成功审查下的 `suggestedScoreTotal`、`fullScoreTotal`、`qualificationMatchCount`、`qualificationMismatchCount`、`qualificationUnknownCount`。
 
 ---
 
@@ -1168,7 +1169,7 @@ Authorization: Bearer <accessToken>
 | 类型 | 规则 |
 |------|------|
 | 招标包 | 已绑定项目 → `40900`；未绑可删 |
-| 投标包 | **可直接删**（已绑则项目下不再可见）；**包内有文件时不可删** |
+| 投标包 | **可直接删**（已绑则项目下不再可见）；**级联逻辑删除包内文件**；已绑项目且包内有文件时作废审查，空投标包删除不影响审查状态 |
 
 ---
 

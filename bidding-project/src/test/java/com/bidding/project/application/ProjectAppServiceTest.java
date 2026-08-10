@@ -3,8 +3,10 @@ package com.bidding.project.application;
 import com.bidding.common.api.PageResult;
 import com.bidding.common.error.BizException;
 import com.bidding.common.error.ErrorCode;
+import com.bidding.common.port.BidPackageReviewSummaryPort;
 import com.bidding.common.port.DocumentCountPort;
 import com.bidding.common.port.DocumentProjectBindPort;
+import com.bidding.common.port.OrgLookupPort;
 import com.bidding.common.port.ProjectReviewProgressPort;
 import com.bidding.common.port.ReviewPort;
 import com.bidding.common.security.CurrentUser;
@@ -21,9 +23,11 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -54,7 +58,13 @@ class ProjectAppServiceTest {
     private DocumentProjectBindPort documentProjectBindPort;
 
     @Mock
+    private OrgLookupPort orgLookupPort;
+
+    @Mock
     private ProjectReviewProgressPort projectReviewProgressPort;
+
+    @Mock
+    private BidPackageReviewSummaryPort bidPackageReviewSummaryPort;
 
     @InjectMocks
     private ProjectAppService projectAppService;
@@ -264,6 +274,34 @@ class ProjectAppServiceTest {
     }
 
     @Test
+    void getUsesTendererOrgNameForTenderParseFailedMessage() {
+        when(projectRepository.findById(100L)).thenReturn(Optional.of(
+                project(100L, 2L, "智慧城市", "ACTIVE")));
+        when(orgLookupPort.findNameById(2L)).thenReturn("杭州富阳区发展和改革局");
+        when(packageRepository.findByProjectIdAndType(100L, "TENDER"))
+                .thenReturn(Optional.of(boundTender(50L, 2L, 100L, "未命名-20260806-1647")));
+        when(documentCountPort.resolveIndexStatusByPackageId(50L)).thenReturn("FAILED");
+        when(documentCountPort.countActiveByPackageId(50L)).thenReturn(1L);
+        when(documentCountPort.countActiveByProjectIdAndPackageType(100L, "TENDER")).thenReturn(1L);
+        when(documentCountPort.countActiveNotSuccessIndexByProjectIdAndPackageType(100L, "TENDER"))
+                .thenReturn(1L);
+        when(documentCountPort.findActiveFileNameByProjectIdAndPackageTypeAndFileType(
+                100L, "TENDER", ProjectAppService.FILE_TYPE_MAIN_TENDER))
+                .thenReturn("招标文件.pdf");
+        when(packageRepository.searchByProjectIdAndType(100L, "BID", 0, 500)).thenReturn(List.of());
+        when(packageRepository.countByProjectIdAndType(100L, "BID")).thenReturn(0L);
+        when(documentCountPort.countActiveByProjectIdAndPackageType(100L, "BID")).thenReturn(0L);
+        when(documentCountPort.countPackagesWithActiveFilesByProjectIdAndPackageType(100L, "BID"))
+                .thenReturn(0L);
+
+        ProjectAppService.ProjectSummary summary = projectAppService.get(100L);
+
+        assertEquals("杭州富阳区发展和改革局", summary.getTendererOrgName());
+        assertEquals("杭州富阳区发展和改革局招标文件解析失败", summary.getWorkflowMessage());
+        assertEquals("未命名-20260806-1647", summary.getTenderPackage().getName());
+    }
+
+    @Test
     void resolveWorkflow_needBidWhenBidIndexFailedOrProcessing() {
         stubTenderReady(100L);
         when(documentCountPort.countActiveByProjectIdAndPackageType(100L, "BID")).thenReturn(1L);
@@ -367,6 +405,36 @@ class ProjectAppServiceTest {
         assertEquals(ProjectAppService.WORKFLOW_READY_FOR_AI_REVIEW, item.getWorkflowStatus());
     }
 
+    @Test
+    void listBidPackagesIncludesLatestReviewSummary() {
+        when(projectRepository.findById(100L)).thenReturn(Optional.of(project(100L, 2L, "项目A", "ACTIVE")));
+        BizPackage bid = boundBid(60L, 2L, 100L, "华建集团");
+        when(packageRepository.searchByProjectIdAndType(100L, "BID", 0, 20))
+                .thenReturn(List.of(bid));
+        when(packageRepository.countByProjectIdAndType(100L, "BID")).thenReturn(1L);
+        when(documentCountPort.countActiveByPackageId(60L)).thenReturn(4L);
+        when(documentCountPort.resolveIndexStatusByPackageId(60L)).thenReturn("SUCCESS");
+        BidPackageReviewSummaryPort.Summary review = new BidPackageReviewSummaryPort.Summary();
+        review.setPackageId(60L);
+        review.setSuggestedScoreTotal(new BigDecimal("88.50"));
+        review.setFullScoreTotal(new BigDecimal("100.00"));
+        review.setQualificationMismatchCount(1);
+        review.setQualificationMatchCount(4);
+        review.setQualificationUnknownCount(2);
+        when(bidPackageReviewSummaryPort.findLatestSuccessByProjectId(100L))
+                .thenReturn(Map.of(60L, review));
+
+        PageResult<PackageAppService.PackageSummary> page =
+                projectAppService.listBidPackages(100L, 1, 20);
+
+        PackageAppService.PackageSummary item = page.getItems().get(0);
+        assertEquals(new BigDecimal("88.50"), item.getSuggestedScoreTotal());
+        assertEquals(new BigDecimal("100.00"), item.getFullScoreTotal());
+        assertEquals(1, item.getQualificationMismatchCount());
+        assertEquals(4, item.getQualificationMatchCount());
+        assertEquals(2, item.getQualificationUnknownCount());
+    }
+
     private void stubNeedTenderFiles(long projectId) {
         when(documentCountPort.countActiveByProjectIdAndPackageType(projectId, "TENDER"))
                 .thenReturn(0L);
@@ -434,6 +502,12 @@ class ProjectAppServiceTest {
     private static BizPackage boundTender(long id, long orgId, long projectId, String name) {
         return new BizPackage(id, orgId, projectId, "TENDER", name,
                 null, null, null, null, null, null,
+                "ACTIVE", 10L, Instant.now(), Instant.now());
+    }
+
+    private static BizPackage boundBid(long id, long orgId, long projectId, String name) {
+        return new BizPackage(id, orgId, projectId, "BID", name,
+                "联系人", "13800000000", null, null, null, null,
                 "ACTIVE", 10L, Instant.now(), Instant.now());
     }
 }

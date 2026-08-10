@@ -3,8 +3,10 @@ package com.bidding.project.application;
 import com.bidding.common.api.PageResult;
 import com.bidding.common.error.BizException;
 import com.bidding.common.error.ErrorCode;
+import com.bidding.common.port.BidPackageReviewSummaryPort;
 import com.bidding.common.port.DocumentCountPort;
 import com.bidding.common.port.DocumentProjectBindPort;
+import com.bidding.common.port.OrgLookupPort;
 import com.bidding.common.port.ProjectReviewProgressPort;
 import com.bidding.common.port.ReviewPort;
 import com.bidding.common.security.CurrentUser;
@@ -23,6 +25,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -38,6 +41,7 @@ public class ProjectAppService {
     private static final String STATUS_ACTIVE = "ACTIVE";
     private static final String STATUS_DISABLED = "DISABLED";
     private static final String STATUS_DELETED = "DELETED";
+    private static final String INDEX_FAILED = "FAILED";
 
     /** 待补充招标文件（0 文件，或存在未解析成功的招标文件） */
     public static final String WORKFLOW_NEED_TENDER_FILES = "NEED_TENDER_FILES";
@@ -71,18 +75,24 @@ public class ProjectAppService {
     private final PackageRepository packageRepository;
     private final DocumentCountPort documentCountPort;
     private final DocumentProjectBindPort documentProjectBindPort;
+    private final OrgLookupPort orgLookupPort;
     private final ProjectReviewProgressPort projectReviewProgressPort;
+    private final BidPackageReviewSummaryPort bidPackageReviewSummaryPort;
 
     public ProjectAppService(ProjectRepository projectRepository,
                              PackageRepository packageRepository,
                              DocumentCountPort documentCountPort,
                              DocumentProjectBindPort documentProjectBindPort,
-                             ProjectReviewProgressPort projectReviewProgressPort) {
+                             OrgLookupPort orgLookupPort,
+                             ProjectReviewProgressPort projectReviewProgressPort,
+                             BidPackageReviewSummaryPort bidPackageReviewSummaryPort) {
         this.projectRepository = projectRepository;
         this.packageRepository = packageRepository;
         this.documentCountPort = documentCountPort;
         this.documentProjectBindPort = documentProjectBindPort;
+        this.orgLookupPort = orgLookupPort;
         this.projectReviewProgressPort = projectReviewProgressPort;
+        this.bidPackageReviewSummaryPort = bidPackageReviewSummaryPort;
     }
 
     /**
@@ -214,9 +224,12 @@ public class ProjectAppService {
 
         List<BizPackage> bidPkgs = packageRepository.searchByProjectIdAndType(
                 projectId, PackageAppService.TYPE_BID, 0, 500);
+        Map<Long, BidPackageReviewSummaryPort.Summary> reviewSummaries =
+                reviewSummariesByPackage(projectId);
         List<PackageAppService.PackageSummary> bidList = new ArrayList<>();
         for (int i = 0; i < bidPkgs.size(); i++) {
-            bidList.add(toPackageSummary(bidPkgs.get(i)));
+            BizPackage bid = bidPkgs.get(i);
+            bidList.add(toPackageSummary(bid, reviewSummaries.get(bid.getId())));
         }
         summary.setBidPackages(bidList);
     }
@@ -318,16 +331,32 @@ public class ProjectAppService {
 
         List<BizPackage> packages = packageRepository.searchByProjectIdAndType(
                 projectId, PackageAppService.TYPE_BID, offset, safeSize);
+        Map<Long, BidPackageReviewSummaryPort.Summary> reviewSummaries =
+                reviewSummariesByPackage(projectId);
         List<PackageAppService.PackageSummary> items = new ArrayList<>();
         for (BizPackage pkg : packages) {
-            items.add(toPackageSummary(pkg));
+            items.add(toPackageSummary(pkg, reviewSummaries.get(pkg.getId())));
         }
         long total = packageRepository.countByProjectIdAndType(
                 projectId, PackageAppService.TYPE_BID);
         return new PageResult<>(items, total, safePage, safeSize);
     }
 
+    private Map<Long, BidPackageReviewSummaryPort.Summary> reviewSummariesByPackage(long projectId) {
+        Map<Long, BidPackageReviewSummaryPort.Summary> summaries =
+                bidPackageReviewSummaryPort.findLatestSuccessByProjectId(projectId);
+        if (summaries == null) {
+            return Map.of();
+        }
+        return summaries;
+    }
+
     private PackageAppService.PackageSummary toPackageSummary(BizPackage pkg) {
+        return toPackageSummary(pkg, null);
+    }
+
+    private PackageAppService.PackageSummary toPackageSummary(
+            BizPackage pkg, BidPackageReviewSummaryPort.Summary reviewSummary) {
         PackageAppService.PackageSummary summary = new PackageAppService.PackageSummary();
         summary.setId(pkg.getId());
         summary.setOrgId(pkg.getOrgId());
@@ -346,6 +375,13 @@ public class ProjectAppService {
         summary.setUpdatedAt(pkg.getUpdatedAt());
         summary.setFileCount(documentCountPort.countActiveByPackageId(pkg.getId()));
         summary.setIndexStatus(documentCountPort.resolveIndexStatusByPackageId(pkg.getId()));
+        if (reviewSummary != null) {
+            summary.setSuggestedScoreTotal(reviewSummary.getSuggestedScoreTotal());
+            summary.setFullScoreTotal(reviewSummary.getFullScoreTotal());
+            summary.setQualificationMatchCount(reviewSummary.getQualificationMatchCount());
+            summary.setQualificationMismatchCount(reviewSummary.getQualificationMismatchCount());
+            summary.setQualificationUnknownCount(reviewSummary.getQualificationUnknownCount());
+        }
         return summary;
     }
 
@@ -354,6 +390,8 @@ public class ProjectAppService {
         summary.setId(project.getId());
         summary.setOrgId(project.getOrgId());
         summary.setName(project.getName());
+        String tendererOrgName = orgLookupPort.findNameById(project.getOrgId());
+        summary.setTendererOrgName(tendererOrgName);
         summary.setAgency(project.getAgency());
         summary.setProjectType(project.getProjectType());
         summary.setLeaderName(project.getLeaderName());
@@ -364,9 +402,11 @@ public class ProjectAppService {
 
         Optional<BizPackage> tenderOpt = packageRepository.findByProjectIdAndType(
                 project.getId(), PackageAppService.TYPE_TENDER);
+        String tenderPackageIndexStatus = null;
         if (tenderOpt.isPresent()) {
             summary.setTenderPackageId(tenderOpt.get().getId());
             summary.setTenderPackageCount(1);
+            tenderPackageIndexStatus = documentCountPort.resolveIndexStatusByPackageId(tenderOpt.get().getId());
         } else {
             summary.setTenderPackageId(null);
             summary.setTenderPackageCount(0);
@@ -390,10 +430,48 @@ public class ProjectAppService {
         summary.setBidFileCount(documentCountPort.countActiveByProjectIdAndPackageType(
                 project.getId(), PackageAppService.TYPE_BID));
 
-        summary.setWorkflowStatus(resolveWorkflowStatus(project.getId()));
+        String workflowStatus = resolveWorkflowStatus(project.getId());
+        summary.setWorkflowStatus(workflowStatus);
+        summary.setWorkflowMessage(resolveWorkflowMessage(
+                workflowStatus, tendererOrgName, tenderPackageIndexStatus));
         summary.setAiReviewJobId(
                 projectReviewProgressPort.findLatestAiReviewPipelineJobId(project.getId()));
         return summary;
+    }
+
+    private String resolveWorkflowMessage(String workflowStatus,
+                                          String tendererOrgName,
+                                          String tenderPackageIndexStatus) {
+        if (WORKFLOW_NEED_TENDER_FILES.equals(workflowStatus)
+                && INDEX_FAILED.equals(tenderPackageIndexStatus)) {
+            return displayOrgName(tendererOrgName) + "招标文件解析失败";
+        }
+        if (WORKFLOW_NEED_TENDER_FILES.equals(workflowStatus)) {
+            return "待补充招标文件";
+        }
+        if (WORKFLOW_NEED_BID_FILES.equals(workflowStatus)) {
+            return "待补充投标文件";
+        }
+        if (WORKFLOW_READY_FOR_AI_REVIEW.equals(workflowStatus)) {
+            return "待AI审查";
+        }
+        if (WORKFLOW_AI_REVIEWING.equals(workflowStatus)) {
+            return "AI审查中";
+        }
+        if (WORKFLOW_AI_REVIEW_SUCCESS.equals(workflowStatus)) {
+            return "AI审查完成";
+        }
+        if (WORKFLOW_AI_REVIEW_FAILED.equals(workflowStatus)) {
+            return "AI审查失败";
+        }
+        return null;
+    }
+
+    private String displayOrgName(String tendererOrgName) {
+        if (tendererOrgName == null || tendererOrgName.trim().isEmpty()) {
+            return "";
+        }
+        return tendererOrgName.trim();
     }
 
     /**
@@ -639,6 +717,8 @@ public class ProjectAppService {
         private long id;
         private long orgId;
         private String name;
+        /** 招标单位名称（当前项目所属组织名称）。 */
+        private String tendererOrgName;
         private String agency;
         private String projectType;
         private String leaderName;
@@ -660,6 +740,8 @@ public class ProjectAppService {
         private long bidFileCount;
         /** 派生业务进度，见 WORKFLOW_* 常量 */
         private String workflowStatus;
+        /** 面向页面展示的业务进度文案。 */
+        private String workflowMessage;
         /**
          * 最新一键 AI 审查总任务 jobId（type=AI_REVIEW_PIPELINE）；无则 null。
          * 前端可据此继续轮询 GET /api/jobs/{aiReviewJobId}。
@@ -696,6 +778,14 @@ public class ProjectAppService {
 
         public void setName(String name) {
             this.name = name;
+        }
+
+        public String getTendererOrgName() {
+            return tendererOrgName;
+        }
+
+        public void setTendererOrgName(String tendererOrgName) {
+            this.tendererOrgName = tendererOrgName;
         }
 
         public String getAgency() {
@@ -816,6 +906,14 @@ public class ProjectAppService {
 
         public void setWorkflowStatus(String workflowStatus) {
             this.workflowStatus = workflowStatus;
+        }
+
+        public String getWorkflowMessage() {
+            return workflowMessage;
+        }
+
+        public void setWorkflowMessage(String workflowMessage) {
+            this.workflowMessage = workflowMessage;
         }
 
         public Long getAiReviewJobId() {

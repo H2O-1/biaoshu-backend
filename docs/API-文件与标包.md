@@ -47,6 +47,11 @@
 | updatedAt | string | ISO 时间 |
 | fileCount | number | 包内未删除文件数 |
 | indexStatus | string\|null | 包内文件解析汇总：`PENDING`/`PROCESSING`/`SUCCESS`/`FAILED`；无文件为 null。多文件取最差：FAILED &gt; PROCESSING &gt; PENDING &gt; SUCCESS |
+| suggestedScoreTotal | number\|null | 项目投标包列表 / 项目详情投标包中返回：最新成功审查下该投标包评分建议分合计 |
+| fullScoreTotal | number\|null | 项目投标包列表 / 项目详情投标包中返回：最新成功审查下该投标包评分满分合计 |
+| qualificationMatchCount | number | 项目投标包列表 / 项目详情投标包中返回：最新成功审查下资格项「符合」数量 |
+| qualificationMismatchCount | number | 项目投标包列表 / 项目详情投标包中返回：最新成功审查下资格项「不符合」数量 |
+| qualificationUnknownCount | number | 项目投标包列表 / 项目详情投标包中返回：最新成功审查下资格项「无法判断」数量 |
 
 ### 7.1 标包分页列表
 
@@ -243,7 +248,7 @@
 | 类型 | 规则 |
 |------|------|
 | 招标包 | 已绑定项目 → `40900`；未绑可删，**级联逻辑删除包内文件**（含对象存储与切块/向量） |
-| 投标包 | **可直接删**（已绑则项目下不再可见）；**级联逻辑删除包内文件**；已绑项目时：删除该包审查条目，并将项目下 SUCCESS/FAILED/BUILDING 审查标为 `OBSOLETE`（`workflowStatus` 回到待审查）；建清单/审查进行中 → `40900` |
+| 投标包 | **可直接删**（已绑则项目下不再可见）；**级联逻辑删除包内文件**；已绑项目且包内有文件时：删除该包审查条目，并将项目下 SUCCESS/FAILED/BUILDING 审查标为 `OBSOLETE`（`workflowStatus` 回到待审查）；已绑项目但包内无文件时仅删包，不作废审查；建清单/审查进行中 → `40900` |
 
 **成功响应**
 
@@ -604,7 +609,7 @@
 - 创建时均不绑项目（`projectId=null`）：招标包在创建项目时选绑；投标包在项目下「添加投标包」时选绑。
 - 创建：仅 `type` 必填；`name` 可空（空则 `未命名-yyyyMMdd-HHmm`）；投标联系人可空。更新接口名称等仍必填。
 - 招标包 `name`=包名；投标包 `name`=投标公司名（同组织未删除唯一）。
-- 已绑项目的招标包：**不可删**；投标包可删（已绑则项目下不再可见），但**包内有文件不可删**。
+- 已绑项目的招标包：**不可删**；投标包可删（已绑则项目下不再可见），包内文件会级联逻辑删除。
 - `fileCount` 为真实未删除文件数（非占位）。
 - `unboundOnly=true`：只返回尚未绑定项目的包，供创建项目/绑投标包下拉。
 
@@ -612,7 +617,7 @@
 - 上传：multipart 必填 `file` + `fileType`（业务类型自由字符串，只存不校验；空/过长 → 400）；扩展名限 PDF/Word/Excel；超限 → 400。
 - 已绑项目下上传/复制/删除文件：建清单或审查进行中 → `40900`；成功后招标变更作废清单+审查，投标变更只作废审查；`OBSOLETE` 不删行，详情可按 id 查看。向量化（INDEX）进行中不拦截改文件。
 - 上传时 `projectId` 取自标包；包尚未绑项目则为 `null`。创建项目绑包时，后端会把包内已有文件（及 chunk/vector）的空 `project_id` 回写为该项目，**前端无需单独传/补绑**。
-- 有文件的包不可删（投标包规则）；删文件为逻辑删（status=DELETED），对象存储侧按实现清理或保留。
+- 删除投标包时，包内文件会级联逻辑删除；删单个文件同样为逻辑删（status=DELETED），对象存储侧按实现清理或保留。
 - 预览仅 PDF；非 PDF 预览 → 400。
 - 下载/预览/列表均校验：包属本组织、文件属该包、未删除。
 - `indexStatus=PROCESSING` 时勿重复点索引（见 AI 册）；列表可轮询 `indexStatus` 展示进度。
