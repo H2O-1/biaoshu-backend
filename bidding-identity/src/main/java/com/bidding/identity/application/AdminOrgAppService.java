@@ -115,7 +115,8 @@ public class AdminOrgAppService {
 
     /**
      * 组织分页列表。
-     * activeCount / disabledCount / pendingConfigCount 为全量统计，不受 name / city / status 筛选影响。
+     * keyword 模糊搜索组织名称、城市，以及组织下未删除账号的负责人、手机号、账号、邮箱。
+     * activeCount / disabledCount / pendingConfigCount 为全量统计，不受 keyword / city / status 筛选影响。
      * pendingConfigCount：未删除且下属无未删除账号的组织数。
      */
     @Transactional(readOnly = true)

@@ -23,8 +23,10 @@ public interface OrgRepository {
 
     boolean existsByCode(String code);
 
+    /** keyword 搜组织名称、城市、组织下未删除账号的负责人、手机号、账号、邮箱。 */
     List<Org> search(String nameKeyword, String city, String status, int offset, int limit);
 
+    /** keyword 搜索口径同 search。 */
     long countSearch(String nameKeyword, String city, String status);
 
     /** 按状态统计未删除组织数（通常传 ACTIVE / DISABLED）。 */

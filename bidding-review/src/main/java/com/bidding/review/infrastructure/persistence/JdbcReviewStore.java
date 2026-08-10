@@ -13,6 +13,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.sql.Types;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
@@ -108,7 +109,7 @@ public class JdbcReviewStore implements ReviewPort {
                 ps.setString(3, item.getDimensionCode());
                 ps.setString(4, item.getRequirementText());
                 ps.setBoolean(5, item.isMust());
-                ps.setString(6, item.getVerdict());
+                ps.setString(6, normalizeVerdict(item));
                 ps.setString(7, item.getReason());
                 ps.setString(8, item.getBidExcerpt());
                 if (item.getPageNo() == null) {
@@ -354,5 +355,42 @@ public class JdbcReviewStore implements ReviewPort {
             return null;
         }
         return ts.toInstant();
+    }
+
+    private String normalizeVerdict(ItemDraft item) {
+        if (item == null) {
+            return ReviewPort.VERDICT_UNCLEAR;
+        }
+        String verdict = item.getVerdict();
+        if (verdict != null && !verdict.isBlank()) {
+            return verdict;
+        }
+        if (ReviewPort.MAIN_SCORING.equals(item.getMainType())) {
+            return verdictForScoring(item.getSuggestedScore(), item.getFullScore());
+        }
+        return mapStatusToVerdict(item.getStatus());
+    }
+
+    private String verdictForScoring(BigDecimal suggested, BigDecimal full) {
+        if (suggested == null || full == null) {
+            return ReviewPort.VERDICT_UNCLEAR;
+        }
+        if (suggested.compareTo(BigDecimal.ZERO) <= 0) {
+            return ReviewPort.VERDICT_FAIL;
+        }
+        if (suggested.compareTo(full) >= 0) {
+            return ReviewPort.VERDICT_PASS;
+        }
+        return ReviewPort.VERDICT_UNCLEAR;
+    }
+
+    private String mapStatusToVerdict(String status) {
+        if (ReviewPort.STATUS_MATCH.equals(status)) {
+            return ReviewPort.VERDICT_PASS;
+        }
+        if (ReviewPort.STATUS_MISMATCH.equals(status)) {
+            return ReviewPort.VERDICT_FAIL;
+        }
+        return ReviewPort.VERDICT_UNCLEAR;
     }
 }

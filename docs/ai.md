@@ -82,7 +82,7 @@ GET /api/jobs/501
     "type": "AI_REVIEW_PIPELINE",
     "status": "SUCCESS",
     "progress": 100,
-    "message": "审查完成 reviewId=201 checklistId=88",
+    "message": "审查完成",
     "payloadJson": "{\"projectId\":10,\"phase\":\"DONE\",\"checklistId\":88,\"reviewId\":201,\"reusedChecklist\":true}",
     "errorMessage": null,
     "retryCount": 0,
@@ -105,7 +105,7 @@ GET /api/jobs/501
 | `data.aiReviewJobId`（项目详情/列表） | 有过一键审查时   | 退出再进后从此字段续轮询    |
 | `data.reviewId`（轮询接口）         | `status=SUCCESS` | **审查详情 id，优先用这个** |
 | `data.checklistId`（轮询接口）      | `status=SUCCESS` | 清单 id（可选展示）         |
-| `data.message` / `data.payloadJson` | 成功后也有       | 兜底；一般不用自己解析      |
+| `data.payloadJson`                  | 成功后也有       | 兜底；一般不用自己解析      |
 
 **失败**（读 `errorMessage`，含阶段与失败文件名）：
 
@@ -531,7 +531,7 @@ projectId=10 pipelineJobId=501 phase=DONE | 审查完成 reviewId=201 checklistI
 
 总任务 `PENDING`/`RUNNING` 时，项目 `workflowStatus` 为 `AI_REVIEWING`。
 
-删投标包或删招标文件时：若有进行中的 INDEX/建清单/审查/一键审查任务会 **409**；否则将相关审查（及招标文件对应的清单）标为 `OBSOLETE`，`workflowStatus` 回到 `READY_FOR_AI_REVIEW`（或待补文件），需重新点一键审查。
+删有文件的投标包或删招标文件时：若有进行中的 INDEX/建清单/审查/一键审查任务会 **409**；否则将相关审查（及招标文件对应的清单）标为 `OBSOLETE`，`workflowStatus` 回到 `READY_FOR_AI_REVIEW`（或待补文件），需重新点一键审查。删空投标包只移除单位，不影响审查状态。
 
 项目下**上传 / 复制 / 删除**任一招标或投标文件：建清单/审查/一键审查进行中 → **409**（INDEX 进行中不拦）；招标变更作废清单+审查，仅投标变更只作废审查；`OBSOLETE` 详情仍可查看。
 

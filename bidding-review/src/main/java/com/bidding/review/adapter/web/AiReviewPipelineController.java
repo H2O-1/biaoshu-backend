@@ -20,7 +20,7 @@ public class AiReviewPipelineController {
 
     /**
      * 发起一键审查。返回总 jobId，前端轮询 GET /api/jobs/{jobId}。
-     * 成功后 message / payloadJson 含 reviewId、checklistId。
+     * 成功后 payloadJson / 摘要字段含 reviewId、checklistId；message 仅放用户可见进度文案。
      */
     @PostMapping("/api/projects/{projectId}/ai-reviews/run")
     public ApiResponse<RunResponse> run(@PathVariable("projectId") long projectId) {

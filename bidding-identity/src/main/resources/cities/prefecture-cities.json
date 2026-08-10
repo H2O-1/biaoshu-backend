@@ -2206,5 +2206,71 @@
     "name": "新星市",
     "province": "新疆维吾尔自治区",
     "provinceCode": "650000"
+  },
+  {
+    "code": "710100",
+    "name": "台北市",
+    "province": "台湾省",
+    "provinceCode": "710000"
+  },
+  {
+    "code": "710200",
+    "name": "高雄市",
+    "province": "台湾省",
+    "provinceCode": "710000"
+  },
+  {
+    "code": "710300",
+    "name": "新北市",
+    "province": "台湾省",
+    "provinceCode": "710000"
+  },
+  {
+    "code": "710400",
+    "name": "台中市",
+    "province": "台湾省",
+    "provinceCode": "710000"
+  },
+  {
+    "code": "710500",
+    "name": "台南市",
+    "province": "台湾省",
+    "provinceCode": "710000"
+  },
+  {
+    "code": "710600",
+    "name": "桃园市",
+    "province": "台湾省",
+    "provinceCode": "710000"
+  },
+  {
+    "code": "710700",
+    "name": "基隆市",
+    "province": "台湾省",
+    "provinceCode": "710000"
+  },
+  {
+    "code": "710800",
+    "name": "新竹市",
+    "province": "台湾省",
+    "provinceCode": "710000"
+  },
+  {
+    "code": "710900",
+    "name": "嘉义市",
+    "province": "台湾省",
+    "provinceCode": "710000"
+  },
+  {
+    "code": "810000",
+    "name": "香港特别行政区",
+    "province": "香港特别行政区",
+    "provinceCode": "810000"
+  },
+  {
+    "code": "820000",
+    "name": "澳门特别行政区",
+    "province": "澳门特别行政区",
+    "provinceCode": "820000"
   }
 ]

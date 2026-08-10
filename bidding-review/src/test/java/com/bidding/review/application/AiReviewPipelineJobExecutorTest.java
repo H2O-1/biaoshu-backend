@@ -228,7 +228,7 @@ class AiReviewPipelineJobExecutorTest {
         ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
         verify(jobPort).advancePipeline(eq(JOB_ID), eq(WORKER),
                 eq(JobPort.PHASE_CHECKLIST_SUBMIT), eq(JobPort.PHASE_REVIEW_SUBMIT),
-                eq(55), anyString(), any(Instant.class), eq(77L), isNull(), payload.capture());
+                eq(55), eq("复用清单"), any(Instant.class), eq(77L), isNull(), payload.capture());
         assertTrue(payload.getValue().contains("\"checklistId\":77"));
         assertTrue(payload.getValue().contains("\"reusedChecklist\":true"));
     }
@@ -250,7 +250,7 @@ class AiReviewPipelineJobExecutorTest {
         ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
         verify(jobPort).advancePipeline(eq(JOB_ID), eq(WORKER),
                 eq(JobPort.PHASE_CHECKLIST_SUBMIT), eq(JobPort.PHASE_CHECKLIST_WAIT),
-                eq(45), anyString(), any(Instant.class), eq(88L), isNull(), payload.capture());
+                eq(45), eq("建清单中"), any(Instant.class), eq(88L), isNull(), payload.capture());
         assertTrue(payload.getValue().contains("\"reusedChecklist\":false"));
     }
 
@@ -272,7 +272,7 @@ class AiReviewPipelineJobExecutorTest {
                 anyLong(), anyLong(), anyLong(), any(), any());
         verify(jobPort).advancePipeline(eq(JOB_ID), eq(WORKER),
                 eq(JobPort.PHASE_CHECKLIST_WAIT), eq(JobPort.PHASE_REVIEW_SUBMIT),
-                eq(55), anyString(), any(Instant.class), isNull(), isNull(), isNull());
+                eq(55), eq("清单完成"), any(Instant.class), isNull(), isNull(), isNull());
     }
 
     @Test
@@ -318,7 +318,7 @@ class AiReviewPipelineJobExecutorTest {
 
         verify(jobPort).advancePipeline(eq(JOB_ID), eq(WORKER),
                 eq(JobPort.PHASE_CHECKLIST_WAIT), eq(JobPort.PHASE_CHECKLIST_WAIT),
-                anyInt(), anyString(), any(Instant.class), isNull(), isNull(), isNull());
+                anyInt(), eq("建清单中"), any(Instant.class), isNull(), isNull(), isNull());
         verify(jobPort, never()).retryPipeline(anyLong(), anyString(), anyString(), anyString(), any());
     }
 
@@ -366,7 +366,7 @@ class AiReviewPipelineJobExecutorTest {
 
         verify(jobPort).advancePipeline(eq(JOB_ID), eq(WORKER),
                 eq(JobPort.PHASE_REVIEW_SUBMIT), eq(JobPort.PHASE_REVIEW_WAIT),
-                eq(70), anyString(), any(Instant.class), isNull(), eq(99L), isNull());
+                eq(70), eq("AI审查中"), any(Instant.class), isNull(), eq(99L), isNull());
     }
 
     @Test
@@ -402,7 +402,7 @@ class AiReviewPipelineJobExecutorTest {
         verify(reviewAppService, never()).createInternal(anyLong(), anyLong(), anyLong(), any(), any());
         ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
         verify(jobPort).succeedPipeline(eq(JOB_ID), eq(WORKER), eq(JobPort.PHASE_REVIEW_WAIT),
-                anyString(), payload.capture());
+                eq("审查完成"), payload.capture());
         String json = payload.getValue();
         assertTrue(json.contains("\"phase\":\"DONE\""), json);
         assertTrue(json.contains("\"checklistId\":88"), json);
@@ -438,7 +438,7 @@ class AiReviewPipelineJobExecutorTest {
 
         verify(jobPort).advancePipeline(eq(JOB_ID), eq(WORKER),
                 eq(JobPort.PHASE_REVIEW_WAIT), eq(JobPort.PHASE_REVIEW_WAIT),
-                eq(80), anyString(), any(Instant.class), isNull(), isNull(), isNull());
+                eq(80), eq("AI审查中"), any(Instant.class), isNull(), isNull(), isNull());
         verify(jobPort, never()).retryPipeline(anyLong(), anyString(), anyString(), anyString(), any());
     }
 

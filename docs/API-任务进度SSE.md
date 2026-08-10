@@ -100,7 +100,7 @@ event: progress
 data: {"id":55,"orgId":2,"projectId":10,"type":"AI_REVIEW_PIPELINE","status":"RUNNING","progress":70,"message":"AI审查中","payloadJson":"{\"projectId\":10}","errorMessage":null,"retryCount":0,"createdBy":10,"createdAt":"2026-08-04T08:00:00Z","startedAt":"2026-08-04T08:00:01Z","finishedAt":null,"updatedAt":"2026-08-04T08:05:00Z","checklistId":null,"reviewId":null}
 
 event: done
-data: {"id":55,"orgId":2,"projectId":10,"type":"AI_REVIEW_PIPELINE","status":"SUCCESS","progress":100,"message":"审查完成 reviewId=201 checklistId=88","payloadJson":"{\"projectId\":10,\"phase\":\"DONE\",\"checklistId\":88,\"reviewId\":201,\"reusedChecklist\":false}","errorMessage":null,"retryCount":0,"createdBy":10,"createdAt":"2026-08-04T08:00:00Z","startedAt":"2026-08-04T08:00:01Z","finishedAt":"2026-08-04T08:10:00Z","updatedAt":"2026-08-04T08:10:00Z","checklistId":88,"reviewId":201}
+data: {"id":55,"orgId":2,"projectId":10,"type":"AI_REVIEW_PIPELINE","status":"SUCCESS","progress":100,"message":"审查完成","payloadJson":"{\"projectId\":10,\"phase\":\"DONE\",\"checklistId\":88,\"reviewId\":201,\"reusedChecklist\":false}","errorMessage":null,"retryCount":0,"createdBy":10,"createdAt":"2026-08-04T08:00:00Z","startedAt":"2026-08-04T08:00:01Z","finishedAt":"2026-08-04T08:10:00Z","updatedAt":"2026-08-04T08:10:00Z","checklistId":88,"reviewId":201}
 ```
 
 ---

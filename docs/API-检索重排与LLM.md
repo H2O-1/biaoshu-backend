@@ -412,7 +412,7 @@
 |------|------|
 | status | `PENDING` → `RUNNING` → `SUCCESS` / `FAILED` |
 | progress / message | 进度文案（向量化中 / 建清单中 / AI审查中 …） |
-| checklistId / reviewId | 成功后填充（亦在 `payloadJson`、`message` 中） |
+| checklistId / reviewId | 成功后填充（亦在 `payloadJson` 中；`message` 仅用于展示进度文案） |
 | errorMessage | 失败原因；索引失败会带文件名 |
 
 **规则摘要**
