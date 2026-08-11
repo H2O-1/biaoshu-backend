@@ -221,6 +221,10 @@ class AdminOrgAppServiceTest {
         when(packageCountPort.countActiveByOrgIdAndType(2L, "BID")).thenReturn(4L);
         when(documentIndexCountPort.countActiveByOrgIdAndIndexStatus(2L, "SUCCESS")).thenReturn(10L);
         when(documentIndexCountPort.countActiveByOrgIdAndIndexStatus(2L, "FAILED")).thenReturn(1L);
+        when(packageCountPort.countActiveByOrgIdAndTypeAndIndexStatus(2L, "TENDER", "SUCCESS")).thenReturn(1L);
+        when(packageCountPort.countActiveByOrgIdAndTypeAndIndexStatus(2L, "TENDER", "FAILED")).thenReturn(1L);
+        when(packageCountPort.countActiveByOrgIdAndTypeAndIndexStatus(2L, "BID", "SUCCESS")).thenReturn(3L);
+        when(packageCountPort.countActiveByOrgIdAndTypeAndIndexStatus(2L, "BID", "FAILED")).thenReturn(1L);
         when(reviewStatusCountPort.countByOrgIdAndStatus(2L, "SUCCESS")).thenReturn(3L);
         when(reviewStatusCountPort.countByOrgIdAndStatus(2L, "FAILED")).thenReturn(2L);
         when(userRepository.findById(1L)).thenReturn(Optional.of(adminUser()));
@@ -233,6 +237,10 @@ class AdminOrgAppServiceTest {
         assertEquals(4L, detail.getBidPackageCount());
         assertEquals(10L, detail.getDocumentIndexSuccessCount());
         assertEquals(1L, detail.getDocumentIndexFailedCount());
+        assertEquals(1L, detail.getTenderPackageIndexSuccessCount());
+        assertEquals(1L, detail.getTenderPackageIndexFailedCount());
+        assertEquals(3L, detail.getBidPackageIndexSuccessCount());
+        assertEquals(1L, detail.getBidPackageIndexFailedCount());
         assertEquals(3L, detail.getReviewSuccessCount());
         assertEquals(2L, detail.getReviewFailedCount());
     }

@@ -29,6 +29,14 @@ public interface PackageRepository {
     long countSearchByOrgId(long orgId, String type, String keyword, boolean unboundOnly);
 
     /**
+     * 按包级解析状态统计未删除标包数量。
+     *
+     * @param type        TENDER / BID
+     * @param indexStatus SUCCESS / FAILED
+     */
+    long countByOrgIdAndTypeAndIndexStatus(long orgId, String type, String indexStatus);
+
+    /**
      * 同组织、同类型下名称是否已存在（未删除）。
      * excludePackageId 非空时排除自身（改名场景）。
      */

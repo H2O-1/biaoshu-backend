@@ -11,4 +11,12 @@ public interface PackageCountPort {
      * @param type TENDER / BID；空串表示不限类型
      */
     long countActiveByOrgIdAndType(long orgId, String type);
+
+    /**
+     * 未删除标包中，按包级解析状态统计数量。
+     *
+     * @param type        TENDER / BID
+     * @param indexStatus SUCCESS / FAILED
+     */
+    long countActiveByOrgIdAndTypeAndIndexStatus(long orgId, String type, String indexStatus);
 }

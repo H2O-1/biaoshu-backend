@@ -117,6 +117,11 @@ public class UserAccount {
         return "ACTIVE".equalsIgnoreCase(status);
     }
 
+    /** 是否已删除 */
+    public boolean isDeleted() {
+        return "DELETED".equalsIgnoreCase(status);
+    }
+
     /** 是否平台方账号（普管或超管） */
     public boolean isPlatformAdminAccount() {
         return roleCodes.contains(RoleCode.PLATFORM_ADMIN.name())
