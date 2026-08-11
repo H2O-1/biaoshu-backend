@@ -13,8 +13,9 @@ import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlin
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.poi.openxml4j.util.ZipSecureFile;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
-import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.springframework.stereotype.Component;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -28,6 +29,8 @@ import java.util.Locale;
  */
 @Component
 public class PdfWordTextExtractPort implements DocumentTextExtractPort {
+
+    private static final String WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 
     static {
         // 招标 docx 常含高度压缩的 EMF/WMF 图，默认 MIN_INFLATE_RATIO=0.01 会误判 zip bomb
@@ -189,67 +192,31 @@ public class PdfWordTextExtractPort implements DocumentTextExtractPort {
     private ExtractResult extractDocx(InputStream content) {
         try (XWPFDocument document = new XWPFDocument(content)) {
             StringBuilder full = new StringBuilder();
-            List<OutlineItem> outline = new ArrayList<>();
-            List<XWPFParagraph> paragraphs = document.getParagraphs();
 
-            for (int i = 0; i < paragraphs.size(); i++) {
-                XWPFParagraph paragraph = paragraphs.get(i);
-                String text = paragraph.getText();
-                if (text == null) {
-                    continue;
+            Node body = document.getDocument().getBody().getDomNode();
+            NodeList bodyChildren = body.getChildNodes();
+            for (int i = 0; i < bodyChildren.getLength(); i++) {
+                Node element = bodyChildren.item(i);
+                String text = "";
+                if ("p".equals(element.getLocalName()) && WORD_NS.equals(element.getNamespaceURI())) {
+                    text = normalizeText(extractNodeText(element));
+                } else if ("tbl".equals(element.getLocalName()) && WORD_NS.equals(element.getNamespaceURI())) {
+                    text = extractTableText(element);
                 }
-                text = text.trim();
                 if (text.isEmpty()) {
                     continue;
                 }
 
-                int headingLevel = detectHeadingLevel(paragraph);
-                if (headingLevel > 0) {
-                    OutlineItem oi = new OutlineItem();
-                    oi.setTitle(text);
-                    // Word 无物理页时，用出现顺序作为逻辑页号，便于章节切分
-                    oi.setPageNo(outline.size() + 1);
-                    oi.setLevel(headingLevel);
-                    outline.add(oi);
-                }
-
-                if (full.length() > 0) {
-                    full.append('\n');
-                }
-                full.append(text);
-            }
-
-            // 表格内文字一并抽取（不参与标题目录）
-            List<org.apache.poi.xwpf.usermodel.XWPFTable> tables = document.getTables();
-            for (int t = 0; t < tables.size(); t++) {
-                org.apache.poi.xwpf.usermodel.XWPFTable table = tables.get(t);
-                List<org.apache.poi.xwpf.usermodel.XWPFTableRow> rows = table.getRows();
-                for (int r = 0; r < rows.size(); r++) {
-                    org.apache.poi.xwpf.usermodel.XWPFTableRow row = rows.get(r);
-                    List<org.apache.poi.xwpf.usermodel.XWPFTableCell> cells = row.getTableCells();
-                    for (int c = 0; c < cells.size(); c++) {
-                        String cellText = cells.get(c).getText();
-                        if (cellText == null) {
-                            continue;
-                        }
-                        cellText = cellText.trim();
-                        if (cellText.isEmpty()) {
-                            continue;
-                        }
-                        if (full.length() > 0) {
-                            full.append('\n');
-                        }
-                        full.append(cellText);
-                    }
-                }
+                appendBlock(full, text);
             }
 
             ExtractResult result = new ExtractResult();
             result.setFullText(full.toString());
-            result.setOutline(outline);
-
-            // Word：按标题拆成「逻辑页」，无标题则整篇一页
-            List<PageText> pages = buildWordLogicalPages(paragraphs, outline);
+            result.setOutline(new ArrayList<>());
+            List<PageText> pages = new ArrayList<>();
+            if (full.length() > 0) {
+                pages.add(page(1, full.toString()));
+            }
             result.setPages(pages);
 
             if (result.isBlank()) {
@@ -261,109 +228,123 @@ public class PdfWordTextExtractPort implements DocumentTextExtractPort {
         }
     }
 
-    /**
-     * 将 Word 段落按标题切成逻辑页，便于与 PDF Outline 共用章节切块逻辑。
-     */
-    private List<PageText> buildWordLogicalPages(List<XWPFParagraph> paragraphs,
-                                                 List<OutlineItem> outline) {
-        List<PageText> pages = new ArrayList<>();
-        if (outline == null || outline.isEmpty()) {
-            StringBuilder all = new StringBuilder();
-            for (int i = 0; i < paragraphs.size(); i++) {
-                String text = paragraphs.get(i).getText();
-                if (text == null) {
-                    continue;
-                }
-                text = text.trim();
-                if (text.isEmpty()) {
-                    continue;
-                }
-                if (all.length() > 0) {
-                    all.append('\n');
-                }
-                all.append(text);
-            }
-            PageText page = new PageText();
-            page.setPageNo(1);
-            page.setText(all.toString());
-            pages.add(page);
-            return pages;
+    private String extractTableText(Node tableNode) {
+        if (tableNode == null) {
+            return "";
         }
-
-        StringBuilder current = new StringBuilder();
-        int currentPage = 0;
-        for (int i = 0; i < paragraphs.size(); i++) {
-            XWPFParagraph paragraph = paragraphs.get(i);
-            String text = paragraph.getText();
-            if (text == null) {
+        StringBuilder sb = new StringBuilder();
+        List<Node> rows = directWordChildren(tableNode, "tr");
+        for (int r = 0; r < rows.size(); r++) {
+            List<Node> cells = directWordChildren(rows.get(r), "tc");
+            if (cells.isEmpty()) {
                 continue;
             }
-            text = text.trim();
-            if (text.isEmpty()) {
+            StringBuilder rowText = new StringBuilder();
+            for (int c = 0; c < cells.size(); c++) {
+                String cellText = normalizeCellText(extractNodeText(cells.get(c)));
+                if (cellText.isEmpty()) {
+                    continue;
+                }
+                if (rowText.length() > 0) {
+                    rowText.append(" | ");
+                }
+                rowText.append(cellText);
+            }
+            if (rowText.length() == 0) {
                 continue;
             }
-            int headingLevel = detectHeadingLevel(paragraph);
-            if (headingLevel > 0) {
-                if (currentPage > 0 && current.length() > 0) {
-                    PageText page = new PageText();
-                    page.setPageNo(currentPage);
-                    page.setText(current.toString());
-                    pages.add(page);
-                    current = new StringBuilder();
-                }
-                currentPage++;
+            if (sb.length() > 0) {
+                sb.append('\n');
             }
-            if (currentPage == 0) {
-                currentPage = 1;
-            }
-            if (current.length() > 0) {
-                current.append('\n');
-            }
-            current.append(text);
+            sb.append(rowText);
         }
-        if (currentPage > 0 && current.length() > 0) {
-            PageText page = new PageText();
-            page.setPageNo(currentPage);
-            page.setText(current.toString());
-            pages.add(page);
-        }
-        // 校正 outline 的 pageNo 与逻辑页一致（按标题出现顺序）
-        int outlineIdx = 0;
-        for (int i = 0; i < paragraphs.size(); i++) {
-            if (detectHeadingLevel(paragraphs.get(i)) > 0 && outlineIdx < outline.size()) {
-                outline.get(outlineIdx).setPageNo(outlineIdx + 1);
-                outlineIdx++;
-            }
-        }
-        return pages;
+        return sb.toString();
     }
 
-    private int detectHeadingLevel(XWPFParagraph paragraph) {
-        String style = paragraph.getStyle();
-        if (style == null) {
-            return 0;
+    private static String extractNodeText(Node node) {
+        if (node == null) {
+            return "";
         }
-        String lower = style.toLowerCase(Locale.ROOT);
-        if (lower.contains("heading3") || lower.equals("3")) {
-            return 3;
+        StringBuilder sb = new StringBuilder();
+        collectNodeText(node, sb);
+        return sb.toString();
+    }
+
+    private static void collectNodeText(Node node, StringBuilder sb) {
+        if (node == null) {
+            return;
         }
-        if (lower.contains("heading2") || lower.equals("2")) {
-            return 2;
+        String localName = node.getLocalName();
+        if ("t".equals(localName) && WORD_NS.equals(node.getNamespaceURI())) {
+            appendTextNodeValue(node, sb);
+            return;
         }
-        if (lower.contains("heading1") || lower.contains("heading") || lower.equals("1")) {
-            return 1;
+        if ("tab".equals(localName) && WORD_NS.equals(node.getNamespaceURI())) {
+            sb.append(' ');
+            return;
         }
-        // 中文样式名常见「标题 1」
-        if (style.contains("标题3")) {
-            return 3;
+        if ("br".equals(localName) && WORD_NS.equals(node.getNamespaceURI())) {
+            sb.append('\n');
+            return;
         }
-        if (style.contains("标题2")) {
-            return 2;
+        NodeList children = node.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            collectNodeText(children.item(i), sb);
         }
-        if (style.contains("标题1") || style.contains("标题")) {
-            return 1;
+    }
+
+    private static void appendTextNodeValue(Node node, StringBuilder sb) {
+        Node child = node.getFirstChild();
+        while (child != null) {
+            String value = child.getNodeValue();
+            if (value != null) {
+                sb.append(value);
+            }
+            child = child.getNextSibling();
         }
-        return 0;
+    }
+
+    private static List<Node> directWordChildren(Node node, String localName) {
+        List<Node> result = new ArrayList<>();
+        if (node == null) {
+            return result;
+        }
+        NodeList children = node.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node child = children.item(i);
+            if (localName.equals(child.getLocalName()) && WORD_NS.equals(child.getNamespaceURI())) {
+                result.add(child);
+            }
+        }
+        return result;
+    }
+
+    private static void appendBlock(StringBuilder sb, String text) {
+        if (sb.length() > 0) {
+            sb.append('\n');
+        }
+        sb.append(text);
+    }
+
+    private static PageText page(int pageNo, String text) {
+        PageText page = new PageText();
+        page.setPageNo(pageNo);
+        page.setText(text);
+        return page;
+    }
+
+    private static String normalizeText(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text.trim();
+    }
+
+    private static String normalizeCellText(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text.replaceAll("\\s+", " ").trim();
     }
 
     private static String normalizeExt(String fileExt) {

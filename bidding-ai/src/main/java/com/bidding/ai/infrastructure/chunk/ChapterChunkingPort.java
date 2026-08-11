@@ -25,6 +25,12 @@ public class ChapterChunkingPort implements ChunkingPort {
     private static final Pattern NUMBERED_TITLE_PATTERN = Pattern.compile(
             "^\\d+(?:\\.\\d+)*[.、\\s].+"
     );
+    private static final Pattern CHINESE_NUMBERED_TITLE_PATTERN = Pattern.compile(
+            "^[一二三四五六七八九十百千万]+[、.．\\s].+"
+    );
+    private static final Pattern PAREN_NUMBERED_TITLE_PATTERN = Pattern.compile(
+            "^[（(][一二三四五六七八九十百千万0-9]+[）)].+"
+    );
 
     private final int maxChars;
     private final int fallbackWindow;
@@ -80,10 +86,6 @@ public class ChapterChunkingPort implements ChunkingPort {
             List<String> parts = splitLongText(body);
             for (int p = 0; p < parts.size(); p++) {
                 String content = prefix + parts.get(p);
-                // 仅第一章块保留标题前缀，避免重复占额度
-                if (p > 0) {
-                    content = parts.get(p);
-                }
                 ChunkDraft draft = new ChunkDraft();
                 draft.setChunkIndex(chunkIndex);
                 draft.setPageNo(section.pageNo);
@@ -177,11 +179,11 @@ public class ChapterChunkingPort implements ChunkingPort {
                 continue;
             }
             if (isHeadingLine(line)) {
-                if (current.length() > 0) {
+                if (current.length() > 0 || (currentTitle != null && !currentTitle.isEmpty())) {
                     Section section = new Section();
                     section.pageNo = currentPage;
                     section.title = currentTitle;
-                    section.body = current.toString().trim();
+                    section.body = current.length() > 0 ? current.toString().trim() : currentTitle;
                     sections.add(section);
                     current = new StringBuilder();
                 }
@@ -211,10 +213,35 @@ public class ChapterChunkingPort implements ChunkingPort {
         if (line.length() > 40) {
             return false;
         }
+        if (line.contains("|")) {
+            return false;
+        }
         if (CHAPTER_PATTERN.matcher(line).matches()) {
             return true;
         }
-        return NUMBERED_TITLE_PATTERN.matcher(line).matches();
+        if (looksLikeNumberedBodyLine(line)) {
+            return false;
+        }
+        if (NUMBERED_TITLE_PATTERN.matcher(line).matches()) {
+            return true;
+        }
+        if (CHINESE_NUMBERED_TITLE_PATTERN.matcher(line).matches()) {
+            return true;
+        }
+        return PAREN_NUMBERED_TITLE_PATTERN.matcher(line).matches();
+    }
+
+    private boolean looksLikeNumberedBodyLine(String line) {
+        if (!(NUMBERED_TITLE_PATTERN.matcher(line).matches()
+                || PAREN_NUMBERED_TITLE_PATTERN.matcher(line).matches())) {
+            return false;
+        }
+        return line.endsWith("；")
+                || line.endsWith(";")
+                || line.endsWith("。")
+                || line.endsWith(".")
+                || line.contains("：")
+                || line.contains(":");
     }
 
     private List<String> splitLongText(String text) {
