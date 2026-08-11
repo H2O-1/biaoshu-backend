@@ -80,8 +80,11 @@ public class ChapterChunkingPort implements ChunkingPort {
             }
             body = body.trim();
             String prefix = "";
-            if (section.title != null && !section.title.isEmpty()) {
-                prefix = "【" + section.title + "】\n";
+            String titlePrefix = section.titlePath == null || section.titlePath.isBlank()
+                    ? section.title
+                    : section.titlePath;
+            if (titlePrefix != null && !titlePrefix.isEmpty()) {
+                prefix = "【" + titlePrefix + "】\n";
             }
             List<String> parts = splitLongText(body);
             for (int p = 0; p < parts.size(); p++) {
@@ -157,6 +160,8 @@ public class ChapterChunkingPort implements ChunkingPort {
             Section section = new Section();
             section.pageNo = start;
             section.title = item.getTitle().trim();
+            section.level = Math.max(1, item.getLevel());
+            section.titlePath = titlePathByLevel(sorted, i);
             section.body = body;
             sections.add(section);
         }
@@ -171,7 +176,10 @@ public class ChapterChunkingPort implements ChunkingPort {
         String[] lines = fullText.split("\\R");
         StringBuilder current = new StringBuilder();
         String currentTitle = null;
+        String currentTitlePath = null;
+        int currentLevel = 0;
         Integer currentPage = 1;
+        List<String> titleStack = new ArrayList<>();
 
         for (int i = 0; i < lines.length; i++) {
             String line = lines[i] == null ? "" : lines[i].trim();
@@ -183,11 +191,17 @@ public class ChapterChunkingPort implements ChunkingPort {
                     Section section = new Section();
                     section.pageNo = currentPage;
                     section.title = currentTitle;
+                    section.titlePath = currentTitlePath;
+                    section.level = currentLevel;
                     section.body = current.length() > 0 ? current.toString().trim() : currentTitle;
                     sections.add(section);
                     current = new StringBuilder();
                 }
+                int level = headingLevel(line);
+                updateTitleStack(titleStack, level, line);
                 currentTitle = line;
+                currentTitlePath = joinTitleStack(titleStack);
+                currentLevel = level;
                 currentPage = sections.size() + 1;
                 continue;
             }
@@ -200,6 +214,8 @@ public class ChapterChunkingPort implements ChunkingPort {
             Section section = new Section();
             section.pageNo = currentPage;
             section.title = currentTitle;
+            section.titlePath = currentTitlePath;
+            section.level = currentLevel;
             section.body = current.toString().trim();
             if (section.body.isEmpty() && currentTitle != null) {
                 section.body = currentTitle;
@@ -229,6 +245,85 @@ public class ChapterChunkingPort implements ChunkingPort {
             return true;
         }
         return PAREN_NUMBERED_TITLE_PATTERN.matcher(line).matches();
+    }
+
+    private int headingLevel(String line) {
+        if (CHAPTER_PATTERN.matcher(line).matches()) {
+            return 1;
+        }
+        if (PAREN_NUMBERED_TITLE_PATTERN.matcher(line).matches()) {
+            return 3;
+        }
+        if (CHINESE_NUMBERED_TITLE_PATTERN.matcher(line).matches()) {
+            return 2;
+        }
+        if (NUMBERED_TITLE_PATTERN.matcher(line).matches()) {
+            return numberedHeadingLevel(line);
+        }
+        return 1;
+    }
+
+    private int numberedHeadingLevel(String line) {
+        int markerEnd = firstMarkerEnd(line);
+        if (markerEnd <= 0) {
+            return 2;
+        }
+        int dots = 0;
+        for (int i = 0; i < markerEnd; i++) {
+            char ch = line.charAt(i);
+            if (ch == '.') {
+                dots++;
+            }
+        }
+        return Math.max(2, dots + 2);
+    }
+
+    private int firstMarkerEnd(String line) {
+        for (int i = 0; i < line.length(); i++) {
+            char ch = line.charAt(i);
+            if (Character.isWhitespace(ch) || ch == '、' || ch == '．') {
+                return i;
+            }
+        }
+        return line.length();
+    }
+
+    private void updateTitleStack(List<String> titleStack, int level, String title) {
+        int safeLevel = Math.max(1, level);
+        while (titleStack.size() >= safeLevel) {
+            titleStack.remove(titleStack.size() - 1);
+        }
+        while (titleStack.size() < safeLevel - 1) {
+            titleStack.add("");
+        }
+        titleStack.add(title);
+    }
+
+    private String joinTitleStack(List<String> titleStack) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < titleStack.size(); i++) {
+            String title = titleStack.get(i);
+            if (title == null || title.isBlank()) {
+                continue;
+            }
+            if (sb.length() > 0) {
+                sb.append(" > ");
+            }
+            sb.append(title);
+        }
+        return sb.toString();
+    }
+
+    private String titlePathByLevel(List<DocumentTextExtractPort.OutlineItem> sorted, int index) {
+        List<String> stack = new ArrayList<>();
+        for (int i = 0; i <= index; i++) {
+            DocumentTextExtractPort.OutlineItem item = sorted.get(i);
+            if (item == null || item.getTitle() == null || item.getTitle().trim().isEmpty()) {
+                continue;
+            }
+            updateTitleStack(stack, Math.max(1, item.getLevel()), item.getTitle().trim());
+        }
+        return joinTitleStack(stack);
     }
 
     private boolean looksLikeNumberedBodyLine(String line) {
@@ -300,6 +395,8 @@ public class ChapterChunkingPort implements ChunkingPort {
     private static class Section {
         private Integer pageNo;
         private String title;
+        private String titlePath;
+        private int level;
         private String body;
     }
 }

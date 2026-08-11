@@ -94,6 +94,24 @@ class ChapterChunkingPortTest {
     }
 
     @Test
+    void childHeadingChunksIncludeParentTitlePath() {
+        ChapterChunkingPort port = new ChapterChunkingPort(2000, 500, 50);
+        DocumentTextExtractPort.ExtractResult source = new DocumentTextExtractPort.ExtractResult();
+        source.setFullText("三、评分标准\n"
+                + "（一）商务部分（30分）\n"
+                + "评审项目 | 评分标准 | 分值\n"
+                + "企业资质 | 具备电子与智能化工程专业承包壹级资质得5分 | 5分\n"
+                + "（二）技术部分（40分）\n"
+                + "技术方案 | 技术方案的先进性、可行性、完整性 | 15分");
+
+        List<ChunkingPort.ChunkDraft> drafts = port.chunk(source);
+        String joined = joinContents(drafts);
+
+        assertTrue(joined.contains("【三、评分标准 > （一）商务部分（30分）】"));
+        assertTrue(joined.contains("【三、评分标准 > （二）技术部分（40分）】"));
+    }
+
+    @Test
     void numberedBodyLinesAndTableRowsAreNotDroppedAsHeadings() {
         ChapterChunkingPort port = new ChapterChunkingPort(2000, 500, 50);
         DocumentTextExtractPort.ExtractResult source = new DocumentTextExtractPort.ExtractResult();

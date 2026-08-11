@@ -11,7 +11,9 @@ import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 基于 embedding_json 的应用层余弦召回（暂不依赖 pgvector）。
@@ -22,6 +24,7 @@ import java.util.List;
 public class JdbcCosineVectorRecallPort implements VectorRecallPort {
 
     private static final Logger log = LoggerFactory.getLogger(JdbcCosineVectorRecallPort.class);
+    private static final int SECTION_EXPAND_MAX_CHUNKS = 5;
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
@@ -203,7 +206,154 @@ public class JdbcCosineVectorRecallPort implements VectorRecallPort {
         for (int i = 0; i < limit; i++) {
             result.add(scored.get(i));
         }
-        return result;
+        return expandSectionNeighbors(result, candidates);
+    }
+
+    private List<RecallHit> expandSectionNeighbors(List<RecallHit> hits, List<Candidate> candidates) {
+        if (hits == null || hits.isEmpty() || candidates == null || candidates.isEmpty()) {
+            return hits;
+        }
+
+        Map<Long, Candidate> byChunkId = new LinkedHashMap<>();
+        Map<Long, List<Candidate>> byDocumentId = new LinkedHashMap<>();
+        for (int i = 0; i < candidates.size(); i++) {
+            Candidate candidate = candidates.get(i);
+            byChunkId.put(candidate.chunkId, candidate);
+            List<Candidate> docCandidates = byDocumentId.get(candidate.documentId);
+            if (docCandidates == null) {
+                docCandidates = new ArrayList<>();
+                byDocumentId.put(candidate.documentId, docCandidates);
+            }
+            docCandidates.add(candidate);
+        }
+        for (Map.Entry<Long, List<Candidate>> entry : byDocumentId.entrySet()) {
+            Collections.sort(entry.getValue(), new Comparator<Candidate>() {
+                @Override
+                public int compare(Candidate a, Candidate b) {
+                    return Integer.compare(a.chunkIndex, b.chunkIndex);
+                }
+            });
+        }
+
+        List<RecallHit> expanded = new ArrayList<>();
+        Map<Long, RecallHit> seen = new LinkedHashMap<>();
+        int added = 0;
+        for (int i = 0; i < hits.size(); i++) {
+            RecallHit hit = hits.get(i);
+            if (!seen.containsKey(hit.getChunkId())) {
+                expanded.add(hit);
+                seen.put(hit.getChunkId(), hit);
+            }
+            if (added >= SECTION_EXPAND_MAX_CHUNKS) {
+                continue;
+            }
+
+            Candidate trigger = byChunkId.get(hit.getChunkId());
+            SectionPath target = sectionTarget(trigger == null ? null : trigger.content);
+            if (target == null) {
+                continue;
+            }
+            List<Candidate> docCandidates = byDocumentId.get(hit.getDocumentId());
+            int start = expansionStart(docCandidates, target);
+            if (start < 0) {
+                continue;
+            }
+            for (int j = start; j < docCandidates.size() && added < SECTION_EXPAND_MAX_CHUNKS; j++) {
+                Candidate candidate = docCandidates.get(j);
+                SectionPath path = parseSectionPath(candidate.content);
+                if (path == null || !path.startsWith(target)) {
+                    break;
+                }
+                if (path.depth() <= target.depth()) {
+                    continue;
+                }
+                if (seen.containsKey(candidate.chunkId)) {
+                    continue;
+                }
+                RecallHit neighbor = toRecallHit(candidate, hit.getScore() * 0.98f);
+                expanded.add(neighbor);
+                seen.put(neighbor.getChunkId(), neighbor);
+                added++;
+            }
+        }
+        return expanded;
+    }
+
+    private int expansionStart(List<Candidate> docCandidates, SectionPath target) {
+        if (docCandidates == null || docCandidates.isEmpty()) {
+            return -1;
+        }
+        int firstChild = -1;
+        for (int i = 0; i < docCandidates.size(); i++) {
+            SectionPath path = parseSectionPath(docCandidates.get(i).content);
+            if (path == null) {
+                continue;
+            }
+            if (path.equalsPath(target)) {
+                return i + 1;
+            }
+            if (firstChild < 0 && path.startsWith(target) && path.depth() > target.depth()) {
+                firstChild = i;
+            }
+        }
+        return firstChild;
+    }
+
+    private SectionPath sectionTarget(String content) {
+        SectionPath path = parseSectionPath(content);
+        if (path == null || path.depth() == 0) {
+            return null;
+        }
+        if (path.depth() >= 2 && isParenHeading(path.last())) {
+            return path.parent();
+        }
+        return path;
+    }
+
+    private SectionPath parseSectionPath(String content) {
+        if (content == null || !content.startsWith("【")) {
+            return null;
+        }
+        int end = content.indexOf('】');
+        if (end <= 1) {
+            return null;
+        }
+        String raw = content.substring(1, end);
+        String[] split = raw.split(">");
+        List<String> parts = new ArrayList<>();
+        for (int i = 0; i < split.length; i++) {
+            String part = split[i] == null ? "" : split[i].trim();
+            if (!part.isEmpty()) {
+                parts.add(part);
+            }
+        }
+        if (parts.isEmpty()) {
+            return null;
+        }
+        return new SectionPath(parts);
+    }
+
+    private boolean isParenHeading(String title) {
+        if (title == null || title.length() < 3) {
+            return false;
+        }
+        return (title.startsWith("（") && title.contains("）"))
+                || (title.startsWith("(") && title.contains(")"));
+    }
+
+    private RecallHit toRecallHit(Candidate c, float score) {
+        RecallHit hit = new RecallHit();
+        hit.setChunkId(c.chunkId);
+        hit.setChunkIndex(c.chunkIndex);
+        hit.setPageNo(c.pageNo);
+        hit.setContent(c.content);
+        hit.setDocumentId(c.documentId);
+        hit.setFileName(c.fileName);
+        hit.setPackageId(c.packageId);
+        hit.setPackageType(c.packageType);
+        hit.setPackageName(c.packageName);
+        hit.setScore(score);
+        return hit;
     }
 
     private static void appendPlaceholders(StringBuilder sql, int count) {
@@ -272,5 +422,44 @@ public class JdbcCosineVectorRecallPort implements VectorRecallPort {
         private int embeddingDim;
         private String embeddingJson;
         private float[] embedding;
+    }
+
+    private static class SectionPath {
+        private final List<String> parts;
+
+        private SectionPath(List<String> parts) {
+            this.parts = parts;
+        }
+
+        private int depth() {
+            return parts.size();
+        }
+
+        private String last() {
+            return parts.get(parts.size() - 1);
+        }
+
+        private SectionPath parent() {
+            if (parts.size() <= 1) {
+                return this;
+            }
+            return new SectionPath(new ArrayList<>(parts.subList(0, parts.size() - 1)));
+        }
+
+        private boolean startsWith(SectionPath other) {
+            if (other == null || other.parts.size() > parts.size()) {
+                return false;
+            }
+            for (int i = 0; i < other.parts.size(); i++) {
+                if (!parts.get(i).equals(other.parts.get(i))) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private boolean equalsPath(SectionPath other) {
+            return other != null && parts.equals(other.parts);
+        }
     }
 }
