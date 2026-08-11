@@ -74,6 +74,51 @@ class ChapterChunkingPortTest {
                 || drafts.get(0).getContent().contains("合格"));
     }
 
+    @Test
+    void chineseNumberedHeadingIsRepeatedForSplitSectionChunks() {
+        ChapterChunkingPort port = new ChapterChunkingPort(100, 50, 5);
+        DocumentTextExtractPort.ExtractResult source = new DocumentTextExtractPort.ExtractResult();
+        StringBuilder table = new StringBuilder();
+        table.append("（一）商务部分（30分）\n");
+        for (int i = 0; i < 20; i++) {
+            table.append("企业资质 | 具备电子与智能化工程专业承包壹级资质得5分 | 5分\n");
+        }
+        source.setFullText(table.toString());
+
+        List<ChunkingPort.ChunkDraft> drafts = port.chunk(source);
+
+        assertTrue(drafts.size() >= 2);
+        for (int i = 0; i < drafts.size(); i++) {
+            assertTrue(drafts.get(i).getContent().contains("商务部分"));
+        }
+    }
+
+    @Test
+    void numberedBodyLinesAndTableRowsAreNotDroppedAsHeadings() {
+        ChapterChunkingPort port = new ChapterChunkingPort(2000, 500, 50);
+        DocumentTextExtractPort.ExtractResult source = new DocumentTextExtractPort.ExtractResult();
+        source.setFullText("12、开标时间和地点\n"
+                + "开标时间为2024年7月1日9时30分。\n"
+                + "13、开标程序\n"
+                + "13.1 宣布开标纪律；\n"
+                + "13.2 公布在投标截止时间前递交投标文件的投标人名称；\n"
+                + "13.5 投标人代表、招标人代表、监标人、记录人等有关人员在开标记录上签字确认。\n"
+                + "第三章  评标办法\n"
+                + "评标办法前附表\n"
+                + "条款号 | 评审因素与标准\n"
+                + "1 | 评标方法：综合评估法\n"
+                + "2.1.1 | 形式评审标准：投标人名称、签字盖章、投标文件格式等\n"
+                + "2.2.3 | 投标报价得分=(评标基准价/投标报价)×30");
+
+        List<ChunkingPort.ChunkDraft> drafts = port.chunk(source);
+        String joined = joinContents(drafts);
+
+        assertTrue(joined.contains("13.1 宣布开标纪律"));
+        assertTrue(joined.contains("13.5 投标人代表"));
+        assertTrue(joined.contains("2.1.1 | 形式评审标准"));
+        assertTrue(joined.contains("2.2.3 | 投标报价得分"));
+    }
+
     private static DocumentTextExtractPort.PageText page(int no, String text) {
         DocumentTextExtractPort.PageText p = new DocumentTextExtractPort.PageText();
         p.setPageNo(no);
@@ -87,5 +132,16 @@ class ChapterChunkingPortTest {
         item.setPageNo(page);
         item.setLevel(level);
         return item;
+    }
+
+    private static String joinContents(List<ChunkingPort.ChunkDraft> drafts) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < drafts.size(); i++) {
+            if (sb.length() > 0) {
+                sb.append('\n');
+            }
+            sb.append(drafts.get(i).getContent());
+        }
+        return sb.toString();
     }
 }
