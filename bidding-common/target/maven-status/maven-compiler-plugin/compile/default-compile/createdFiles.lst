@@ -7,11 +7,14 @@ com\bidding\common\port\RequirementChecklistPort.class
 com\bidding\common\port\DocumentAccessPort.class
 com\bidding\common\port\ProjectLookupPort.class
 com\bidding\common\port\DocumentTextExtractPort$ExtractResult.class
+com\bidding\common\port\OrgLookupPort.class
 com\bidding\common\port\PackageLookupPort.class
 com\bidding\common\port\VectorRecallPort.class
 com\bidding\common\port\VectorRecallPort$RecallMultiQuery.class
 com\bidding\common\port\DocumentProjectBindPort.class
 com\bidding\common\port\LlmPort$BidSearchRow.class
+com\bidding\common\port\BidPackageReviewSummaryPort.class
+com\bidding\common\port\BidPackageReviewSummaryPort$Summary.class
 com\bidding\common\port\DocumentIndexStorePort.class
 com\bidding\common\port\ProjectArtifactInvalidationPort.class
 com\bidding\common\port\RerankPort.class

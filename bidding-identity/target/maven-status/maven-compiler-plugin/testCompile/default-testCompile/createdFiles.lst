@@ -1,4 +1,5 @@
 com\bidding\identity\application\AdminDashboardAppServiceTest.class
 com\bidding\identity\infrastructure\city\CityCatalogTest.class
 com\bidding\identity\application\AdminOrgAppServiceTest.class
+com\bidding\identity\application\AuthAppServiceTest.class
 com\bidding\identity\application\AdminUserAppServiceTest.class

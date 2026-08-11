@@ -173,6 +173,14 @@ public class AdminOrgAppService {
                 documentIndexCountPort.countActiveByOrgIdAndIndexStatus(orgId, INDEX_SUCCESS));
         detail.setDocumentIndexFailedCount(
                 documentIndexCountPort.countActiveByOrgIdAndIndexStatus(orgId, INDEX_FAILED));
+        detail.setTenderPackageIndexSuccessCount(
+                packageCountPort.countActiveByOrgIdAndTypeAndIndexStatus(orgId, PACKAGE_TYPE_TENDER, INDEX_SUCCESS));
+        detail.setTenderPackageIndexFailedCount(
+                packageCountPort.countActiveByOrgIdAndTypeAndIndexStatus(orgId, PACKAGE_TYPE_TENDER, INDEX_FAILED));
+        detail.setBidPackageIndexSuccessCount(
+                packageCountPort.countActiveByOrgIdAndTypeAndIndexStatus(orgId, PACKAGE_TYPE_BID, INDEX_SUCCESS));
+        detail.setBidPackageIndexFailedCount(
+                packageCountPort.countActiveByOrgIdAndTypeAndIndexStatus(orgId, PACKAGE_TYPE_BID, INDEX_FAILED));
         detail.setReviewSuccessCount(
                 reviewStatusCountPort.countByOrgIdAndStatus(orgId, REVIEW_SUCCESS));
         detail.setReviewFailedCount(
@@ -590,6 +598,10 @@ public class AdminOrgAppService {
     public static class OrgDetail extends OrgSummary {
         private long documentIndexSuccessCount;
         private long documentIndexFailedCount;
+        private long tenderPackageIndexSuccessCount;
+        private long tenderPackageIndexFailedCount;
+        private long bidPackageIndexSuccessCount;
+        private long bidPackageIndexFailedCount;
         private long reviewSuccessCount;
         private long reviewFailedCount;
 
@@ -607,6 +619,38 @@ public class AdminOrgAppService {
 
         public void setDocumentIndexFailedCount(long documentIndexFailedCount) {
             this.documentIndexFailedCount = documentIndexFailedCount;
+        }
+
+        public long getTenderPackageIndexSuccessCount() {
+            return tenderPackageIndexSuccessCount;
+        }
+
+        public void setTenderPackageIndexSuccessCount(long tenderPackageIndexSuccessCount) {
+            this.tenderPackageIndexSuccessCount = tenderPackageIndexSuccessCount;
+        }
+
+        public long getTenderPackageIndexFailedCount() {
+            return tenderPackageIndexFailedCount;
+        }
+
+        public void setTenderPackageIndexFailedCount(long tenderPackageIndexFailedCount) {
+            this.tenderPackageIndexFailedCount = tenderPackageIndexFailedCount;
+        }
+
+        public long getBidPackageIndexSuccessCount() {
+            return bidPackageIndexSuccessCount;
+        }
+
+        public void setBidPackageIndexSuccessCount(long bidPackageIndexSuccessCount) {
+            this.bidPackageIndexSuccessCount = bidPackageIndexSuccessCount;
+        }
+
+        public long getBidPackageIndexFailedCount() {
+            return bidPackageIndexFailedCount;
+        }
+
+        public void setBidPackageIndexFailedCount(long bidPackageIndexFailedCount) {
+            this.bidPackageIndexFailedCount = bidPackageIndexFailedCount;
         }
 
         public long getReviewSuccessCount() {

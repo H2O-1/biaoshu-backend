@@ -21,4 +21,11 @@ public class PackageCountPortAdapter implements PackageCountPort {
         String safeType = type == null ? "" : type.trim();
         return packageRepository.countSearchByOrgId(orgId, safeType, "", false);
     }
+
+    @Override
+    public long countActiveByOrgIdAndTypeAndIndexStatus(long orgId, String type, String indexStatus) {
+        String safeType = type == null ? "" : type.trim();
+        String safeIndexStatus = indexStatus == null ? "" : indexStatus.trim();
+        return packageRepository.countByOrgIdAndTypeAndIndexStatus(orgId, safeType, safeIndexStatus);
+    }
 }

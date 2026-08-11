@@ -5,6 +5,7 @@ com\bidding\identity\infrastructure\persistence\JdbcUserRepository.class
 com\bidding\identity\infrastructure\security\CorsConfig.class
 com\bidding\identity\infrastructure\security\SecurityConfig.class
 com\bidding\identity\adapter\web\AdminCityController.class
+com\bidding\identity\infrastructure\port\OrgLookupPortAdapter.class
 com\bidding\identity\application\AdminOrgAppService.class
 com\bidding\identity\adapter\web\AdminUserController.class
 com\bidding\identity\adapter\web\AdminUserController$CreatePlatformAdminRequest.class

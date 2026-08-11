@@ -45,6 +45,9 @@ public class AuthAppService {
         }
 
         UserAccount user = optionalUser.get();
+        if (user.isDeleted()) {
+            throw new BizException(ErrorCode.UNAUTHORIZED, "用户名或密码错误");
+        }
         if (!user.isEnabled()) {
             throw new BizException(ErrorCode.FORBIDDEN, "账号已停用");
         }

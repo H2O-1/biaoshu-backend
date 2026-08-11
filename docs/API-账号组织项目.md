@@ -775,6 +775,10 @@ Authorization: Bearer <accessToken>
 |------|------|
 | documentIndexSuccessCount | 未删除文档中 `indexStatus=SUCCESS` 数量 |
 | documentIndexFailedCount | 未删除文档中 `indexStatus=FAILED` 数量 |
+| tenderPackageIndexSuccessCount | 招标文件包解析成功数：包内至少 1 个未删除文档，且全部 `indexStatus=SUCCESS` |
+| tenderPackageIndexFailedCount | 招标文件包解析失败数：包内任一未删除文档 `indexStatus=FAILED` |
+| bidPackageIndexSuccessCount | 投标文件包解析成功数：包内至少 1 个未删除文档，且全部 `indexStatus=SUCCESS` |
+| bidPackageIndexFailedCount | 投标文件包解析失败数：包内任一未删除文档 `indexStatus=FAILED` |
 | reviewSuccessCount | 审查（REVIEW）`status=SUCCESS` 数量（含历史版本行） |
 | reviewFailedCount | 审查（REVIEW）`status=FAILED` 数量 |
 
@@ -794,6 +798,10 @@ Authorization: Bearer <accessToken>
     "bidPackageCount": 4,
     "documentIndexSuccessCount": 10,
     "documentIndexFailedCount": 1,
+    "tenderPackageIndexSuccessCount": 1,
+    "tenderPackageIndexFailedCount": 1,
+    "bidPackageIndexSuccessCount": 3,
+    "bidPackageIndexFailedCount": 1,
     "reviewSuccessCount": 3,
     "reviewFailedCount": 2,
     "createdBy": 1,

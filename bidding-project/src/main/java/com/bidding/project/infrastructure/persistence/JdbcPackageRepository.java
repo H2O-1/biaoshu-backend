@@ -118,6 +118,33 @@ public class JdbcPackageRepository implements PackageRepository {
     }
 
     @Override
+    public long countByOrgIdAndTypeAndIndexStatus(long orgId, String type, String indexStatus) {
+        String typeKw = type == null ? "" : type;
+        String statusKw = indexStatus == null ? "" : indexStatus;
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM ("
+                        + "SELECT p.id, "
+                        + "COUNT(d.id) AS document_count, "
+                        + "SUM(CASE WHEN d.index_status = 'SUCCESS' THEN 1 ELSE 0 END) AS success_count, "
+                        + "SUM(CASE WHEN d.index_status = 'FAILED' THEN 1 ELSE 0 END) AS failed_count "
+                        + "FROM biz_package p "
+                        + "LEFT JOIN biz_document d ON d.package_id = p.id AND d.status <> 'DELETED' "
+                        + "WHERE p.org_id = ? AND p.status <> 'DELETED' AND p.type = ? "
+                        + "GROUP BY p.id"
+                        + ") x "
+                        + "WHERE (? = 'SUCCESS' AND document_count > 0 "
+                        + "AND success_count = document_count AND failed_count = 0) "
+                        + "OR (? = 'FAILED' AND failed_count > 0)",
+                Long.class,
+                orgId,
+                typeKw,
+                statusKw,
+                statusKw
+        );
+        return count == null ? 0 : count;
+    }
+
+    @Override
     public boolean existsByOrgIdAndTypeAndName(long orgId, String type, String name,
                                                Long excludePackageId) {
         Long count;
