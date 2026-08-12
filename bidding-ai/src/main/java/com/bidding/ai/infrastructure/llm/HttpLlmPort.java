@@ -43,6 +43,9 @@ public class HttpLlmPort implements LlmPort {
     private static final String SYSTEM_EVIDENCE =
             "你是招标原文证据摘录专家。只从给定候选原文摘录支撑条目的证据，不得编造。只输出 JSON。";
 
+    private static final String SYSTEM_TENDER_BASIC =
+            "你是招标文件基础信息解析助手。只依据给定候选原文抽取，不得编造。只输出 JSON。";
+
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
     private final String chatUrl;
@@ -167,6 +170,25 @@ public class HttpLlmPort implements LlmPort {
             return result;
         } catch (IOException ex) {
             throw new IllegalStateException("解析 LLM evidence 结果失败: " + ex.getMessage(), ex);
+        }
+    }
+
+    @Override
+    public TenderBasicInfoResult extractTenderBasicInfo(String chunksText) {
+        if (apiKey.isEmpty()) {
+            throw new IllegalStateException("未配置 DASHSCOPE_API_KEY / bidding.llm.api-key");
+        }
+        String chunks = chunksText == null ? "" : chunksText;
+        String content = chatJsonContent(
+                SYSTEM_TENDER_BASIC,
+                defaultTenderBasicPromptTemplate().replace("{{recalled_chunks}}", chunks));
+        try {
+            TenderBasicInfoResult result = new TenderBasicInfoResult();
+            result.setRawContent(content);
+            result.setInfo(parseTenderBasicInfoFromContent(content));
+            return result;
+        } catch (IOException ex) {
+            throw new IllegalStateException("解析 LLM 招标基础信息结果失败: " + ex.getMessage(), ex);
         }
     }
 
@@ -708,6 +730,64 @@ public class HttpLlmPort implements LlmPort {
         return row;
     }
 
+    TenderBasicInfo parseTenderBasicInfoFromContent(String trimmed) throws IOException {
+        JsonNode node = objectMapper.readTree(trimmed);
+        if (node == null || !node.isObject()) {
+            throw new IllegalStateException("招标基础信息 LLM JSON 须为对象");
+        }
+        TenderBasicInfo info = new TenderBasicInfo();
+        info.setTenderer(parseFieldEvidence(node.get("tenderer")));
+        info.setAgency(parseFieldEvidence(node.get("agency")));
+        info.setBudgetAmount(parseFieldEvidence(node.get("budgetAmount")));
+        info.setBidDeadline(parseDeadlineEvidence(node.get("bidDeadline")));
+        info.setProjectIntro(parseFieldEvidence(node.get("projectIntro")));
+        info.setProjectBackground(parseFieldEvidence(node.get("projectBackground")));
+        info.setProjectOverview(parseFieldEvidence(node.get("projectOverview")));
+        return info;
+    }
+
+    private FieldEvidence parseFieldEvidence(JsonNode node) {
+        if (node == null || node.isNull() || !node.isObject()) {
+            return null;
+        }
+        FieldEvidence field = new FieldEvidence();
+        field.setValue(textOf(node, "value"));
+        field.setQuote(textOf(node, "quote"));
+        field.setChunkId(longOf(node, "chunkId"));
+        field.setPageNo(intOf(node, "pageNo"));
+        return field;
+    }
+
+    private DeadlineEvidence parseDeadlineEvidence(JsonNode node) {
+        if (node == null || node.isNull() || !node.isObject()) {
+            return null;
+        }
+        DeadlineEvidence field = new DeadlineEvidence();
+        field.setValue(textOf(node, "value"));
+        field.setText(textOf(node, "text"));
+        field.setIso(textOf(node, "iso"));
+        field.setQuote(textOf(node, "quote"));
+        field.setChunkId(longOf(node, "chunkId"));
+        field.setPageNo(intOf(node, "pageNo"));
+        return field;
+    }
+
+    private Long longOf(JsonNode node, String field) {
+        JsonNode v = node.get(field);
+        if (v == null || v.isNull() || !v.isNumber()) {
+            return null;
+        }
+        return v.asLong();
+    }
+
+    private Integer intOf(JsonNode node, String field) {
+        JsonNode v = node.get(field);
+        if (v == null || v.isNull() || !v.isNumber()) {
+            return null;
+        }
+        return v.asInt();
+    }
+
     /**
      * bidSearch 支持字符串数组，或产品外形 {"queries":[...]}。
      */
@@ -1240,6 +1320,25 @@ public class HttpLlmPort implements LlmPort {
                 + "【相关原文】\n{{related_chunks}}\n"
                 + "【输出外形】\n"
                 + "{\"rows\":[{\"id\":\"Q1\",\"fragmentId\":101,\"page\":12,\"quote\":\"...\"}]}";
+    }
+
+    private static String defaultTenderBasicPromptTemplate() {
+        return "【任务】从候选招标原文中抽取招标基础信息。\n"
+                + "【字段】招标人 tenderer；招标代理 agency；预算金额 budgetAmount；"
+                + "投标截止时间 bidDeadline；项目简介 projectIntro；项目背景 projectBackground；项目概况 projectOverview。\n"
+                + "【规则】预算金额不拆分，按原文整体填 value；投标截止时间 text 填原文，"
+                + "iso 填 ISO-8601 UTC 时间（示例 2026-08-15T09:00:00Z），无法确定完整年月日时分则 iso=null；"
+                + "quote 必须是候选原文连续摘录；chunkId/pageNo 必须来自候选标签；字段未明确填 null。\n"
+                + "【约束】只输出 JSON；不得编造；不要输出多余字段；不要用未知/无等占位文字。\n"
+                + "【候选原文】\n{{recalled_chunks}}\n"
+                + "【输出外形】\n"
+                + "{\"tenderer\":{\"value\":null,\"quote\":null,\"chunkId\":null,\"pageNo\":null},"
+                + "\"agency\":{\"value\":null,\"quote\":null,\"chunkId\":null,\"pageNo\":null},"
+                + "\"budgetAmount\":{\"value\":null,\"quote\":null,\"chunkId\":null,\"pageNo\":null},"
+                + "\"bidDeadline\":{\"text\":null,\"iso\":null,\"quote\":null,\"chunkId\":null,\"pageNo\":null},"
+                + "\"projectIntro\":{\"value\":null,\"quote\":null,\"chunkId\":null,\"pageNo\":null},"
+                + "\"projectBackground\":{\"value\":null,\"quote\":null,\"chunkId\":null,\"pageNo\":null},"
+                + "\"projectOverview\":{\"value\":null,\"quote\":null,\"chunkId\":null,\"pageNo\":null}}";
     }
 
     private static String defaultReviewPromptTemplate() {

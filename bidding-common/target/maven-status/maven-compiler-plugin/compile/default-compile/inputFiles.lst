@@ -31,6 +31,8 @@ D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\co
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\ReviewDimensionPort.java
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\ReviewPort.java
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\ReviewStatusCountPort.java
+D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\TenderAnalysisDocumentCommandPort.java
+D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\TenderAnalysisPort.java
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\VectorRecallPort.java
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\security\CurrentUser.java
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\security\TendererAuth.java

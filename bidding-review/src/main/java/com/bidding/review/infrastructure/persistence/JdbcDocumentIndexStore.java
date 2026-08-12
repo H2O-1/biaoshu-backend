@@ -54,6 +54,37 @@ public class JdbcDocumentIndexStore implements DocumentIndexStorePort {
         jdbcTemplate.update("DELETE FROM biz_document_chunk WHERE document_id = ?", documentId);
     }
 
+    @Override
+    public List<ChunkView> listChunksByDocumentIds(long orgId, List<Long> documentIds) {
+        if (documentIds == null || documentIds.isEmpty()) {
+            return List.of();
+        }
+        String placeholders = String.join(",", java.util.Collections.nCopies(documentIds.size(), "?"));
+        List<Object> args = new java.util.ArrayList<>();
+        args.add(orgId);
+        args.addAll(documentIds);
+        return jdbcTemplate.query(
+                "SELECT c.id AS chunk_id, c.document_id, d.file_name, c.chunk_index, c.page_no, c.content "
+                        + "FROM biz_document_chunk c "
+                        + "JOIN biz_document d ON d.id = c.document_id "
+                        + "WHERE c.org_id = ? AND c.document_id IN (" + placeholders + ") "
+                        + "AND d.status = 'ACTIVE' "
+                        + "ORDER BY c.document_id ASC, c.chunk_index ASC",
+                (rs, rowNum) -> {
+                    ChunkView view = new ChunkView();
+                    view.setChunkId(rs.getLong("chunk_id"));
+                    view.setDocumentId(rs.getLong("document_id"));
+                    view.setFileName(rs.getString("file_name"));
+                    view.setChunkIndex(rs.getInt("chunk_index"));
+                    int page = rs.getInt("page_no");
+                    view.setPageNo(rs.wasNull() ? null : page);
+                    view.setContent(rs.getString("content"));
+                    return view;
+                },
+                args.toArray()
+        );
+    }
+
     private long insertChunk(long orgId,
                              Long projectId,
                              long packageId,

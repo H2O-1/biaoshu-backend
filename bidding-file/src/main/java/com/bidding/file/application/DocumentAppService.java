@@ -170,6 +170,30 @@ public class DocumentAppService {
     }
 
     /**
+     * 招标解析内部上传：调用方已校验组织与内部招标包；上传后自动排队 INDEX。
+     */
+    @Transactional
+    public InternalUploadResult uploadTenderAnalysisFile(long orgId,
+                                                        long packageId,
+                                                        String fileType,
+                                                        MultipartFile file,
+                                                        long createdBy) {
+        long t0 = System.currentTimeMillis();
+        String safeFileType = normalizeFileType(fileType);
+        StoredDocument stored = storeUploadedDocument(
+                orgId, null, packageId, safeFileType, file, createdBy);
+        long jobId = documentIndexJobPort.enqueueIndex(orgId, null, stored.documentId, createdBy);
+        InternalUploadResult result = new InternalUploadResult();
+        result.setDocumentId(stored.documentId);
+        result.setJobId(jobId);
+        result.setFileName(stored.fileName);
+        result.setFileType(safeFileType);
+        log.info("招标解析上传文件成功 packageId={} documentId={} jobId={} fileName={} costMs={}",
+                packageId, stored.documentId, jobId, stored.fileName, System.currentTimeMillis() - t0);
+        return result;
+    }
+
+    /**
      * 历史项目列表（供「从历史项目选择招标文件」）：本组织其它未删除项目中，
      * 招标包下至少有 1 个未删除文件的项目；展示项目名与文件数。
      */
@@ -526,6 +550,84 @@ public class DocumentAppService {
             jobIds.add(jobId);
             copied.add(toSummary(requireOwnedDocument(newId, operator.getOrgId())));
         }
+    }
+
+    private StoredDocument storeUploadedDocument(long orgId,
+                                                 Long projectId,
+                                                 long packageId,
+                                                 String fileType,
+                                                 MultipartFile file,
+                                                 long createdBy) {
+        if (file == null || file.isEmpty()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "请选择要上传的文件");
+        }
+
+        long size = file.getSize();
+        if (size <= 0) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "文件不能为空");
+        }
+        if (size > maxFileBytes) {
+            throw new BizException(ErrorCode.BAD_REQUEST,
+                    "单文件不能超过 " + (maxFileBytes / (1024 * 1024)) + "MB");
+        }
+
+        long existing = documentRepository.countActiveByPackageId(packageId);
+        if (existing >= maxFilesPerPackage) {
+            throw new BizException(ErrorCode.CONFLICT, "每个标包最多上传 " + maxFilesPerPackage + " 个文件");
+        }
+
+        String originalName = file.getOriginalFilename();
+        if (originalName == null || originalName.trim().isEmpty()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "文件名无效");
+        }
+        String safeName = sanitizeFileName(originalName.trim());
+        String ext = extractExt(safeName);
+        if (!ALLOWED_EXT.contains(ext)) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "仅支持 PDF / Word / Excel 文件");
+        }
+
+        String contentType = file.getContentType();
+        String objectKey = buildObjectKey(orgId, packageId, safeName);
+
+        try (InputStream in = file.getInputStream()) {
+            objectStoragePort.put(objectKey, in, size, contentType);
+        } catch (IOException e) {
+            log.error("上传读流失败 packageId={} fileName={}", packageId, safeName, e);
+            throw new BizException(ErrorCode.INTERNAL, "读取上传文件失败");
+        } catch (RuntimeException e) {
+            log.error("上传写对象存储失败 packageId={} fileName={}", packageId, safeName, e);
+            throw new BizException(ErrorCode.INTERNAL, "文件写入对象存储失败");
+        }
+
+        long id;
+        try {
+            id = documentRepository.insert(
+                    orgId,
+                    projectId,
+                    packageId,
+                    safeName,
+                    contentType,
+                    ext,
+                    fileType,
+                    size,
+                    objectKey,
+                    INDEX_PENDING,
+                    STATUS_ACTIVE,
+                    createdBy
+            );
+        } catch (RuntimeException e) {
+            try {
+                objectStoragePort.delete(objectKey);
+            } catch (RuntimeException ignored) {
+                // ignore
+            }
+            throw e;
+        }
+
+        StoredDocument stored = new StoredDocument();
+        stored.documentId = id;
+        stored.fileName = safeName;
+        return stored;
     }
 
     @Transactional(readOnly = true)
@@ -1164,6 +1266,50 @@ public class DocumentAppService {
         public void setUpdatedAt(Instant updatedAt) {
             this.updatedAt = updatedAt;
         }
+    }
+
+    public static class InternalUploadResult {
+        private long documentId;
+        private long jobId;
+        private String fileName;
+        private String fileType;
+
+        public long getDocumentId() {
+            return documentId;
+        }
+
+        public void setDocumentId(long documentId) {
+            this.documentId = documentId;
+        }
+
+        public long getJobId() {
+            return jobId;
+        }
+
+        public void setJobId(long jobId) {
+            this.jobId = jobId;
+        }
+
+        public String getFileName() {
+            return fileName;
+        }
+
+        public void setFileName(String fileName) {
+            this.fileName = fileName;
+        }
+
+        public String getFileType() {
+            return fileType;
+        }
+
+        public void setFileType(String fileType) {
+            this.fileType = fileType;
+        }
+    }
+
+    private static class StoredDocument {
+        private long documentId;
+        private String fileName;
     }
 
     public static class FileContent {

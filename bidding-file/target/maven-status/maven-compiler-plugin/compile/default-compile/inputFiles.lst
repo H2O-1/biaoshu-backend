@@ -11,6 +11,7 @@ D:\Work\bidding-architecture\backend\bidding-file\src\main\java\com\bidding\file
 D:\Work\bidding-architecture\backend\bidding-file\src\main\java\com\bidding\file\infrastructure\persistence\JdbcDocumentRepository.java
 D:\Work\bidding-architecture\backend\bidding-file\src\main\java\com\bidding\file\infrastructure\port\DocumentAccessPortAdapter.java
 D:\Work\bidding-architecture\backend\bidding-file\src\main\java\com\bidding\file\infrastructure\port\DocumentContentPortAdapter.java
+D:\Work\bidding-architecture\backend\bidding-file\src\main\java\com\bidding\file\infrastructure\port\TenderAnalysisDocumentCommandPortAdapter.java
 D:\Work\bidding-architecture\backend\bidding-file\src\main\java\com\bidding\file\infrastructure\storage\InMemoryObjectStorage.java
 D:\Work\bidding-architecture\backend\bidding-file\src\main\java\com\bidding\file\infrastructure\storage\S3ObjectStorage.java
 D:\Work\bidding-architecture\backend\bidding-file\src\main\java\com\bidding\file\package-info.java

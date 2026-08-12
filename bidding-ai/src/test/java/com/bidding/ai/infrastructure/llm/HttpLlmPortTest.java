@@ -237,6 +237,31 @@ class HttpLlmPortTest {
     }
 
     @Test
+    void parseTenderBasicInfoReadsFieldsAndEvidence() throws Exception {
+        String json = "{"
+                + "\"tenderer\":{\"value\":\"采购人A\",\"quote\":\"采购人：采购人A\",\"chunkId\":11,\"pageNo\":1},"
+                + "\"agency\":{\"value\":\"代理B\",\"quote\":\"代理机构：代理B\",\"chunkId\":12,\"pageNo\":2},"
+                + "\"budgetAmount\":{\"value\":\"预算金额100万元\",\"quote\":\"预算金额100万元\",\"chunkId\":13,\"pageNo\":3},"
+                + "\"bidDeadline\":{\"text\":\"2026年8月15日17:00\",\"iso\":\"2026-08-15T09:00:00Z\","
+                + "\"quote\":\"截止时间：2026年8月15日17:00\",\"chunkId\":14,\"pageNo\":4},"
+                + "\"projectIntro\":{\"value\":\"项目简介\",\"quote\":\"项目简介原文\",\"chunkId\":15,\"pageNo\":5},"
+                + "\"projectBackground\":{\"value\":\"项目背景\",\"quote\":\"项目背景原文\",\"chunkId\":16,\"pageNo\":6},"
+                + "\"projectOverview\":{\"value\":\"项目概况\",\"quote\":\"项目概况原文\",\"chunkId\":17,\"pageNo\":7}"
+                + "}";
+        LlmPort.TenderBasicInfo info = llmPort.parseTenderBasicInfoFromContent(json);
+        assertEquals("采购人A", info.getTenderer().getValue());
+        assertEquals(Long.valueOf(11L), info.getTenderer().getChunkId());
+        assertEquals("代理B", info.getAgency().getValue());
+        assertEquals("预算金额100万元", info.getBudgetAmount().getValue());
+        assertEquals("2026年8月15日17:00", info.getBidDeadline().getText());
+        assertEquals("2026-08-15T09:00:00Z", info.getBidDeadline().getIso());
+        assertEquals(Integer.valueOf(4), info.getBidDeadline().getPageNo());
+        assertEquals("项目简介", info.getProjectIntro().getValue());
+        assertEquals("项目背景", info.getProjectBackground().getValue());
+        assertEquals("项目概况", info.getProjectOverview().getValue());
+    }
+
+    @Test
     void parseCompareFromContent() throws Exception {
         String json = "{\"requirementId\":\"Q1\",\"title\":\"资质\",\"reviewType\":\"响应性审查\","
                 + "\"status\":\"符合\",\"vetoRisk\":false,\"judgement\":\"已响应\","

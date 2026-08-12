@@ -139,6 +139,44 @@ public class JdbcJobRepository implements JobPort {
 
     @Override
     @Transactional
+    public Optional<JobRef> claimNextPendingOrOwnedRunning(String type, String workerId) {
+        List<Long> ownedRunning = jdbcTemplate.query(
+                "SELECT id FROM biz_job WHERE status = 'RUNNING' AND type = ? AND worker_id = ? "
+                        + "ORDER BY updated_at ASC, created_at ASC LIMIT 1",
+                (rs, rowNum) -> rs.getLong("id"),
+                type,
+                workerId
+        );
+        if (!ownedRunning.isEmpty()) {
+            return findById(ownedRunning.get(0));
+        }
+
+        List<Long> pending = jdbcTemplate.query(
+                "SELECT id FROM biz_job WHERE status = 'PENDING' AND type = ? "
+                        + "ORDER BY created_at ASC LIMIT 1",
+                (rs, rowNum) -> rs.getLong("id"),
+                type
+        );
+        if (pending.isEmpty()) {
+            return Optional.empty();
+        }
+        long id = pending.get(0);
+        int updated = jdbcTemplate.update(
+                "UPDATE biz_job SET status = 'RUNNING', worker_id = ?, locked_at = CURRENT_TIMESTAMP, "
+                        + "started_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP, "
+                        + "message = '处理中', progress = 1 "
+                        + "WHERE id = ? AND status = 'PENDING'",
+                workerId,
+                id
+        );
+        if (updated != 1) {
+            return Optional.empty();
+        }
+        return findById(id);
+    }
+
+    @Override
+    @Transactional
     public Optional<JobRef> claimNextRunnablePipeline(String type, String workerId, int leaseSeconds) {
         List<Long> ids = jdbcTemplate.query(
                 "SELECT id FROM biz_job WHERE type = ? AND status IN ('PENDING', 'RUNNING') "

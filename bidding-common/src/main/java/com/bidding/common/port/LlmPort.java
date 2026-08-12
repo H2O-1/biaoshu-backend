@@ -47,6 +47,14 @@ public interface LlmPort {
      */
     EvidenceResult generateEvidence(String checklistItemsText, String relatedChunksText);
 
+    /**
+     * 抽取招标文件基础信息。
+     *
+     * @param chunksText 已格式化的候选原文（须含 chunkId/pageNo/documentId）
+     * @return 基础字段 + 模型原始 content
+     */
+    TenderBasicInfoResult extractTenderBasicInfo(String chunksText);
+
     /** 建清单抽取结果（含 LLM 原文）。 */
     class ExtractChecklistResult {
         private List<ExtractedRequirement> items = new ArrayList<>();
@@ -189,6 +197,157 @@ public interface LlmPort {
 
         public void setQuote(String quote) {
             this.quote = quote;
+        }
+    }
+
+    /** 招标基础信息抽取结果（含 LLM 原文）。 */
+    class TenderBasicInfoResult {
+        private TenderBasicInfo info = new TenderBasicInfo();
+        private String rawContent;
+
+        public TenderBasicInfo getInfo() {
+            return info;
+        }
+
+        public void setInfo(TenderBasicInfo info) {
+            this.info = info == null ? new TenderBasicInfo() : info;
+        }
+
+        public String getRawContent() {
+            return rawContent;
+        }
+
+        public void setRawContent(String rawContent) {
+            this.rawContent = rawContent;
+        }
+    }
+
+    /** 招标基础信息字段集合。 */
+    class TenderBasicInfo {
+        private FieldEvidence tenderer;
+        private FieldEvidence agency;
+        private FieldEvidence budgetAmount;
+        private DeadlineEvidence bidDeadline;
+        private FieldEvidence projectIntro;
+        private FieldEvidence projectBackground;
+        private FieldEvidence projectOverview;
+
+        public FieldEvidence getTenderer() {
+            return tenderer;
+        }
+
+        public void setTenderer(FieldEvidence tenderer) {
+            this.tenderer = tenderer;
+        }
+
+        public FieldEvidence getAgency() {
+            return agency;
+        }
+
+        public void setAgency(FieldEvidence agency) {
+            this.agency = agency;
+        }
+
+        public FieldEvidence getBudgetAmount() {
+            return budgetAmount;
+        }
+
+        public void setBudgetAmount(FieldEvidence budgetAmount) {
+            this.budgetAmount = budgetAmount;
+        }
+
+        public DeadlineEvidence getBidDeadline() {
+            return bidDeadline;
+        }
+
+        public void setBidDeadline(DeadlineEvidence bidDeadline) {
+            this.bidDeadline = bidDeadline;
+        }
+
+        public FieldEvidence getProjectIntro() {
+            return projectIntro;
+        }
+
+        public void setProjectIntro(FieldEvidence projectIntro) {
+            this.projectIntro = projectIntro;
+        }
+
+        public FieldEvidence getProjectBackground() {
+            return projectBackground;
+        }
+
+        public void setProjectBackground(FieldEvidence projectBackground) {
+            this.projectBackground = projectBackground;
+        }
+
+        public FieldEvidence getProjectOverview() {
+            return projectOverview;
+        }
+
+        public void setProjectOverview(FieldEvidence projectOverview) {
+            this.projectOverview = projectOverview;
+        }
+    }
+
+    /** 基础字段证据。 */
+    class FieldEvidence {
+        private String value;
+        private String quote;
+        private Long chunkId;
+        private Integer pageNo;
+
+        public String getValue() {
+            return value;
+        }
+
+        public void setValue(String value) {
+            this.value = value;
+        }
+
+        public String getQuote() {
+            return quote;
+        }
+
+        public void setQuote(String quote) {
+            this.quote = quote;
+        }
+
+        public Long getChunkId() {
+            return chunkId;
+        }
+
+        public void setChunkId(Long chunkId) {
+            this.chunkId = chunkId;
+        }
+
+        public Integer getPageNo() {
+            return pageNo;
+        }
+
+        public void setPageNo(Integer pageNo) {
+            this.pageNo = pageNo;
+        }
+    }
+
+    /** 投标截止时间证据。 */
+    class DeadlineEvidence extends FieldEvidence {
+        private String text;
+        private String iso;
+
+        public String getText() {
+            return text;
+        }
+
+        public void setText(String text) {
+            this.text = text;
+        }
+
+        public String getIso() {
+            return iso;
+        }
+
+        public void setIso(String iso) {
+            this.iso = iso;
         }
     }
 
