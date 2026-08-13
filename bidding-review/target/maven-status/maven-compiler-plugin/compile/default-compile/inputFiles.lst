@@ -24,6 +24,7 @@ D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\re
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\ReviewJobExecutor.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\TenderAnalysisAppService.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\TenderAnalysisJobExecutor.java
+D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\TenderIssueScanPipeline.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\logging\AiPipelineLog.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\persistence\BidPackageReviewSummaryPortAdapter.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\persistence\JdbcDocumentIndexStore.java

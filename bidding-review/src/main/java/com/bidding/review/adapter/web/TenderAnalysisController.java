@@ -143,6 +143,10 @@ public class TenderAnalysisController {
             AnalysisItemDto itemDto = toItemDto(item);
             if (TenderAnalysisPort.ITEM_SCORING.equals(item.getItemType())) {
                 dto.getScoringItems().add(itemDto);
+            } else if (TenderAnalysisPort.ITEM_LOGIC_ISSUE.equals(item.getItemType())) {
+                dto.getLogicIssueItems().add(itemDto);
+            } else if (TenderAnalysisPort.ITEM_TYPO.equals(item.getItemType())) {
+                dto.getTypoItems().add(itemDto);
             } else {
                 dto.getQualificationItems().add(itemDto);
             }
@@ -425,6 +429,8 @@ public class TenderAnalysisController {
         private BasicInfoDto basicInfo;
         private List<AnalysisItemDto> qualificationItems = new ArrayList<>();
         private List<AnalysisItemDto> scoringItems = new ArrayList<>();
+        private List<AnalysisItemDto> logicIssueItems = new ArrayList<>();
+        private List<AnalysisItemDto> typoItems = new ArrayList<>();
         private String basicInfoRawJson;
         private String checklistRawJson;
 
@@ -450,6 +456,22 @@ public class TenderAnalysisController {
 
         public void setScoringItems(List<AnalysisItemDto> scoringItems) {
             this.scoringItems = scoringItems == null ? new ArrayList<>() : scoringItems;
+        }
+
+        public List<AnalysisItemDto> getLogicIssueItems() {
+            return logicIssueItems;
+        }
+
+        public void setLogicIssueItems(List<AnalysisItemDto> logicIssueItems) {
+            this.logicIssueItems = logicIssueItems == null ? new ArrayList<>() : logicIssueItems;
+        }
+
+        public List<AnalysisItemDto> getTypoItems() {
+            return typoItems;
+        }
+
+        public void setTypoItems(List<AnalysisItemDto> typoItems) {
+            this.typoItems = typoItems == null ? new ArrayList<>() : typoItems;
         }
 
         public String getBasicInfoRawJson() {

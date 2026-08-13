@@ -46,6 +46,9 @@ public class HttpLlmPort implements LlmPort {
     private static final String SYSTEM_TENDER_BASIC =
             "你是招标文件基础信息解析助手。只依据给定候选原文抽取，不得编造。只输出 JSON。";
 
+    private static final String SYSTEM_TENDER_ISSUE =
+            "你是招标文件文本质检助手。只依据给定招标原文片段识别逻辑问题和错别字，不输出法律风险。只输出 JSON。";
+
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
     private final String chatUrl;
@@ -189,6 +192,24 @@ public class HttpLlmPort implements LlmPort {
             return result;
         } catch (IOException ex) {
             throw new IllegalStateException("解析 LLM 招标基础信息结果失败: " + ex.getMessage(), ex);
+        }
+    }
+
+    @Override
+    public TenderIssueScanResult scanTenderIssues(String chunksText) {
+        if (apiKey.isEmpty()) {
+            throw new IllegalStateException("未配置 DASHSCOPE_API_KEY / bidding.llm.api-key");
+        }
+        String chunks = chunksText == null ? "" : chunksText;
+        String content = chatJsonContent(
+                SYSTEM_TENDER_ISSUE,
+                defaultTenderIssueScanPromptTemplate().replace("{{chunksText}}", chunks));
+        try {
+            TenderIssueScanResult result = parseTenderIssueScanFromContent(content);
+            result.setRawContent(content);
+            return result;
+        } catch (IOException ex) {
+            throw new IllegalStateException("解析 LLM 逻辑问题和错别字识别结果失败: " + ex.getMessage(), ex);
         }
     }
 
@@ -744,6 +765,85 @@ public class HttpLlmPort implements LlmPort {
         info.setProjectBackground(parseFieldEvidence(node.get("projectBackground")));
         info.setProjectOverview(parseFieldEvidence(node.get("projectOverview")));
         return info;
+    }
+
+    TenderIssueScanResult parseTenderIssueScanFromContent(String trimmed) throws IOException {
+        JsonNode node = objectMapper.readTree(trimmed);
+        if (node == null || !node.isObject()) {
+            throw new IllegalStateException("逻辑问题和错别字识别 LLM JSON 须为对象");
+        }
+        JsonNode logicNode = node.get("logicIssues");
+        JsonNode typoNode = node.get("typos");
+        if (logicNode == null || !logicNode.isArray() || typoNode == null || !typoNode.isArray()) {
+            throw new IllegalStateException("逻辑问题和错别字识别 LLM JSON 须包含 logicIssues 和 typos 数组");
+        }
+
+        TenderIssueScanResult result = new TenderIssueScanResult();
+        List<LogicIssueCandidate> logicIssues = new ArrayList<>();
+        for (int i = 0; i < logicNode.size(); i++) {
+            LogicIssueCandidate item = parseOneLogicIssue(logicNode.get(i));
+            if (item != null) {
+                logicIssues.add(item);
+            }
+        }
+        result.setLogicIssues(logicIssues);
+
+        List<TypoCandidate> typos = new ArrayList<>();
+        for (int i = 0; i < typoNode.size(); i++) {
+            TypoCandidate item = parseOneTypo(typoNode.get(i));
+            if (item != null) {
+                typos.add(item);
+            }
+        }
+        result.setTypos(typos);
+        return result;
+    }
+
+    private LogicIssueCandidate parseOneLogicIssue(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return null;
+        }
+        LogicIssueCandidate item = new LogicIssueCandidate();
+        item.setTitle(textOf(node, "title"));
+        item.setSeverity(textOf(node, "severity"));
+        item.setIssueType(textOf(node, "issueType"));
+        item.setProblem(textOf(node, "problem"));
+        item.setSuggestion(textOf(node, "suggestion"));
+        item.setEvidence(parseIssueEvidence(node.get("evidence")));
+        return item;
+    }
+
+    private TypoCandidate parseOneTypo(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return null;
+        }
+        TypoCandidate item = new TypoCandidate();
+        item.setWrongText(textOf(node, "wrongText"));
+        item.setSuggestedText(textOf(node, "suggestedText"));
+        item.setContext(textOf(node, "context"));
+        item.setConfidence(textOf(node, "confidence"));
+        item.setSuggestion(textOf(node, "suggestion"));
+        item.setEvidence(parseIssueEvidence(node.get("evidence")));
+        return item;
+    }
+
+    private List<IssueEvidence> parseIssueEvidence(JsonNode node) {
+        List<IssueEvidence> result = new ArrayList<>();
+        if (node == null || !node.isArray()) {
+            return result;
+        }
+        for (int i = 0; i < node.size(); i++) {
+            JsonNode el = node.get(i);
+            if (el == null || !el.isObject()) {
+                continue;
+            }
+            IssueEvidence evidence = new IssueEvidence();
+            evidence.setChunkId(longOf(el, "chunkId"));
+            evidence.setPageNo(intOf(el, "pageNo"));
+            evidence.setQuote(textOf(el, "quote"));
+            result.add(evidence);
+        }
+        return result;
     }
 
     private FieldEvidence parseFieldEvidence(JsonNode node) {
@@ -1339,6 +1439,41 @@ public class HttpLlmPort implements LlmPort {
                 + "\"projectIntro\":{\"value\":null,\"quote\":null,\"chunkId\":null,\"pageNo\":null},"
                 + "\"projectBackground\":{\"value\":null,\"quote\":null,\"chunkId\":null,\"pageNo\":null},"
                 + "\"projectOverview\":{\"value\":null,\"quote\":null,\"chunkId\":null,\"pageNo\":null}}";
+    }
+
+    private static String defaultTenderIssueScanPromptTemplate() {
+        return "你是招标文件文本质检助手。请只根据用户提供的招标文件原文片段，识别两类问题：逻辑问题、错别字识别。\n"
+                + "重要规则：\n"
+                + "1. 只根据输入片段判断，不引用外部法律法规，不输出法律风险。\n"
+                + "2. 没有明确原文证据的问题不要输出。\n"
+                + "3. 不要编造页码、chunkId、原文摘录；evidence 必须来自输入片段。\n"
+                + "4. 不要把公司名称、项目名称、人名、地名、证书名称、产品名称等专有名词轻易判为错别字。\n"
+                + "5. 不要把 OCR 断行、页眉页脚、空格、编号格式差异当作错别字。\n"
+                + "6. 没发现问题时返回空数组。\n"
+                + "7. 只返回 JSON 对象，不要 Markdown，不要解释文字。\n"
+                + "逻辑问题识别范围：\n"
+                + "- 同一批片段内金额、时间、数量、比例、分值、门槛前后不一致。\n"
+                + "- 条款之间存在明显矛盾。\n"
+                + "- 评分总分与分项加总明显不一致。\n"
+                + "- 投标截止时间、开标时间、保证金截止时间等时间安排明显冲突。\n"
+                + "- 同一项目名称、标段名称、文件名称、采购方式、评标方法前后明显不一致。\n"
+                + "- 资格门槛、业绩门槛、人员要求与同批片段中的项目规模信息明显不匹配时，可以作为逻辑问题候选输出。\n"
+                + "错别字识别范围：\n"
+                + "- 明显中文错别字。\n"
+                + "- 明显术语错误。\n"
+                + "- 明显多字、漏字、重复字。\n"
+                + "- 明显影响理解的文字错误。\n"
+                + "输出 JSON 格式必须严格如下：\n"
+                + "{\"logicIssues\":[{\"title\":\"简短问题标题\",\"severity\":\"HIGH|MEDIUM|LOW\","
+                + "\"issueType\":\"AMOUNT_INCONSISTENCY|TIME_CONFLICT|SCORE_SUM_MISMATCH|TERM_INCONSISTENCY|THRESHOLD_INCONSISTENCY|OTHER\","
+                + "\"problem\":\"说明问题是什么，只描述输入片段能支持的内容\","
+                + "\"suggestion\":\"修改建议；不确定时写空字符串\","
+                + "\"evidence\":[{\"chunkId\":123,\"pageNo\":5,\"quote\":\"必须逐字摘录输入片段中的关键原文\"}]}],"
+                + "\"typos\":[{\"wrongText\":\"疑似错误文字\",\"suggestedText\":\"建议文字\","
+                + "\"context\":\"包含错误文字的短上下文\",\"confidence\":\"HIGH|MEDIUM|LOW\","
+                + "\"suggestion\":\"修改建议；不确定时写空字符串\","
+                + "\"evidence\":[{\"chunkId\":123,\"pageNo\":5,\"quote\":\"必须逐字摘录输入片段中的关键原文\"}]}]}\n"
+                + "现在请扫描以下招标文件片段：\n{{chunksText}}";
     }
 
     private static String defaultReviewPromptTemplate() {

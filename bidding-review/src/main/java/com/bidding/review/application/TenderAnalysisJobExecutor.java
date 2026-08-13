@@ -37,6 +37,7 @@ public class TenderAnalysisJobExecutor {
     private final DocumentIndexStorePort documentIndexStorePort;
     private final LlmPort llmPort;
     private final ChecklistBuildPipeline checklistBuildPipeline;
+    private final TenderIssueScanPipeline tenderIssueScanPipeline;
     private final TenderAnalysisPort tenderAnalysisPort;
     private final ObjectMapper objectMapper;
 
@@ -45,6 +46,7 @@ public class TenderAnalysisJobExecutor {
                                      DocumentIndexStorePort documentIndexStorePort,
                                      LlmPort llmPort,
                                      ChecklistBuildPipeline checklistBuildPipeline,
+                                     TenderIssueScanPipeline tenderIssueScanPipeline,
                                      TenderAnalysisPort tenderAnalysisPort,
                                      ObjectMapper objectMapper) {
         this.jobPort = jobPort;
@@ -52,6 +54,7 @@ public class TenderAnalysisJobExecutor {
         this.documentIndexStorePort = documentIndexStorePort;
         this.llmPort = llmPort;
         this.checklistBuildPipeline = checklistBuildPipeline;
+        this.tenderIssueScanPipeline = tenderIssueScanPipeline;
         this.tenderAnalysisPort = tenderAnalysisPort;
         this.objectMapper = objectMapper;
     }
@@ -136,6 +139,8 @@ public class TenderAnalysisJobExecutor {
                             (progress, message) -> jobPort.markRunningProgress(jobId, progress, message));
             List<TenderAnalysisPort.ItemDraft> itemDrafts =
                     toTenderAnalysisItems(checklistResult.getItems());
+            jobPort.markRunningProgress(jobId, 80, "逻辑问题和错别字识别中");
+            itemDrafts.addAll(tenderIssueScanPipeline.scan(chunks));
             jobPort.markRunningProgress(jobId, 90, "结果保存中");
             if (!itemDrafts.isEmpty()) {
                 tenderAnalysisPort.insertItems(payload.analysisId, itemDrafts);

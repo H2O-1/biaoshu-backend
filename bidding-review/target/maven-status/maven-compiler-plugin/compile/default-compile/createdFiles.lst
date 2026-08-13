@@ -6,6 +6,7 @@ com\bidding\review\application\ChecklistAppService.class
 com\bidding\review\infrastructure\persistence\ProjectArtifactInvalidationPortAdapter.class
 com\bidding\review\infrastructure\persistence\JdbcTenderAnalysisStore.class
 com\bidding\review\infrastructure\worker\TenderAnalysisJobPoller.class
+com\bidding\review\application\TenderIssueScanPipeline.class
 com\bidding\review\infrastructure\persistence\BidPackageReviewSummaryPortAdapter.class
 com\bidding\review\adapter\web\ReviewController$SupplierReviewDto.class
 com\bidding\review\application\ChecklistBuildPipeline$ProgressCallback.class
@@ -76,7 +77,6 @@ com\bidding\review\infrastructure\recall\Bm25LexicalRecall$ChunkRow.class
 com\bidding\review\adapter\web\TenderAnalysisController$AnalysisSummaryDto.class
 com\bidding\review\infrastructure\recall\JdbcCosineVectorRecallPort$2.class
 com\bidding\review\adapter\web\AdminReviewDimensionController.class
-com\bidding\review\adapter\web\ReviewController$CreateRequest.class
 com\bidding\review\application\RerankAppService.class
 com\bidding\review\infrastructure\persistence\ProjectReviewProgressPortAdapter.class
 com\bidding\review\application\ReviewDimensionAppService$DimensionSummary.class
@@ -91,7 +91,6 @@ com\bidding\review\application\ChecklistRecallDebugAppService$DebugResult.class
 com\bidding\review\infrastructure\persistence\JdbcDocumentIndexStore.class
 com\bidding\review\adapter\web\ChecklistController$ItemDto.class
 com\bidding\review\infrastructure\recall\JdbcCosineVectorRecallPort$1.class
-com\bidding\review\adapter\web\ReviewController$CreateResponse.class
 com\bidding\review\adapter\web\TenderAnalysisController$BasicInfoDto.class
 com\bidding\review\application\ChecklistBuildPipeline$LlmExtractBundle.class
 com\bidding\review\application\ReviewComparePipeline$ProgressCallback.class

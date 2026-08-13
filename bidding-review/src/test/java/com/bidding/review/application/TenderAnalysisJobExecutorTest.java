@@ -45,6 +45,8 @@ class TenderAnalysisJobExecutorTest {
     @Mock
     private ChecklistBuildPipeline checklistBuildPipeline;
     @Mock
+    private TenderIssueScanPipeline tenderIssueScanPipeline;
+    @Mock
     private TenderAnalysisPort tenderAnalysisPort;
 
     @Test
@@ -106,6 +108,7 @@ class TenderAnalysisJobExecutorTest {
         when(llmPort.extractTenderBasicInfo(anyString())).thenReturn(basicInfoResult());
         when(checklistBuildPipeline.buildFromRankedChunks(anyList(), any()))
                 .thenReturn(checklistResult());
+        when(tenderIssueScanPipeline.scan(anyList())).thenReturn(issueItems());
 
         assertEquals(true, executor.claimAndRunOnce("w1"));
 
@@ -126,13 +129,18 @@ class TenderAnalysisJobExecutorTest {
                 ArgumentCaptor.forClass(List.class);
         verify(tenderAnalysisPort).insertItems(eq(55L), itemsCaptor.capture());
         List<TenderAnalysisPort.ItemDraft> items = itemsCaptor.getValue();
-        assertEquals(2, items.size());
+        assertEquals(4, items.size());
         assertEquals(TenderAnalysisPort.ITEM_QUALIFICATION, items.get(0).getItemType());
         assertEquals("Q1", items.get(0).getRequirementCode());
         assertEquals("须具备二级资质", items.get(0).getContent());
         assertEquals(TenderAnalysisPort.ITEM_SCORING, items.get(1).getItemType());
         assertEquals("S1", items.get(1).getRequirementCode());
         assertEquals(0, new BigDecimal("10").compareTo(items.get(1).getScoreTotal()));
+        assertEquals(TenderAnalysisPort.ITEM_LOGIC_ISSUE, items.get(2).getItemType());
+        assertEquals("逻辑问题-1", items.get(2).getRequirementCode());
+        assertEquals(TenderAnalysisPort.ITEM_TYPO, items.get(3).getItemType());
+        assertEquals("错别字-1", items.get(3).getRequirementCode());
+        verify(jobPort).markRunningProgress(101L, 80, "逻辑问题和错别字识别中");
         verify(jobPort).markSuccess(101L, "招标解析完成");
     }
 
@@ -143,6 +151,7 @@ class TenderAnalysisJobExecutorTest {
                 documentIndexStorePort,
                 llmPort,
                 checklistBuildPipeline,
+                tenderIssueScanPipeline,
                 tenderAnalysisPort,
                 new ObjectMapper()
         );
@@ -244,5 +253,30 @@ class TenderAnalysisJobExecutorTest {
         result.setItems(items);
         result.setLlmRawJson("{\"qualification\":{},\"scoring\":{}}");
         return result;
+    }
+
+    private static List<TenderAnalysisPort.ItemDraft> issueItems() {
+        TenderAnalysisPort.ItemDraft logic = new TenderAnalysisPort.ItemDraft();
+        logic.setItemType(TenderAnalysisPort.ITEM_LOGIC_ISSUE);
+        logic.setRequirementCode("逻辑问题-1");
+        logic.setTitle("业绩门槛与预算不匹配");
+        logic.setContent("预算100万元，业绩要求500万元。");
+        logic.setChunkIdsJson("[9001,9002]");
+        logic.setEvidenceJson("[]");
+        logic.setSortOrder(2);
+
+        TenderAnalysisPort.ItemDraft typo = new TenderAnalysisPort.ItemDraft();
+        typo.setItemType(TenderAnalysisPort.ITEM_TYPO);
+        typo.setRequirementCode("错别字-1");
+        typo.setTitle("疑似错别字：解折");
+        typo.setContent("建议改为解析。");
+        typo.setChunkIdsJson("[9002]");
+        typo.setEvidenceJson("[]");
+        typo.setSortOrder(3);
+
+        List<TenderAnalysisPort.ItemDraft> items = new ArrayList<>();
+        items.add(logic);
+        items.add(typo);
+        return items;
     }
 }

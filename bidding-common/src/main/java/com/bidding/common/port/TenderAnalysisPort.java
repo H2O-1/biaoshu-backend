@@ -19,6 +19,8 @@ public interface TenderAnalysisPort {
 
     String ITEM_QUALIFICATION = "QUALIFICATION";
     String ITEM_SCORING = "SCORING";
+    String ITEM_LOGIC_ISSUE = "LOGIC_ISSUE";
+    String ITEM_TYPO = "TYPO";
 
     /**
      * 创建解析中主记录。

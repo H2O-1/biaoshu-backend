@@ -1,12 +1,12 @@
 # 招投标后端 · API（招标解析）
 
 > 本册范围：**独立招标文件上传解析**。  
-> 用户上传一个或多个招标文件，后端自动解析基础信息、资格要求、评分标准；不创建项目、不上传投标文件、不发起审查。  
+> 用户上传一个或多个招标文件，后端自动解析基础信息、资格要求、评分标准、逻辑问题、错别字识别；不创建项目、不上传投标文件、不发起审查。  
 > 文件 / 标包通用能力见：[文件与标包](./API-文件与标包.md)  
 > 任务进度见：[任务进度 SSE](./API-任务进度SSE.md)  
 > 账号 / 组织 / 项目见：[账号组织项目](./API-账号组织项目.md) · [总索引](./API.md)  
 > Base URL（本地）：`http://localhost:8080`  
-> 更新：2026-08-11
+> 更新：2026-08-13
 
 ## 通用约定（摘要）
 
@@ -30,6 +30,8 @@
 | 基础信息 | 招标人、招标代理、预算金额、投标截止时间、项目简介、项目背景、项目概况 |
 | 资格要求 | 沿用 `Q1` / `Q2` 编号 |
 | 评分标准 | 沿用 `S1` / `S2` 编号 |
+| 逻辑问题 | 全文 chunk 分批扫描后合并，沿用 `逻辑问题-1` / `逻辑问题-2` 编号 |
+| 错别字识别 | 全文 chunk 分批扫描后合并，沿用 `错别字-1` / `错别字-2` 编号 |
 | 查看原文片段 | 返回 evidence，前端可通过 chunk / page / quote 定位原文片段 |
 
 ---
@@ -51,6 +53,8 @@
 |----------|------|
 | `QUALIFICATION` | 资格要求 |
 | `SCORING` | 评分标准 |
+| `LOGIC_ISSUE` | 逻辑问题 |
+| `TYPO` | 错别字识别 |
 
 ---
 
@@ -246,6 +250,60 @@
         "createdAt": "2026-08-11T08:35:00Z"
       }
     ],
+    "logicIssueItems": [
+      {
+        "id": 30,
+        "analysisId": 1,
+        "itemType": "LOGIC_ISSUE",
+        "requirementCode": "逻辑问题-1",
+        "title": "业绩门槛与项目预算规模不匹配",
+        "content": "项目预算金额为1280万元，但类似业绩要求达到5000万元，门槛明显高于项目规模。建议补充设置依据，或调整为与项目规模相称的合理区间。",
+        "subType": "THRESHOLD_INCONSISTENCY",
+        "sourceExcerpt": "预算金额为人民币 1280 万元；近三年需具有 5000 万元以上类似项目业绩",
+        "pageNo": 5,
+        "chunkIds": [9001, 9010],
+        "evidence": [
+          {
+            "chunkId": 9001,
+            "pageNo": 1,
+            "quote": "预算金额为人民币 1280 万元"
+          },
+          {
+            "chunkId": 9010,
+            "pageNo": 5,
+            "quote": "近三年需具有 5000 万元以上类似项目业绩"
+          }
+        ],
+        "sortOrder": 0,
+        "createdAt": "2026-08-11T08:35:00Z"
+      }
+    ],
+    "typoItems": [
+      {
+        "id": 40,
+        "analysisId": 1,
+        "itemType": "TYPO",
+        "requirementCode": "错别字-1",
+        "title": "疑似错别字：解折",
+        "content": "原文疑似将“解析”写成“解折”。建议改为“解析”。",
+        "subType": null,
+        "sourceExcerpt": "解折失败，请重新解析",
+        "pageNo": 6,
+        "chunkIds": [9015],
+        "evidence": [
+          {
+            "chunkId": 9015,
+            "pageNo": 6,
+            "quote": "解折失败，请重新解析",
+            "wrongText": "解折",
+            "suggestedText": "解析",
+            "confidence": "HIGH"
+          }
+        ],
+        "sortOrder": 0,
+        "createdAt": "2026-08-11T08:35:00Z"
+      }
+    ],
     "basicInfoRawJson": "{}",
     "checklistRawJson": "{}"
   }
@@ -257,6 +315,8 @@
 | `basicInfo.evidence` | 基础信息证据数组，用于“查看原文片段” |
 | `qualificationItems` | 资格要求列表，按 `sortOrder/id` 升序 |
 | `scoringItems` | 评分标准列表，按 `sortOrder/id` 升序 |
+| `logicIssueItems` | 逻辑问题列表，按 `sortOrder/id` 升序；由全文 chunk 分批扫描候选合并生成 |
+| `typoItems` | 错别字识别列表，按 `sortOrder/id` 升序；由全文 chunk 分批扫描候选合并生成 |
 | `items[].chunkIds` | 来源 chunk ID 数组 |
 | `items[].evidence` | 条目原文证据数组，用于“查看原文片段” |
 | `basicInfoRawJson` | 基础信息抽取 LLM 原始输出，仅详情返回 |
@@ -325,5 +385,9 @@
 - `预算金额` 不拆分为预算金额 / 最高限价，本期统一返回 `budgetAmountText`。
 - `投标截止时间` 返回原文 `bidDeadlineText`；`bidDeadlineAt` 只接受 LLM 返回的 ISO-8601 UTC 时间，无法解析则为 `null`。
 - 资格要求和评分标准沿用现有 `Q1` / `S1` 编号规则。
+- 逻辑问题沿用 `逻辑问题-1` / `逻辑问题-2` 编号规则。
+- 错别字识别沿用 `错别字-1` / `错别字-2` 编号规则。
 - 前端“查看原文片段”依赖 evidence 中的 chunk / page / quote 信息。
 - 资格要求 / 评分标准复用建清单拆分链路：资格和评分分开抽取，再生成条目检索词与招标侧原文 evidence；本接口不发起投标文件审查。
+- 逻辑问题 / 错别字识别不复用建清单召回链路；文件 INDEX 成功后读取本次文档 chunk，按批次交给 LLM 扫描候选问题，再由后端合并去重后返回。
+- 本期不做法律风险识别，不接入法律库。
