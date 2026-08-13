@@ -188,12 +188,12 @@ public class ReviewAppService {
             List<Long> all = new ArrayList<>();
             for (int i = 0; i < bidPkgs.size(); i++) {
                 PackageLookupPort.PackageRef pkg = bidPkgs.get(i);
-                if (pkg.getOrgId() == orgId) {
+                if (pkg.getOrgId() == orgId && hasActiveDocument(orgId, projectId, pkg.getId())) {
                     all.add(pkg.getId());
                 }
             }
             if (all.isEmpty()) {
-                throw new BizException(ErrorCode.BAD_REQUEST, "项目下无有效投标文件包，无法发起审查");
+                throw new BizException(ErrorCode.BAD_REQUEST, "投标包下没有文件，请先上传投标文件");
             }
             return all;
         }
@@ -207,6 +207,10 @@ public class ReviewAppService {
                 throw new BizException(ErrorCode.BAD_REQUEST,
                         "packageId=" + id + " 不是本项目的有效投标文件包");
             }
+            if (!hasActiveDocument(orgId, projectId, id)) {
+                throw new BizException(ErrorCode.BAD_REQUEST,
+                        "packageId=" + id + " 下没有文件，请先上传投标文件");
+            }
             if (!resolved.contains(id)) {
                 resolved.add(id);
             }
@@ -218,32 +222,56 @@ public class ReviewAppService {
     }
 
     private void ensureBidPackagesHaveIndexedDocs(long orgId, long projectId, List<Long> bidPackageIds) {
-        boolean anySuccess = false;
         for (int i = 0; i < bidPackageIds.size(); i++) {
             long packageId = bidPackageIds.get(i);
-            List<DocumentAccessPort.DocumentRef> docs =
-                    documentAccessPort.listActiveByPackageId(packageId);
-            for (int j = 0; j < docs.size(); j++) {
-                DocumentAccessPort.DocumentRef doc = docs.get(j);
-                if (doc.getOrgId() != orgId) {
-                    continue;
-                }
-                if (doc.getProjectId() != null && doc.getProjectId() != projectId) {
-                    continue;
-                }
-                if (DocumentAccessPort.INDEX_SUCCESS.equals(doc.getIndexStatus())) {
-                    anySuccess = true;
-                    break;
-                }
-            }
-            if (anySuccess) {
-                break;
+            if (!hasIndexedDocument(orgId, projectId, packageId)) {
+                throw new BizException(ErrorCode.BAD_REQUEST,
+                        "选定投标包下没有已索引成功的文档，请先完成 INDEX");
             }
         }
-        if (!anySuccess) {
-            throw new BizException(ErrorCode.BAD_REQUEST,
-                    "选定投标包下没有已索引成功的文档，请先完成 INDEX");
+    }
+
+    private boolean hasActiveDocument(long orgId, long projectId, long packageId) {
+        List<DocumentAccessPort.DocumentRef> docs =
+                documentAccessPort.listActiveByPackageId(packageId);
+        if (docs == null || docs.isEmpty()) {
+            return false;
         }
+        for (int i = 0; i < docs.size(); i++) {
+            DocumentAccessPort.DocumentRef doc = docs.get(i);
+            if (isSameProjectDocument(doc, orgId, projectId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasIndexedDocument(long orgId, long projectId, long packageId) {
+        List<DocumentAccessPort.DocumentRef> docs =
+                documentAccessPort.listActiveByPackageId(packageId);
+        if (docs == null || docs.isEmpty()) {
+            return false;
+        }
+        for (int i = 0; i < docs.size(); i++) {
+            DocumentAccessPort.DocumentRef doc = docs.get(i);
+            if (isSameProjectDocument(doc, orgId, projectId)
+                    && DocumentAccessPort.INDEX_SUCCESS.equals(doc.getIndexStatus())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isSameProjectDocument(DocumentAccessPort.DocumentRef doc,
+                                          long orgId,
+                                          long projectId) {
+        if (doc == null || doc.getOrgId() != orgId) {
+            return false;
+        }
+        if (doc.getProjectId() != null && doc.getProjectId() != projectId) {
+            return false;
+        }
+        return true;
     }
 
     private String toJsonLongArray(List<Long> ids) {

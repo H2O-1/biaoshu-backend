@@ -167,14 +167,14 @@ Authorization: Bearer <accessToken>
 | checklistId                       | long         | 所用清单版本                                        |
 | version                           | int          | 本项目审查版本号                                    |
 | status                            | string       | `BUILDING` / `SUCCESS` / `FAILED`                   |
-| packageIdsJson                    | string       | 对照的投标包 id 列表 JSON，如 `"[80,81]"`           |
+| packageIdsJson                    | string       | 实际参与审查的投标包 id 列表 JSON，如 `"[80,81]"`；空投标包不包含 |
 | overallVerdict                    | string\|null | **已废弃，恒为 `null`**；不要用                     |
 | needHumanReview                   | boolean      | 是否需人工复核（默认 true）                         |
 | promptVersion                     | string       | 如 `review-v2`                                      |
 | recallTopK / rerankTopN           | int          | 本次召回/重排参数快照                               |
 | errorMessage                      | string\|null | 失败原因；成功多为 null                             |
 | createdBy / createdAt / updatedAt | —            | 创建人与时间                                        |
-| packages                          | array        | **按投标包嵌套**的产品向结果（多投标包 = 多个元素） |
+| packages                          | array        | **按投标包嵌套**的产品向结果；只包含实际参与审查的有文件投标包 |
 
 **`packages[]`**
 
@@ -453,6 +453,8 @@ Authorization: Bearer <accessToken>
 5. 点击证据：`bidEvidence[].fragmentId` / `page` / `quote` 跳转预览  
 6. `status !== SUCCESS` 时勿当终态展示（`BUILDING` 轮询；`FAILED` 读 `errorMessage`）
 
+空投标包不参与审查，也不会出现在 `packages[]` 中；如需展示“未参与审查”的投标单位，请用项目投标包列表与审查详情 `packages[]` 做对比。
+
 ## 后端自动跑什么
 
 总任务是 PostgreSQL 持久化状态机（阶段存 `biz_job.phase`，多 Worker 租约接管，每步事务内推进）：
@@ -479,9 +481,10 @@ INDEX_SUBMIT → INDEX_WAIT → CHECKLIST_SUBMIT → CHECKLIST_WAIT
    - LLM：资格条目∥评分条目 → bidSearch → evidence（extract-artifact-v1）
    - 清单 FAILED / OBSOLETE / 成功但无条目 / 超时 → 整单失败
 
-③ REVIEW_SUBMIT / REVIEW_WAIT（智能审查，按包全量：投标包 × 清单条目）
+③ REVIEW_SUBMIT / REVIEW_WAIT（智能审查，按包全量：有文件投标包 × 清单条目）
    - 创建审查 + REVIEW 子任务（同事务），保存 review_id
    - 召回仅 bidSearch；重排/对照用 text；LLM=review-v2（产品规则）
+   - 空投标包跳过，不生成审查条目，不出现在结果 packages[]
    - 资格无证据 → 无法判断；评分无证据 → 建议分 0；fullScore 空 → 暂无评分
    - 审查 SUCCESS → 总任务 SUCCESS 并写兼容 payload（checklistId / reviewId / reusedChecklist）；
      FAILED / OBSOLETE / 超时 → 整单失败

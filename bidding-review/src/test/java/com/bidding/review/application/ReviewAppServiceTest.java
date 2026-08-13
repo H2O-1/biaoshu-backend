@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -120,5 +121,63 @@ class ReviewAppServiceTest {
         verify(jobPort).insert(eq(2L), eq(100L), eq(JobPort.TYPE_REVIEW),
                 eq(JobPort.STATUS_PENDING), payloadCap.capture(), eq(9L));
         assertEquals(true, payloadCap.getValue().contains("\"reviewId\":201"));
+    }
+
+    @Test
+    void createSkipsBidPackageWithoutFiles() {
+        ProjectLookupPort.ProjectRef project = new ProjectLookupPort.ProjectRef();
+        project.setId(100L);
+        project.setOrgId(2L);
+        when(projectLookupPort.findActiveById(100L)).thenReturn(project);
+
+        RequirementChecklistPort.ChecklistDetail checklist =
+                new RequirementChecklistPort.ChecklistDetail();
+        checklist.setId(88L);
+        checklist.setOrgId(2L);
+        checklist.setProjectId(100L);
+        checklist.setStatus(RequirementChecklistPort.STATUS_SUCCESS);
+        RequirementChecklistPort.ItemView item = new RequirementChecklistPort.ItemView();
+        item.setId(1L);
+        item.setText("要求");
+        checklist.setItems(List.of(item));
+        when(checklistPort.findLatestSuccess(2L, 100L)).thenReturn(checklist);
+
+        PackageLookupPort.PackageRef withFile = new PackageLookupPort.PackageRef();
+        withFile.setId(80L);
+        withFile.setOrgId(2L);
+        withFile.setProjectId(100L);
+        withFile.setType("BID");
+        PackageLookupPort.PackageRef empty = new PackageLookupPort.PackageRef();
+        empty.setId(81L);
+        empty.setOrgId(2L);
+        empty.setProjectId(100L);
+        empty.setType("BID");
+        when(packageLookupPort.listActiveByProjectIdAndType(100L, "BID"))
+                .thenReturn(List.of(withFile, empty));
+
+        DocumentAccessPort.DocumentRef doc = new DocumentAccessPort.DocumentRef();
+        doc.setId(7L);
+        doc.setOrgId(2L);
+        doc.setProjectId(100L);
+        doc.setPackageId(80L);
+        doc.setIndexStatus(DocumentAccessPort.INDEX_SUCCESS);
+        when(documentAccessPort.listActiveByPackageId(80L)).thenReturn(List.of(doc));
+        when(documentAccessPort.listActiveByPackageId(81L)).thenReturn(List.of());
+
+        when(reviewPort.nextVersion(2L, 100L)).thenReturn(1);
+        when(reviewPort.createBuilding(
+                eq(2L), eq(100L), eq(88L), eq(1), anyString(), eq("review-v2"),
+                eq(30), eq(6), eq(9L))).thenReturn(201L);
+        when(jobPort.insert(eq(2L), eq(100L), eq(JobPort.TYPE_REVIEW),
+                eq(JobPort.STATUS_PENDING), anyString(), eq(9L))).thenReturn(301L);
+
+        service.create(100L, null, null);
+
+        ArgumentCaptor<String> packageIdsCap = ArgumentCaptor.forClass(String.class);
+        verify(reviewPort).createBuilding(
+                eq(2L), eq(100L), eq(88L), eq(1), packageIdsCap.capture(), eq("review-v2"),
+                eq(30), eq(6), eq(9L));
+        assertEquals("[80]", packageIdsCap.getValue());
+        assertTrue(!packageIdsCap.getValue().contains("81"));
     }
 }

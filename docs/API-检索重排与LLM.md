@@ -350,7 +350,7 @@
 #### 8.0.7 智能审查结果（REVIEW）
 
 审查创建入口已收敛到一键 AI 审查：`POST /api/projects/{projectId}/ai-reviews/run`。  
-`REVIEW` 是一键流程内部创建的子任务结果。基于某版 **SUCCESS** 清单，对选定 **投标包逐个**、对清单条目逐条：  
+`REVIEW` 是一键流程内部创建的子任务结果。基于某版 **SUCCESS** 清单，对有文件的 **投标包逐个**、对清单条目逐条：  
 投标侧召回（**仅 `bidSearchJson` 多词合并；无 bidSearch 则不召回**，资格→无法判断 / 评分→0）→ 用要求正文 **`text` 重排** → LLM 对照 → 落库。  
 `items` 数量 ≈ **投标包数 × 清单条目数**，每条必有 `packageId`。  
 **无项目级总判定**（`overallVerdict` 为 `null`）；符合/不符合由前端按包统计。无召回 → 该条 `FAIL`。
@@ -360,6 +360,8 @@
 `GET /api/projects/{projectId}/reviews` — 列表（按 version 降序）
 
 `GET /api/projects/{projectId}/reviews/{reviewId}` — 详情按投标包嵌套：`packages[]` 含 `supplier`、**整包**`suggestedScoreTotal`/`fullScoreTotal`、`qualificationResponses`、`scoringResponses`（含 `mainType`/`mainTypeLabel`、`title`/`content`/`subType`/`status` 或建议分、`judgement`、`bidEvidence`、`llmRawJson`）
+
+> 空投标包不参与审查，不会出现在详情 `packages[]` 中。
 
 配置：`REVIEW_*`、`LLM_REVIEW_PROMPT_VERSION`（默认 `review-v2`）；对照模型复用 `LLM_MODEL`。
 
@@ -375,7 +377,7 @@
 **前置**
 
 - 已绑招标包、至少一个投标包
-- 招标包 / 投标包下至少各有 1 个未删除文件
+- 招标包至少 1 个未删除文件；项目下全部投标包合计至少 1 个未删除文件
 - 同项目无进行中的一键审查任务（否则 **409**）
 
 **成功 `data`**
@@ -397,7 +399,7 @@
 
 - 向量化：`SUCCESS` 跳过；`PROCESSING` 等待不重复入队；`PENDING`/`FAILED` 入队；任一失败整单失败
 - 清单：有 SUCCESS 且有条目则复用，否则新建
-- 审查：由一键审查内部创建；全部投标包 × 清单条目全量审完；`items` 带 `packageId`；无项目级总判定
+- 审查：由一键审查内部创建；有文件的投标包 × 清单条目全量审完；空投标包跳过且不出现在 `packages[]`；`items` 带 `packageId`；无项目级总判定
 - 流程日志：`logs/ai.log`（Logger `ai.pipeline`）
 
 ---
@@ -436,7 +438,7 @@
 - LLM 默认模型 `qwen3.7-plus`（`LLM_MODEL`），复用 `DASHSCOPE_API_KEY`。
 
 ### 智能审查（REVIEW）
-- 基于某版 **SUCCESS** 清单；对每个投标包单独做召回→重排→LLM 对照（N×P）。
+- 基于某版 **SUCCESS** 清单；对每个有文件的投标包单独做召回→重排→LLM 对照（N×P），空投标包不参与。
 - **召回**：仅用条目 `bidSearchJson`（多词各自召回后按 chunk 合并）；**无 bidSearch 不召回、不调对照 LLM**（走无证据规则）。
 - **重排 / 对照**：query 与招标要求正文均用条目 **`text`**（对照 LLM 为 **review-v2** 产品输出）。
 - `bidEvidence` 落库前清洗：占位文案或不在候选原文中 → 丢弃；资格无证据 → `无法判断`；评分无证据 → 建议分 0。
@@ -444,7 +446,7 @@
 - 有对照的条目写入 `llm_raw_json`；详情 `items[].llmRawJson` 返回；无召回未调 LLM 则为空。
 - 无召回 / 无可用证据 → 该条 `FAIL`。
 - `needHumanReview` 默认 `true`。
-- 不传 `checklistId` → 取项目下最新 SUCCESS 清单；不传 `packageIds` → 该项目全部投标包。
+- 新建审查统一由一键审查总任务内部触发；空投标包会被跳过。
 - 详情扁平返回，前端按 `packageId` → `dimensionCode`/`mainType` 分组展示。
 
 ### 一键审查（AI_REVIEW_PIPELINE）
