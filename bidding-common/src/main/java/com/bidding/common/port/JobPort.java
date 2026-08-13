@@ -15,6 +15,8 @@ public interface JobPort {
     String TYPE_REVIEW = "REVIEW";
     /** 一键审查总流程：INDEX → 建清单 → REVIEW。 */
     String TYPE_AI_REVIEW_PIPELINE = "AI_REVIEW_PIPELINE";
+    /** 独立招标文件解析：INDEX → 基础信息 / 资格要求 / 评分标准抽取。 */
+    String TYPE_TENDER_ANALYSIS = "TENDER_ANALYSIS";
     String STATUS_PENDING = "PENDING";
     String STATUS_RUNNING = "RUNNING";
     String STATUS_SUCCESS = "SUCCESS";
@@ -45,6 +47,14 @@ public interface JobPort {
      * 认领一条 PENDING 任务；成功返回任务，无可用任务返回 empty。
      */
     Optional<JobRef> claimNextPending(String type, String workerId);
+
+    /**
+     * 认领一条 PENDING 或当前 Worker 已持有的 RUNNING 任务。
+     * <p>
+     * 用于轻量编排任务：每次轮询只检查一次状态，不 sleep；若仍需等待，保持 RUNNING，
+     * 下次由同一 workerId 继续检查。
+     */
+    Optional<JobRef> claimNextPendingOrOwnedRunning(String type, String workerId);
 
     /** 领取到期的流水线任务；过期租约可由其他实例接管。 */
     Optional<JobRef> claimNextRunnablePipeline(String type, String workerId, int leaseSeconds);

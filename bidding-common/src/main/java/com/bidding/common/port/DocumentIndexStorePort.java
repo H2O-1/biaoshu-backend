@@ -24,6 +24,11 @@ public interface DocumentIndexStorePort {
      */
     void deleteByDocumentId(long documentId);
 
+    /**
+     * 按本组织文档读取已生成的切块，供招标解析等后续 LLM 任务使用。
+     */
+    List<ChunkView> listChunksByDocumentIds(long orgId, List<Long> documentIds);
+
     /** 一条切块及其向量。 */
     class IndexedChunk {
         private int chunkIndex;
@@ -70,6 +75,64 @@ public interface DocumentIndexStorePort {
 
         public void setEmbedding(float[] embedding) {
             this.embedding = embedding;
+        }
+    }
+
+    /** 已落库切块视图。 */
+    class ChunkView {
+        private long chunkId;
+        private long documentId;
+        private String fileName;
+        private int chunkIndex;
+        private Integer pageNo;
+        private String content;
+
+        public long getChunkId() {
+            return chunkId;
+        }
+
+        public void setChunkId(long chunkId) {
+            this.chunkId = chunkId;
+        }
+
+        public long getDocumentId() {
+            return documentId;
+        }
+
+        public void setDocumentId(long documentId) {
+            this.documentId = documentId;
+        }
+
+        public String getFileName() {
+            return fileName;
+        }
+
+        public void setFileName(String fileName) {
+            this.fileName = fileName;
+        }
+
+        public int getChunkIndex() {
+            return chunkIndex;
+        }
+
+        public void setChunkIndex(int chunkIndex) {
+            this.chunkIndex = chunkIndex;
+        }
+
+        public Integer getPageNo() {
+            return pageNo;
+        }
+
+        public void setPageNo(Integer pageNo) {
+            this.pageNo = pageNo;
+        }
+
+        public String getContent() {
+            return content;
+        }
+
+        public void setContent(String content) {
+            this.content = content;
         }
     }
 }

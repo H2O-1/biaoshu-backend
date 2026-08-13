@@ -24,6 +24,25 @@ public class PackageCommandPortAdapter implements PackageCommandPort {
     }
 
     @Override
+    public long createUnboundTenderPackage(long orgId, String preferredName, long createdBy) {
+        String uniqueName = allocateUniqueName(orgId, PackageAppService.TYPE_TENDER, preferredName, "未命名招标解析");
+        return packageRepository.insert(
+                orgId,
+                null,
+                PackageAppService.TYPE_TENDER,
+                uniqueName,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                STATUS_ACTIVE,
+                createdBy
+        );
+    }
+
+    @Override
     public long createBoundBidPackage(long orgId,
                                       long projectId,
                                       String preferredName,
@@ -66,23 +85,38 @@ public class PackageCommandPortAdapter implements PackageCommandPort {
      * 投标公司名唯一：可用则原名；否则 原名_副本 / 原名_副本2…
      */
     static String allocateUniqueBidName(PackageRepository packageRepository, long orgId, String preferredName) {
+        return allocateUniqueName(
+                packageRepository, orgId, PackageAppService.TYPE_BID, preferredName, "未命名投标公司");
+    }
+
+    private String allocateUniqueBidName(long orgId, String preferredName) {
+        return allocateUniqueBidName(packageRepository, orgId, preferredName);
+    }
+
+    private String allocateUniqueName(long orgId, String type, String preferredName, String fallbackName) {
+        return allocateUniqueName(packageRepository, orgId, type, preferredName, fallbackName);
+    }
+
+    static String allocateUniqueName(PackageRepository packageRepository,
+                                     long orgId,
+                                     String type,
+                                     String preferredName,
+                                     String fallbackName) {
         String base = preferredName == null ? "" : preferredName.trim();
         if (base.isEmpty()) {
-            base = "未命名投标公司";
+            base = fallbackName;
         }
         if (base.length() > 128) {
             base = base.substring(0, 128);
         }
-        if (!packageRepository.existsByOrgIdAndTypeAndName(
-                orgId, PackageAppService.TYPE_BID, base, null)) {
+        if (!packageRepository.existsByOrgIdAndTypeAndName(orgId, type, base, null)) {
             return base;
         }
         String candidate = base + "_副本";
         if (candidate.length() > 128) {
             candidate = candidate.substring(0, 128);
         }
-        if (!packageRepository.existsByOrgIdAndTypeAndName(
-                orgId, PackageAppService.TYPE_BID, candidate, null)) {
+        if (!packageRepository.existsByOrgIdAndTypeAndName(orgId, type, candidate, null)) {
             return candidate;
         }
         int n = 2;
@@ -91,16 +125,11 @@ public class PackageCommandPortAdapter implements PackageCommandPort {
             if (candidate.length() > 128) {
                 candidate = candidate.substring(0, 128);
             }
-            if (!packageRepository.existsByOrgIdAndTypeAndName(
-                    orgId, PackageAppService.TYPE_BID, candidate, null)) {
+            if (!packageRepository.existsByOrgIdAndTypeAndName(orgId, type, candidate, null)) {
                 return candidate;
             }
             n++;
         }
-        throw new BizException(ErrorCode.CONFLICT, "无法生成不冲突的投标包名称");
-    }
-
-    private String allocateUniqueBidName(long orgId, String preferredName) {
-        return allocateUniqueBidName(packageRepository, orgId, preferredName);
+        throw new BizException(ErrorCode.CONFLICT, "无法生成不冲突的标包名称");
     }
 }

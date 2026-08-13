@@ -347,37 +347,15 @@
 
 配置：`CHECKLIST_*`（含 `CHECKLIST_BID_SEARCH_BATCH_SIZE`，默认 10）、`LLM_BASE_URL`、`LLM_MODEL`（默认 `qwen3.7-plus`）、`LLM_PROMPT_VERSION`（默认 `extract-artifact-v1`；复用 `DASHSCOPE_API_KEY`）。
 
-#### 8.0.7 智能审查（REVIEW）
+#### 8.0.7 智能审查结果（REVIEW）
 
-异步：基于某版 **SUCCESS** 清单，对选定 **投标包逐个**、对清单条目逐条：  
+审查创建入口已收敛到一键 AI 审查：`POST /api/projects/{projectId}/ai-reviews/run`。  
+`REVIEW` 是一键流程内部创建的子任务结果。基于某版 **SUCCESS** 清单，对选定 **投标包逐个**、对清单条目逐条：  
 投标侧召回（**仅 `bidSearchJson` 多词合并；无 bidSearch 则不召回**，资格→无法判断 / 评分→0）→ 用要求正文 **`text` 重排** → LLM 对照 → 落库。  
 `items` 数量 ≈ **投标包数 × 清单条目数**，每条必有 `packageId`。  
 **无项目级总判定**（`overallVerdict` 为 `null`）；符合/不符合由前端按包统计。无召回 → 该条 `FAIL`。
 
-`POST /api/projects/{projectId}/reviews`
-
-**请求体（均可选）**
-
-```json
-{
-  "checklistId": 88,
-  "packageIds": [80, 81]
-}
-```
-
-| 字段 | 说明 |
-|------|------|
-| checklistId | 可选；不传则用项目下最新 SUCCESS 清单 |
-| packageIds | 可选；须为本项目有效投标包；不传则用项目下全部投标包 |
-
-**成功 `data`**
-
-```json
-{ "reviewId": 201, "jobId": 301, "version": 1 }
-```
-
-前置：至少 1 份 SUCCESS 清单且有条目；选定投标包下至少 1 份文档 INDEX 成功。  
-进度：短轮询 `GET /api/jobs/{jobId}`，或 SSE `GET /api/jobs/{jobId}/events`；审查状态 `BUILDING` → `SUCCESS` / `FAILED`。
+> `POST /api/projects/{projectId}/reviews` 已废弃并从对外 API 移除；前端不要再调用分步创建审查。
 
 `GET /api/projects/{projectId}/reviews` — 列表（按 version 降序）
 
@@ -419,7 +397,7 @@
 
 - 向量化：`SUCCESS` 跳过；`PROCESSING` 等待不重复入队；`PENDING`/`FAILED` 入队；任一失败整单失败
 - 清单：有 SUCCESS 且有条目则复用，否则新建
-- 审查：全部投标包 × 清单条目全量审完；`items` 带 `packageId`；无项目级总判定
+- 审查：由一键审查内部创建；全部投标包 × 清单条目全量审完；`items` 带 `packageId`；无项目级总判定
 - 流程日志：`logs/ai.log`（Logger `ai.pipeline`）
 
 ---

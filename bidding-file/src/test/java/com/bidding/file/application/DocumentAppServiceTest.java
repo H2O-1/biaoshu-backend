@@ -243,6 +243,29 @@ class DocumentAppServiceTest {
     }
 
     @Test
+    void uploadTenderAnalysisFileStoresPassedFileTypeAndEnqueuesIndex() {
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "招标.pdf", "application/pdf", new byte[]{1, 2, 3});
+        when(documentRepository.countActiveByPackageId(50L)).thenReturn(0L);
+        when(documentRepository.insert(eq(2L), eq(null), eq(50L), eq("招标.pdf"),
+                eq("application/pdf"), eq("pdf"), eq("招标正文"), eq(3L), anyString(),
+                eq("PENDING"), eq("ACTIVE"), eq(10L))).thenReturn(1L);
+        when(documentIndexJobPort.enqueueIndex(2L, null, 1L, 10L)).thenReturn(1001L);
+
+        DocumentAppService.InternalUploadResult result =
+                documentAppService.uploadTenderAnalysisFile(2L, 50L, " 招标正文 ", file, 10L);
+
+        assertEquals(1L, result.getDocumentId());
+        assertEquals(1001L, result.getJobId());
+        assertEquals("招标.pdf", result.getFileName());
+        assertEquals("招标正文", result.getFileType());
+        verify(documentRepository).insert(eq(2L), eq(null), eq(50L), eq("招标.pdf"),
+                eq("application/pdf"), eq("pdf"), eq("招标正文"), eq(3L), anyString(),
+                eq("PENDING"), eq("ACTIVE"), eq(10L));
+        verify(documentIndexJobPort).enqueueIndex(2L, null, 1L, 10L);
+    }
+
+    @Test
     void platformAdminForbidden() {
         Set<String> roles = new HashSet<>();
         roles.add("PLATFORM_ADMIN");

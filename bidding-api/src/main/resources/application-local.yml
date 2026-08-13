@@ -30,5 +30,7 @@ bidding:
     worker-enabled: true
   review:
     worker-enabled: true
+  tender-analysis:
+    worker-enabled: true
   ai-review-pipeline:
     worker-enabled: true

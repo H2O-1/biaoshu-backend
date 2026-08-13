@@ -322,7 +322,7 @@ Authorization: Bearer <accessToken>
 
 | 字段 | 说明 |
 |------|------|
-| status | `ACTIVE` / `DISABLED` / `DELETED` |
+| status | `ACTIVE` / `DISABLED`；用户删除为物理删除，不再返回 `DELETED` 用户 |
 | mustChangePassword | 是否仍需强制改密 |
 | createdAt | 创建时间 |
 | updatedAt | 最近更新时间 |
@@ -571,11 +571,11 @@ Authorization: Bearer <accessToken>
 
 ---
 
-### 3.8 删除用户（逻辑删除）
+### 3.8 删除用户（物理删除）
 
 `DELETE /api/admin/users/{userId}`
 
-将 `status` 设为 `DELETED`，并吊销会话。系统至少保留一名平台管理员；若目标为末位超管则禁止删除。
+物理删除账号，并释放该账号占用的用户名、手机号、邮箱；删除后可重新创建相同用户名。系统至少保留一名平台管理员；若目标为末位超管则禁止删除。历史业务记录中的创建人 ID 快照不做级联删除。
 
 
 ## 4. 组织管理 Orgs（M1）
@@ -707,7 +707,7 @@ Authorization: Bearer <accessToken>
 | pendingConfigCount | 全量待配置：未删除且下属无未删除账号的组织数（不受筛选影响） |
 | code | 系统自动生成，创建后不可改 |
 | name | 公司名称，可编辑；全局未删除唯一 |
-| status | 库内可为 `ACTIVE` / `DISABLED` / `DELETED`；列表与详情不返回已删 |
+| status | 库内可为 `ACTIVE` / `DISABLED`；用户删除为物理删除，列表与详情不返回已删 |
 | userCount | 组织下未删除用户数 |
 | projectCount | 组织下未删除项目数 |
 | tenderPackageCount | 未删除招标包数量 |
@@ -1274,6 +1274,7 @@ Authorization: Bearer <accessToken>
 - 创建平台管理员：固定挂 **SYSTEM** 组织、角色固定 `PLATFORM_ADMIN`；手机/邮箱为 `null`；`created_by` 记当前操作人。
 - 超管全局唯一：仅现任超管可授予/摘除 `PLATFORM_SUPER_ADMIN`；授予时自动附带 `PLATFORM_ADMIN`，并摘掉原超管角色且 bump 其会话。
 - 至少保留一名有效平台管理员、一名超管；停用/删除/改角色时后端拦截。
+- 删除用户为物理删除，会释放用户名、手机号、邮箱；删除后可重新创建相同用户名。
 - 平台方列表 `GET /api/admin/platform-admins` 按角色过滤（普管或超管），支持 `status`；返回 `activeCount` / `disabledCount` 为全量统计；**不是**通用用户列表加参数。
 
 ### 组织

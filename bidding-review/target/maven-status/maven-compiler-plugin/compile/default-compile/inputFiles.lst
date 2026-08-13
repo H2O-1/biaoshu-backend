@@ -6,6 +6,7 @@ D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\re
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\adapter\web\RerankDebugController.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\adapter\web\ReviewController.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\adapter\web\ReviewDimensionController.java
+D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\adapter\web\TenderAnalysisController.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\AiReviewPipelineAppService.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\AiReviewPipelineJobExecutor.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\BuildChecklistJobExecutor.java
@@ -21,6 +22,8 @@ D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\re
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\ReviewComparePipeline.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\ReviewDimensionAppService.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\ReviewJobExecutor.java
+D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\TenderAnalysisAppService.java
+D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\TenderAnalysisJobExecutor.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\logging\AiPipelineLog.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\persistence\BidPackageReviewSummaryPortAdapter.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\persistence\JdbcDocumentIndexStore.java
@@ -28,6 +31,7 @@ D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\re
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\persistence\JdbcRequirementChecklistStore.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\persistence\JdbcReviewDimensionStore.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\persistence\JdbcReviewStore.java
+D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\persistence\JdbcTenderAnalysisStore.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\persistence\ProjectArtifactInvalidationPortAdapter.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\persistence\ProjectReviewProgressPortAdapter.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\persistence\ReviewStatusCountPortAdapter.java
@@ -42,4 +46,5 @@ D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\re
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\worker\IndexJobPoller.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\worker\ReviewJobPoller.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\worker\StaleAiWorkRecovery.java
+D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\worker\TenderAnalysisJobPoller.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\package-info.java

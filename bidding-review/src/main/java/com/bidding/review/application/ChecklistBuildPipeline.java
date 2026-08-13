@@ -232,6 +232,73 @@ public class ChecklistBuildPipeline {
     }
 
     /**
+     * 招标解析专用入口：本次文档切块已确定时，跳过项目维度召回，直接复用 A/B/C/D 抽取链路。
+     */
+    public PipelineResult buildFromRankedChunks(List<VectorRecallPort.RecallHit> ranked,
+                                                ProgressCallback progress) {
+        long tAll = System.currentTimeMillis();
+        if (ranked == null || ranked.isEmpty()) {
+            return emptyResult();
+        }
+
+        if (progress != null) {
+            progress.onProgress(65, "资格要求和评分标准抽取中");
+        }
+        String chunksText = formatChunks(ranked);
+        long t0 = System.currentTimeMillis();
+        LlmExtractBundle bundle = extractWithLlm(chunksText);
+        long llmMs = System.currentTimeMillis() - t0;
+
+        Map<Long, Boolean> allowedChunk = new LinkedHashMap<>();
+        for (int i = 0; i < ranked.size(); i++) {
+            allowedChunk.put(ranked.get(i).getChunkId(), Boolean.TRUE);
+        }
+
+        List<RequirementChecklistPort.ItemDraft> all = new ArrayList<>();
+        List<LlmPort.ExtractedRequirement> extracted = bundle.items;
+        if (extracted != null) {
+            for (int i = 0; i < extracted.size(); i++) {
+                RequirementChecklistPort.ItemDraft draft =
+                        toDraft(extracted.get(i), allowedChunk, all.size());
+                if (draft != null) {
+                    all.add(draft);
+                }
+            }
+        }
+
+        List<RequirementChecklistPort.ItemDraft> deduped = dedupeByNormalizedText(all);
+        assignRequirementCodes(deduped);
+        for (int i = 0; i < deduped.size(); i++) {
+            deduped.get(i).setSortOrder(i);
+        }
+
+        String llmRaw = bundle.rawJson;
+        long bidSearchMs = 0L;
+        long evidenceMs = 0L;
+        if (!deduped.isEmpty()) {
+            if (progress != null) {
+                progress.onProgress(80, "生成条目检索词和原文证据中 count=" + deduped.size());
+            }
+            long t1 = System.currentTimeMillis();
+            String bidSearchRaw = attachBidSearch(deduped);
+            bidSearchMs = System.currentTimeMillis() - t1;
+            t1 = System.currentTimeMillis();
+            String evidenceRaw = attachEvidence(deduped, ranked);
+            evidenceMs = System.currentTimeMillis() - t1;
+            llmRaw = appendLlmPartRaw(llmRaw, "bidSearch", bidSearchRaw);
+            llmRaw = appendLlmPartRaw(llmRaw, "evidence", evidenceRaw);
+        }
+
+        log.info("招标解析清单抽取完成 chunks={} extracted={} llmMs={} bidSearchMs={} evidenceMs={} totalMs={}",
+                ranked.size(), deduped.size(), llmMs, bidSearchMs, evidenceMs,
+                System.currentTimeMillis() - tAll);
+        PipelineResult result = new PipelineResult();
+        result.setItems(deduped);
+        result.setLlmRawJson(llmRaw);
+        return result;
+    }
+
+    /**
      * 调试：只执行建清单阶段的多维召回，使用与正式建清单一致的召回词收集、
      * 混合召回和合并排序逻辑。
      */

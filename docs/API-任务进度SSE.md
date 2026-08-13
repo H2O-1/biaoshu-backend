@@ -243,7 +243,6 @@ SSE 为长连接，反代注意：
 |----------|--------------------------------|----------|
 | 文档索引 | `POST /api/packages/{packageId}/files/{documentId}/index` | 本册 SSE 或短轮询 |
 | 建清单 | `POST /api/projects/{projectId}/checklists` | 同上 |
-| 智能审查 | `POST /api/projects/{projectId}/reviews` | 同上 |
 | 一键审查 | `POST /api/projects/{projectId}/ai-reviews/run` | 同上；成功后可读 `checklistId`/`reviewId` |
 | 项目详情续查 | 项目上的 `aiReviewJobId` 等字段 | 用该 id 调本册接口 |
 

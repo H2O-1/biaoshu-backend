@@ -147,13 +147,12 @@ Authorization: Bearer <accessToken>
 | 位置         | 参数        | 类型 | 必填 | 说明                                                              |
 | ------------ | ----------- | ---- | ---- | ----------------------------------------------------------------- |
 | path         | `projectId` | long | 是   | 项目 id                                                           |
-| path         | `reviewId`  | long | 是   | 一键审查成功后的 `data.reviewId`，或分步创建审查返回的 `reviewId` |
+| path         | `reviewId`  | long | 是   | 一键审查成功后的 `data.reviewId` |
 | body / query | —           | —    | —    | **无请求体、无 query**                                            |
 
 角色：`TENDERER`；跨组织 / 审查不存在 → `40400`。
 
-> 若走分步接口自行创建审查（非一键）：`POST /api/projects/{projectId}/reviews`，body 可选  
-> `{ "checklistId": 88, "packageIds": [80, 81] }`（均省略则用最新成功清单 + 项目下全部投标包）。
+> `POST /api/projects/{projectId}/reviews` 分步创建审查接口已移除；新建审查统一走一键审查入口。
 
 ### 4.2 出参总览
 
@@ -488,7 +487,7 @@ INDEX_SUBMIT → INDEX_WAIT → CHECKLIST_SUBMIT → CHECKLIST_WAIT
      FAILED / OBSOLETE / 超时 → 整单失败
 ```
 
-前端**不必**再单独调 index / checklists / reviews（仍保留原接口供调试或分步用）。
+前端**不必**再单独调 index / checklists；新建审查统一走一键审查入口。
 
 ## 日志：`logs/ai.log`
 

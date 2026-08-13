@@ -99,6 +99,11 @@ bidding:
     worker-id: ${REVIEW_WORKER_ID:}
     recall-top-k: ${REVIEW_RECALL_TOP_K:30}
     rerank-top-n: ${REVIEW_RERANK_TOP_N:15}
+  # 招标解析 TENDER_ANALYSIS（本进程写死开启，原因同 index.worker-enabled）
+  tender-analysis:
+    worker-enabled: true
+    poll-ms: ${TENDER_ANALYSIS_POLL_MS:3000}
+    worker-id: ${TENDER_ANALYSIS_WORKER_ID:}
   # 一键审查总流程（本进程写死开启，原因同 index.worker-enabled）
   ai-review-pipeline:
     worker-enabled: true

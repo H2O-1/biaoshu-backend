@@ -6,6 +6,7 @@ com\bidding\file\application\DocumentAppService$DocumentSummary.class
 com\bidding\file\application\DocumentAppService$TenderCopyResult.class
 com\bidding\file\adapter\web\ProjectTenderFileController.class
 com\bidding\file\application\DocumentAppService$TenderCopySource.class
+com\bidding\file\application\DocumentAppService$StoredDocument.class
 com\bidding\file\infrastructure\persistence\DocumentIndexCountPortAdapter.class
 com\bidding\file\application\DocumentAppService$BidCopySourceProject.class
 com\bidding\file\infrastructure\persistence\DocumentProjectBindPortAdapter.class
@@ -15,7 +16,9 @@ com\bidding\file\infrastructure\storage\S3ObjectStorage.class
 com\bidding\file\infrastructure\persistence\DocumentCountPortAdapter.class
 com\bidding\file\infrastructure\storage\InMemoryObjectStorage.class
 com\bidding\file\application\DocumentAppService$FileContent.class
+com\bidding\file\application\DocumentAppService$InternalUploadResult.class
 com\bidding\file\infrastructure\persistence\JdbcDocumentRepository.class
+com\bidding\file\infrastructure\port\TenderAnalysisDocumentCommandPortAdapter.class
 com\bidding\file\domain\model\Document.class
 com\bidding\file\application\DocumentAppService$BidCopySourcePackage.class
 com\bidding\file\adapter\web\DocumentController.class

@@ -8,8 +8,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.math.BigDecimal;
@@ -35,25 +33,6 @@ public class ReviewController {
         this.reviewAppService = reviewAppService;
         this.packageLookupPort = packageLookupPort;
         this.objectMapper = objectMapper;
-    }
-
-    @PostMapping("/api/projects/{projectId}/reviews")
-    public ApiResponse<CreateResponse> create(
-            @PathVariable("projectId") long projectId,
-            @RequestBody(required = false) CreateRequest request) {
-        Long checklistId = null;
-        List<Long> packageIds = null;
-        if (request != null) {
-            checklistId = request.getChecklistId();
-            packageIds = request.getPackageIds();
-        }
-        ReviewAppService.CreateResult created =
-                reviewAppService.create(projectId, checklistId, packageIds);
-        CreateResponse resp = new CreateResponse();
-        resp.setReviewId(created.getReviewId());
-        resp.setJobId(created.getJobId());
-        resp.setVersion(created.getVersion());
-        return ApiResponse.ok(resp);
     }
 
     @GetMapping("/api/projects/{projectId}/reviews")
@@ -328,57 +307,6 @@ public class ReviewController {
             // 非法 JSON 返回空
         }
         return list;
-    }
-
-    public static class CreateRequest {
-        private Long checklistId;
-        private List<Long> packageIds;
-
-        public Long getChecklistId() {
-            return checklistId;
-        }
-
-        public void setChecklistId(Long checklistId) {
-            this.checklistId = checklistId;
-        }
-
-        public List<Long> getPackageIds() {
-            return packageIds;
-        }
-
-        public void setPackageIds(List<Long> packageIds) {
-            this.packageIds = packageIds;
-        }
-    }
-
-    public static class CreateResponse {
-        private long reviewId;
-        private long jobId;
-        private int version;
-
-        public long getReviewId() {
-            return reviewId;
-        }
-
-        public void setReviewId(long reviewId) {
-            this.reviewId = reviewId;
-        }
-
-        public long getJobId() {
-            return jobId;
-        }
-
-        public void setJobId(long jobId) {
-            this.jobId = jobId;
-        }
-
-        public int getVersion() {
-            return version;
-        }
-
-        public void setVersion(int version) {
-            this.version = version;
-        }
     }
 
     public static class ReviewSummaryDto {
