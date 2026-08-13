@@ -125,7 +125,7 @@ public class AdminUserController {
         return ApiResponse.ok(adminUserAppService.updateStatus(userId, request.getStatus()));
     }
 
-    /** 逻辑删除账号 */
+    /** 物理删除账号 */
     @DeleteMapping("/users/{userId}")
     public ApiResponse<Void> deleteUser(@PathVariable("userId") long userId) {
         adminUserAppService.deleteUser(userId);

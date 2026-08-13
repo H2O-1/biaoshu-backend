@@ -413,6 +413,11 @@ public class JdbcUserRepository implements UserRepository {
     }
 
     @Override
+    public void deleteById(long userId) {
+        jdbcTemplate.update("DELETE FROM sys_user WHERE id = ?", userId);
+    }
+
+    @Override
     public List<Role> listRoles() {
         return jdbcTemplate.query(
                 "SELECT code, name FROM sys_role ORDER BY code",

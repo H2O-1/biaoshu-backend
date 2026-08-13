@@ -462,6 +462,33 @@ class AdminUserAppServiceTest {
         verify(userRepository).bumpTokenVersion(9L);
     }
 
+    @Test
+    void deleteUserPhysicallyDeletesAccount() {
+        Set<String> roles = new HashSet<>();
+        roles.add(RoleCode.BIDDER.name());
+        when(userRepository.findById(9L)).thenReturn(Optional.of(user(9L, roles)));
+
+        adminUserAppService.deleteUser(9L);
+
+        verify(userRepository).deleteById(9L);
+        verify(userRepository, never()).updateStatus(eq(9L), eq("DELETED"));
+        verify(userRepository, never()).bumpTokenVersion(9L);
+    }
+
+    @Test
+    void deleteUserRejectLastPlatformAdmin() {
+        Set<String> roles = new HashSet<>();
+        roles.add(RoleCode.PLATFORM_ADMIN.name());
+        when(userRepository.findById(9L)).thenReturn(Optional.of(user(9L, roles)));
+        when(userRepository.countDistinctActiveUsersWithAnyRole(any())).thenReturn(1L);
+
+        BizException ex = assertThrows(BizException.class,
+                () -> adminUserAppService.deleteUser(9L));
+
+        assertEquals(ErrorCode.CONFLICT, ex.errorCode());
+        verify(userRepository, never()).deleteById(anyLong());
+    }
+
     private static UserAccount user(long id, Set<String> roles) {
         return new UserAccount(id, 1L, "u" + id, "hash", "用户" + id,
                 "1390000000" + (id % 10), "u" + id + "@example.com",

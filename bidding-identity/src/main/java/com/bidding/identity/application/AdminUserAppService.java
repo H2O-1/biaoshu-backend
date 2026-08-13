@@ -26,7 +26,7 @@ import java.util.regex.Pattern;
 import java.time.Instant;
 
 /**
- * 平台管理员业务：查角色、查用户、创建用户、改角色、重置密码、停用/删除。
+ * 平台管理员业务：查角色、查用户、创建用户、改角色、重置密码、停用/物理删除。
  */
 @Service
 public class AdminUserAppService {
@@ -360,21 +360,17 @@ public class AdminUserAppService {
     }
 
     /**
-     * 逻辑删除：status=DELETED，并吊销会话。
+     * 物理删除账号：释放用户名、手机号、邮箱；历史业务记录保留创建人 ID 快照。
      */
     @Transactional
     public void deleteUser(long userId) {
         checkPlatformAdmin();
         UserAccount target = requireUser(userId);
 
-        if (STATUS_DELETED.equalsIgnoreCase(target.getStatus())) {
-            return;
-        }
         ensureNotLastPlatformAdmin(target);
         ensureNotLastSuperAdmin(target);
 
-        userRepository.updateStatus(userId, STATUS_DELETED);
-        userRepository.bumpTokenVersion(userId);
+        userRepository.deleteById(userId);
     }
 
     private void ensureNotLastPlatformAdmin(UserAccount target) {

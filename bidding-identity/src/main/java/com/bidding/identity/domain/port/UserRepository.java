@@ -94,5 +94,10 @@ public interface UserRepository {
 
     void updateStatus(long userId, String status);
 
+    /**
+     * 物理删除用户；角色关联由数据库外键级联删除。
+     */
+    void deleteById(long userId);
+
     List<Role> listRoles();
 }
