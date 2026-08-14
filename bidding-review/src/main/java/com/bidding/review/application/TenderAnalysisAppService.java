@@ -16,6 +16,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * 招标解析应用服务：独立招标文件解析创建与查询。
@@ -111,16 +112,17 @@ public class TenderAnalysisAppService {
      * 查询本组织招标解析历史记录。
      */
     @Transactional(readOnly = true)
-    public PageResult<TenderAnalysisPort.AnalysisSummary> list(String keyword, int page, int size) {
+    public PageResult<TenderAnalysisPort.AnalysisSummary> list(String keyword, String status, int page, int size) {
         CurrentUser operator = TendererAuth.requireTenderer("仅招标方可操作招标解析");
         int safePage = Math.max(page, 1);
         int safeSize = Math.min(Math.max(size, 1), 100);
         int offset = (safePage - 1) * safeSize;
         String kw = keyword == null ? "" : keyword.trim();
+        String safeStatus = normalizeListStatus(status);
 
         List<TenderAnalysisPort.AnalysisSummary> items =
-                tenderAnalysisPort.listByOrg(operator.getOrgId(), kw, offset, safeSize);
-        long total = tenderAnalysisPort.countByOrg(operator.getOrgId(), kw);
+                tenderAnalysisPort.listByOrg(operator.getOrgId(), kw, safeStatus, offset, safeSize);
+        long total = tenderAnalysisPort.countByOrg(operator.getOrgId(), kw, safeStatus);
         return new PageResult<>(items, total, safePage, safeSize);
     }
 
@@ -170,6 +172,19 @@ public class TenderAnalysisAppService {
             result.add(new UploadFileCommand(file, fileType));
         }
         return result;
+    }
+
+    private String normalizeListStatus(String status) {
+        if (status == null || status.trim().isEmpty()) {
+            return "";
+        }
+        String normalized = status.trim().toUpperCase(Locale.ROOT);
+        if (TenderAnalysisPort.STATUS_BUILDING.equals(normalized)
+                || TenderAnalysisPort.STATUS_SUCCESS.equals(normalized)
+                || TenderAnalysisPort.STATUS_FAILED.equals(normalized)) {
+            return normalized;
+        }
+        throw new BizException(ErrorCode.BAD_REQUEST, "status 仅支持 BUILDING / SUCCESS / FAILED");
     }
 
     private String normalizeFileType(String fileType) {

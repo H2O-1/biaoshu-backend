@@ -165,8 +165,9 @@ public class JdbcTenderAnalysisStore implements TenderAnalysisPort {
 
     @Override
     @Transactional(readOnly = true)
-    public List<AnalysisSummary> listByOrg(long orgId, String keyword, int offset, int limit) {
+    public List<AnalysisSummary> listByOrg(long orgId, String keyword, String status, int offset, int limit) {
         String kw = normalizeKeyword(keyword);
+        String safeStatus = normalizeKeyword(status);
         int safeOffset = Math.max(offset, 0);
         int safeLimit = Math.max(limit, 1);
         List<Object> args = new ArrayList<>();
@@ -176,6 +177,7 @@ public class JdbcTenderAnalysisStore implements TenderAnalysisPort {
                 .append(" FROM biz_tender_analysis WHERE org_id = ? AND status <> '")
                 .append(STATUS_OBSOLETE)
                 .append("'");
+        appendStatus(sql, args, safeStatus);
         appendKeyword(sql, args, kw);
         sql.append(" ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?");
         args.add(safeLimit);
@@ -185,14 +187,16 @@ public class JdbcTenderAnalysisStore implements TenderAnalysisPort {
 
     @Override
     @Transactional(readOnly = true)
-    public long countByOrg(long orgId, String keyword) {
+    public long countByOrg(long orgId, String keyword, String status) {
         String kw = normalizeKeyword(keyword);
+        String safeStatus = normalizeKeyword(status);
         List<Object> args = new ArrayList<>();
         args.add(orgId);
         StringBuilder sql = new StringBuilder();
         sql.append("SELECT COUNT(1) FROM biz_tender_analysis WHERE org_id = ? AND status <> '")
                 .append(STATUS_OBSOLETE)
                 .append("'");
+        appendStatus(sql, args, safeStatus);
         appendKeyword(sql, args, kw);
         Long count = jdbcTemplate.queryForObject(sql.toString(), Long.class, args.toArray());
         return count == null ? 0 : count;
@@ -255,6 +259,14 @@ public class JdbcTenderAnalysisStore implements TenderAnalysisPort {
         args.add(pattern);
         args.add(pattern);
         args.add(pattern);
+    }
+
+    private static void appendStatus(StringBuilder sql, List<Object> args, String status) {
+        if (status == null || status.isEmpty()) {
+            return;
+        }
+        sql.append(" AND status = ?");
+        args.add(status);
     }
 
     private AnalysisSummary mapSummary(ResultSet rs) throws SQLException {

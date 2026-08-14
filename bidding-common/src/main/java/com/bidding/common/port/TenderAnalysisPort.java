@@ -63,12 +63,12 @@ public interface TenderAnalysisPort {
     /**
      * 按组织分页查询历史记录。
      */
-    List<AnalysisSummary> listByOrg(long orgId, String keyword, int offset, int limit);
+    List<AnalysisSummary> listByOrg(long orgId, String keyword, String status, int offset, int limit);
 
     /**
      * 按组织统计历史记录数量。
      */
-    long countByOrg(long orgId, String keyword);
+    long countByOrg(long orgId, String keyword, String status);
 
     /**
      * 按组织查询主记录；不存在或不属于该组织返回 null。

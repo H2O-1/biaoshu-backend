@@ -4,16 +4,55 @@ import com.bidding.common.port.TenderAnalysisPort;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class JdbcTenderAnalysisStoreTest {
+
+    @Test
+    void listAndCountApplyStatusFilter() {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        @SuppressWarnings("unchecked")
+        List<TenderAnalysisPort.AnalysisSummary> empty = new ArrayList<>();
+        when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(Object[].class)))
+                .thenReturn(empty);
+        when(jdbcTemplate.queryForObject(anyString(), eq(Long.class), any(Object[].class)))
+                .thenReturn(0L);
+        JdbcTenderAnalysisStore store = new JdbcTenderAnalysisStore(jdbcTemplate);
+
+        store.listByOrg(2L, "", TenderAnalysisPort.STATUS_FAILED, 20, 10);
+        store.countByOrg(2L, "", TenderAnalysisPort.STATUS_FAILED);
+
+        ArgumentCaptor<String> listSql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> listArgs = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(listSql.capture(), any(RowMapper.class), listArgs.capture());
+        assertTrue(listSql.getValue().contains("status <> 'OBSOLETE'"));
+        assertTrue(listSql.getValue().contains("AND status = ?"));
+        assertEquals(2L, listArgs.getValue()[0]);
+        assertEquals(TenderAnalysisPort.STATUS_FAILED, listArgs.getValue()[1]);
+        assertEquals(10, listArgs.getValue()[2]);
+        assertEquals(20, listArgs.getValue()[3]);
+
+        ArgumentCaptor<String> countSql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> countArgs = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).queryForObject(countSql.capture(), eq(Long.class), countArgs.capture());
+        assertTrue(countSql.getValue().contains("status <> 'OBSOLETE'"));
+        assertTrue(countSql.getValue().contains("AND status = ?"));
+        assertEquals(2L, countArgs.getValue()[0]);
+        assertEquals(TenderAnalysisPort.STATUS_FAILED, countArgs.getValue()[1]);
+    }
 
     @Test
     void insertItemsStoresLogicIssueAndTypoItemTypes() {

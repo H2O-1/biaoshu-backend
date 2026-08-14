@@ -58,10 +58,11 @@ public class TenderAnalysisController {
     @GetMapping
     public ApiResponse<PageResult<AnalysisSummaryDto>> list(
             @RequestParam(required = false, defaultValue = "") String keyword,
+            @RequestParam(required = false, defaultValue = "") String status,
             @RequestParam(required = false, defaultValue = "1") int page,
             @RequestParam(required = false, defaultValue = "20") int size) {
         PageResult<TenderAnalysisPort.AnalysisSummary> result =
-                tenderAnalysisAppService.list(keyword, page, size);
+                tenderAnalysisAppService.list(keyword, status, page, size);
         List<AnalysisSummaryDto> items = new ArrayList<>();
         for (TenderAnalysisPort.AnalysisSummary item : result.getItems()) {
             items.add(toSummaryDto(item));
@@ -166,13 +167,131 @@ public class TenderAnalysisController {
         dto.setSourceExcerpt(item.getSourceExcerpt());
         dto.setPageNo(item.getPageNo());
         dto.setChunkIds(parseLongArray(item.getChunkIdsJson()));
-        dto.setEvidence(parseJsonArray(item.getEvidenceJson()));
+        JsonNode evidence = parseJsonArray(item.getEvidenceJson());
+        dto.setEvidence(evidence);
+        applyDisplayFields(dto, evidence);
         dto.setScoreTotal(item.getScoreTotal());
         dto.setScoreParts(parseJsonArray(item.getScorePartsJson()));
         dto.setScoreSumMatches(item.getScoreSumMatches());
         dto.setSortOrder(item.getSortOrder());
         dto.setCreatedAt(item.getCreatedAt());
         return dto;
+    }
+
+    private void applyDisplayFields(AnalysisItemDto dto, JsonNode evidence) {
+        if (dto == null) {
+            return;
+        }
+        JsonNode first = firstEvidence(evidence);
+        if (TenderAnalysisPort.ITEM_LOGIC_ISSUE.equals(dto.getItemType())) {
+            String severity = upperText(textOf(first, "severity"));
+            dto.setSeverity(severity);
+            dto.setSeverityLabel(severityLabel(severity));
+            String issueType = upperText(firstNonBlank(textOf(first, "issueType"), dto.getSubType()));
+            dto.setIssueType(issueType);
+            dto.setIssueTypeLabel(issueTypeLabel(issueType, dto.getItemType()));
+            dto.setSuggestion(textOf(first, "suggestion"));
+        } else if (TenderAnalysisPort.ITEM_TYPO.equals(dto.getItemType())) {
+            String severity = upperText(firstNonBlank(textOf(first, "severity"), "LOW"));
+            dto.setSeverity(severity);
+            dto.setSeverityLabel(severityLabel(severity));
+            dto.setIssueType(TenderAnalysisPort.ITEM_TYPO);
+            dto.setIssueTypeLabel("错别字");
+            dto.setWrongText(textOf(first, "wrongText"));
+            dto.setSuggestedText(textOf(first, "suggestedText"));
+            String confidence = upperText(textOf(first, "confidence"));
+            dto.setConfidence(confidence);
+            dto.setConfidenceLabel(confidenceLabel(confidence));
+            dto.setSuggestion(textOf(first, "suggestion"));
+        }
+    }
+
+    private JsonNode firstEvidence(JsonNode evidence) {
+        if (evidence == null || !evidence.isArray() || evidence.isEmpty()) {
+            return null;
+        }
+        JsonNode first = evidence.get(0);
+        return first != null && first.isObject() ? first : null;
+    }
+
+    private String textOf(JsonNode node, String field) {
+        if (node == null || field == null) {
+            return null;
+        }
+        JsonNode value = node.get(field);
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        String text = value.asText();
+        if (text == null || text.trim().isEmpty()) {
+            return null;
+        }
+        return text.trim();
+    }
+
+    private String firstNonBlank(String first, String second) {
+        return first == null || first.trim().isEmpty() ? second : first;
+    }
+
+    private String upperText(String value) {
+        if (value == null || value.trim().isEmpty()) {
+            return null;
+        }
+        return value.trim().toUpperCase(java.util.Locale.ROOT).replace('-', '_').replace(' ', '_');
+    }
+
+    private String severityLabel(String severity) {
+        if ("HIGH".equals(severity)) {
+            return "高风险";
+        }
+        if ("MEDIUM".equals(severity)) {
+            return "中风险";
+        }
+        if ("LOW".equals(severity)) {
+            return "低风险";
+        }
+        return null;
+    }
+
+    private String confidenceLabel(String confidence) {
+        if ("HIGH".equals(confidence)) {
+            return "高置信";
+        }
+        if ("MEDIUM".equals(confidence)) {
+            return "中置信";
+        }
+        if ("LOW".equals(confidence)) {
+            return "低置信";
+        }
+        return null;
+    }
+
+    private String issueTypeLabel(String issueType, String itemType) {
+        if (TenderAnalysisPort.ITEM_TYPO.equals(itemType)) {
+            return "错别字";
+        }
+        if ("AMOUNT_INCONSISTENCY".equals(issueType)) {
+            return "金额逻辑";
+        }
+        if ("TIME_CONFLICT".equals(issueType)) {
+            return "时间冲突";
+        }
+        if ("SCORE_SUM_MISMATCH".equals(issueType)) {
+            return "评分分值逻辑";
+        }
+        if ("TERM_INCONSISTENCY".equals(issueType)) {
+            return "术语前后一致性";
+        }
+        if ("THRESHOLD_INCONSISTENCY".equals(issueType)) {
+            return "门槛条件逻辑";
+        }
+        if ("QUALIFICATION_REJECT_LOGIC".equals(issueType)) {
+            return "资格与废标逻辑";
+        }
+        if ("OTHER".equals(issueType)) {
+            return "逻辑问题";
+        }
+        return issueType == null ? null : "逻辑问题";
     }
 
     private List<Long> parseLongArray(String json) {
@@ -590,6 +709,15 @@ public class TenderAnalysisController {
         private BigDecimal scoreTotal;
         private JsonNode scoreParts;
         private Boolean scoreSumMatches;
+        private String severity;
+        private String severityLabel;
+        private String issueType;
+        private String issueTypeLabel;
+        private String suggestion;
+        private String wrongText;
+        private String suggestedText;
+        private String confidence;
+        private String confidenceLabel;
         private int sortOrder;
         private Instant createdAt;
 
@@ -703,6 +831,78 @@ public class TenderAnalysisController {
 
         public void setScoreSumMatches(Boolean scoreSumMatches) {
             this.scoreSumMatches = scoreSumMatches;
+        }
+
+        public String getSeverity() {
+            return severity;
+        }
+
+        public void setSeverity(String severity) {
+            this.severity = severity;
+        }
+
+        public String getSeverityLabel() {
+            return severityLabel;
+        }
+
+        public void setSeverityLabel(String severityLabel) {
+            this.severityLabel = severityLabel;
+        }
+
+        public String getIssueType() {
+            return issueType;
+        }
+
+        public void setIssueType(String issueType) {
+            this.issueType = issueType;
+        }
+
+        public String getIssueTypeLabel() {
+            return issueTypeLabel;
+        }
+
+        public void setIssueTypeLabel(String issueTypeLabel) {
+            this.issueTypeLabel = issueTypeLabel;
+        }
+
+        public String getSuggestion() {
+            return suggestion;
+        }
+
+        public void setSuggestion(String suggestion) {
+            this.suggestion = suggestion;
+        }
+
+        public String getWrongText() {
+            return wrongText;
+        }
+
+        public void setWrongText(String wrongText) {
+            this.wrongText = wrongText;
+        }
+
+        public String getSuggestedText() {
+            return suggestedText;
+        }
+
+        public void setSuggestedText(String suggestedText) {
+            this.suggestedText = suggestedText;
+        }
+
+        public String getConfidence() {
+            return confidence;
+        }
+
+        public void setConfidence(String confidence) {
+            this.confidence = confidence;
+        }
+
+        public String getConfidenceLabel() {
+            return confidenceLabel;
+        }
+
+        public void setConfidenceLabel(String confidenceLabel) {
+            this.confidenceLabel = confidenceLabel;
         }
 
         public int getSortOrder() {

@@ -122,7 +122,7 @@
 
 ### 3.2 历史记录
 
-`GET /api/tender-analyses?page=1&size=20&keyword=`
+`GET /api/tender-analyses?page=1&size=20&keyword=&status=`
 
 查询当前登录招标方组织下的招标解析历史记录。按创建时间倒序返回。
 
@@ -131,6 +131,7 @@
 | 参数 | 类型 | 必填 | 默认 | 说明 |
 |------|------|------|------|------|
 | `keyword` | string | 否 | `""` | 按任务名称 / 招标人 / 招标代理模糊搜 |
+| `status` | string | 否 | `""` | 解析状态过滤；空=全部，支持 `BUILDING` / `SUCCESS` / `FAILED` |
 | `page` | number | 否 | 1 | 页码，从 1 起 |
 | `size` | number | 否 | 20 | 每页条数，最大 100 |
 
@@ -173,12 +174,14 @@
 |------|------|
 | `documentIds` | 参与解析的招标文档 ID 数组 |
 | `fileCount` | 由 `documentIds` 数组长度派生 |
+| `status` | 解析状态：`BUILDING` 解析中 / `SUCCESS` 解析完成 / `FAILED` 解析失败 |
 | `jobId` | 解析任务 ID；`BUILDING` 时可用于查询进度 |
 
 **常见错误**
 
 | code | 场景 |
 |------|------|
+| 40000 | `status` 不在 `BUILDING` / `SUCCESS` / `FAILED` 范围内 |
 | 40100 | 未登录或 token 失效 |
 | 40300 | 当前用户不是招标方 |
 
@@ -259,6 +262,11 @@
         "title": "业绩门槛与项目预算规模不匹配",
         "content": "项目预算金额为1280万元，但类似业绩要求达到5000万元，门槛明显高于项目规模。建议补充设置依据，或调整为与项目规模相称的合理区间。",
         "subType": "THRESHOLD_INCONSISTENCY",
+        "severity": "MEDIUM",
+        "severityLabel": "中风险",
+        "issueType": "THRESHOLD_INCONSISTENCY",
+        "issueTypeLabel": "门槛条件逻辑",
+        "suggestion": "建议补充设置依据，或调整为与项目规模相称的合理区间。",
         "sourceExcerpt": "预算金额为人民币 1280 万元；近三年需具有 5000 万元以上类似项目业绩",
         "pageNo": 5,
         "chunkIds": [9001, 9010],
@@ -266,12 +274,18 @@
           {
             "chunkId": 9001,
             "pageNo": 1,
-            "quote": "预算金额为人民币 1280 万元"
+            "quote": "预算金额为人民币 1280 万元",
+            "severity": "MEDIUM",
+            "issueType": "THRESHOLD_INCONSISTENCY",
+            "suggestion": "建议补充设置依据，或调整为与项目规模相称的合理区间。"
           },
           {
             "chunkId": 9010,
             "pageNo": 5,
-            "quote": "近三年需具有 5000 万元以上类似项目业绩"
+            "quote": "近三年需具有 5000 万元以上类似项目业绩",
+            "severity": "MEDIUM",
+            "issueType": "THRESHOLD_INCONSISTENCY",
+            "suggestion": "建议补充设置依据，或调整为与项目规模相称的合理区间。"
           }
         ],
         "sortOrder": 0,
@@ -284,20 +298,30 @@
         "analysisId": 1,
         "itemType": "TYPO",
         "requirementCode": "错别字-1",
-        "title": "疑似错别字：解折",
-        "content": "原文疑似将“解析”写成“解折”。建议改为“解析”。",
+        "title": "“按装调试”应为“安装调试”",
+        "content": "招标范围条款存在错别字。建议：更正为“安装调试”。",
         "subType": null,
-        "sourceExcerpt": "解折失败，请重新解析",
-        "pageNo": 6,
+        "severity": "LOW",
+        "severityLabel": "低风险",
+        "issueType": "TYPO",
+        "issueTypeLabel": "错别字",
+        "suggestion": "更正为“安装调试”。",
+        "wrongText": "按装调试",
+        "suggestedText": "安装调试",
+        "confidence": "HIGH",
+        "confidenceLabel": "高置信",
+        "sourceExcerpt": "招标范围条款“按装调试”存在错别字。",
+        "pageNo": 12,
         "chunkIds": [9015],
         "evidence": [
           {
             "chunkId": 9015,
-            "pageNo": 6,
-            "quote": "解折失败，请重新解析",
-            "wrongText": "解折",
-            "suggestedText": "解析",
-            "confidence": "HIGH"
+            "pageNo": 12,
+            "quote": "招标范围条款“按装调试”存在错别字。",
+            "wrongText": "按装调试",
+            "suggestedText": "安装调试",
+            "confidence": "HIGH",
+            "suggestion": "更正为“安装调试”。"
           }
         ],
         "sortOrder": 0,
@@ -319,6 +343,15 @@
 | `typoItems` | 错别字识别列表，按 `sortOrder/id` 升序；由全文 chunk 分批扫描候选合并生成 |
 | `items[].chunkIds` | 来源 chunk ID 数组 |
 | `items[].evidence` | 条目原文证据数组，用于“查看原文片段” |
+| `items[].severity` | 风险等级：`HIGH` / `MEDIUM` / `LOW`；逻辑问题从 evidence 派生，错别字默认 `LOW` |
+| `items[].severityLabel` | 风险等级中文：`高风险` / `中风险` / `低风险` |
+| `items[].issueType` | 问题类型；逻辑问题为 LLM 输出的类型，错别字为 `TYPO` |
+| `items[].issueTypeLabel` | 问题类型中文，如 `资格与废标逻辑` / `门槛条件逻辑` / `错别字` |
+| `items[].suggestion` | 修改建议；从 evidence 中的 `suggestion` 派生 |
+| `items[].wrongText` | 错别字原文，仅 `TYPO` 返回 |
+| `items[].suggestedText` | 建议修改文字，仅 `TYPO` 返回 |
+| `items[].confidence` | 错别字置信度：`HIGH` / `MEDIUM` / `LOW`，仅 `TYPO` 返回 |
+| `items[].confidenceLabel` | 错别字置信度中文：`高置信` / `中置信` / `低置信`，仅 `TYPO` 返回 |
 | `basicInfoRawJson` | 基础信息抽取 LLM 原始输出，仅详情返回 |
 | `checklistRawJson` | 资格/评分抽取 LLM 原始输出，仅详情返回 |
 
