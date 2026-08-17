@@ -5,6 +5,7 @@ import com.bidding.common.error.ErrorCode;
 import com.bidding.common.port.DocumentAccessPort;
 import com.bidding.common.port.JobPort;
 import com.bidding.common.port.PackageLookupPort;
+import com.bidding.common.security.BusinessAuth;
 import com.bidding.common.security.CurrentUser;
 import com.bidding.common.security.TendererAuth;
 import org.springframework.stereotype.Service;
@@ -67,14 +68,14 @@ public class JobAppService {
     }
 
     /**
-     * 查询任务详情（仅本组织；招标方）。
+     * 查询任务详情（仅本组织；招标方 / 投标方）。
      * <p>
      * 前端既可短轮询本接口，也可改用 {@code GET /api/jobs/{jobId}/events}（SSE）收进度；
      * 刷新/断线后仍建议先调本接口拿当前快照。
      */
     @Transactional(readOnly = true)
     public JobSummary getJob(long jobId) {
-        CurrentUser operator = TendererAuth.requireTenderer("仅招标方可操作索引任务");
+        CurrentUser operator = BusinessAuth.requireTendererOrBidder("仅招标方或投标方可查询任务");
         Optional<JobPort.JobRef> optional = jobPort.findById(jobId);
         if (optional.isEmpty() || optional.get().getOrgId() != operator.getOrgId()) {
             throw new BizException(ErrorCode.NOT_FOUND, "任务不存在");
@@ -156,6 +157,9 @@ public class JobAppService {
             summary.setChecklistId(extractJsonLong(job.getPayloadJson(), "checklistId"));
             summary.setReviewId(extractJsonLong(job.getPayloadJson(), "reviewId"));
         }
+        if (JobPort.TYPE_BID_SIMULATION_AUDIT.equals(job.getType())) {
+            summary.setAuditId(extractJsonLong(job.getPayloadJson(), "auditId"));
+        }
         return summary;
     }
 
@@ -213,6 +217,8 @@ public class JobAppService {
         private Long checklistId;
         /** 一键审查结果：审查 id（可能为空） */
         private Long reviewId;
+        /** 投标模拟审核结果：审核记录 id（可能为空） */
+        private Long auditId;
 
         public long getId() {
             return id;
@@ -348,6 +354,14 @@ public class JobAppService {
 
         public void setReviewId(Long reviewId) {
             this.reviewId = reviewId;
+        }
+
+        public Long getAuditId() {
+            return auditId;
+        }
+
+        public void setAuditId(Long auditId) {
+            this.auditId = auditId;
         }
     }
 }

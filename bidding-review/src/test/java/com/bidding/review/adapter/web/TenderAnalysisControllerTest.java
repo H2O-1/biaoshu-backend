@@ -22,13 +22,24 @@ class TenderAnalysisControllerTest {
         TenderAnalysisAppService appService = mock(TenderAnalysisAppService.class);
         TenderAnalysisController controller =
                 new TenderAnalysisController(appService, new ObjectMapper());
+        TenderAnalysisPort.AnalysisSummary summary = new TenderAnalysisPort.AnalysisSummary();
+        summary.setId(55L);
+        summary.setName("招标文件.pdf");
+        summary.setStatus(TenderAnalysisPort.STATUS_FAILED);
+        summary.setDocumentIdsJson("[7,8]");
+        summary.setRequirementCount(12);
+        summary.setIssueCount(3);
         when(appService.list("园区", TenderAnalysisPort.STATUS_FAILED, 2, 10))
-                .thenReturn(new PageResult<>(new ArrayList<>(), 0, 2, 10));
+                .thenReturn(new PageResult<>(List.of(summary), 1, 2, 10));
 
         ApiResponse<PageResult<TenderAnalysisController.AnalysisSummaryDto>> response =
                 controller.list("园区", TenderAnalysisPort.STATUS_FAILED, 2, 10);
 
-        assertEquals(0, response.getData().getTotal());
+        assertEquals(1, response.getData().getTotal());
+        TenderAnalysisController.AnalysisSummaryDto dto = response.getData().getItems().get(0);
+        assertEquals(2, dto.getFileCount());
+        assertEquals(12, dto.getRequirementCount());
+        assertEquals(3, dto.getIssueCount());
         verify(appService).list("园区", TenderAnalysisPort.STATUS_FAILED, 2, 10);
     }
 
@@ -65,6 +76,28 @@ class TenderAnalysisControllerTest {
         assertEquals("HIGH", data.getTypoItems().get(0).getConfidence());
         assertEquals("高置信", data.getTypoItems().get(0).getConfidenceLabel());
         assertEquals("更正为“安装调试”。", data.getTypoItems().get(0).getSuggestion());
+    }
+
+    @Test
+    void rerunReturnsNewAnalysisResponse() {
+        TenderAnalysisAppService appService = mock(TenderAnalysisAppService.class);
+        TenderAnalysisController controller =
+                new TenderAnalysisController(appService, new ObjectMapper());
+        TenderAnalysisAppService.CreateResult created = new TenderAnalysisAppService.CreateResult();
+        created.setAnalysisId(77L);
+        created.setJobId(88L);
+        created.setPackageId(66L);
+        created.setDocumentIds(List.of(7L, 8L));
+        when(appService.rerun(55L)).thenReturn(created);
+
+        ApiResponse<TenderAnalysisController.CreateResponse> response = controller.rerun(55L);
+
+        assertEquals(77L, response.getData().getAnalysisId());
+        assertEquals(88L, response.getData().getJobId());
+        assertEquals(66L, response.getData().getPackageId());
+        assertEquals(List.of(7L, 8L), response.getData().getDocumentIds());
+        assertEquals(0, response.getData().getFiles().size());
+        verify(appService).rerun(55L);
     }
 
     private static TenderAnalysisPort.AnalysisDetail detail() {

@@ -17,6 +17,8 @@ public interface JobPort {
     String TYPE_AI_REVIEW_PIPELINE = "AI_REVIEW_PIPELINE";
     /** 独立招标文件解析：INDEX → 基础信息 / 资格要求 / 评分标准抽取。 */
     String TYPE_TENDER_ANALYSIS = "TENDER_ANALYSIS";
+    /** 投标模拟审核：INDEX → 招标要求抽取 → 投标响应审查 → 投标文件问题识别。 */
+    String TYPE_BID_SIMULATION_AUDIT = "BID_SIMULATION_AUDIT";
     String STATUS_PENDING = "PENDING";
     String STATUS_RUNNING = "RUNNING";
     String STATUS_SUCCESS = "SUCCESS";

@@ -41,7 +41,14 @@ public interface OrgRepository {
     /** 招标方组织数：排除系统组织与已删除。 */
     long countTendererOrgs();
 
-    long insert(String code, String name, String city, String status, Long createdBy);
+    /** 投标方组织数：排除系统组织与已删除。 */
+    long countBidderOrgs();
+
+    long insert(String code, String name, String city, String orgType, String status, Long createdBy);
+
+    default long insert(String code, String name, String city, String status, Long createdBy) {
+        return insert(code, name, city, "TENDERER", status, createdBy);
+    }
 
     void updateStatus(long orgId, String status);
 

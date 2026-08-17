@@ -160,6 +160,7 @@ class AdminUserAppServiceTest {
         when(userRepository.findById(9L))
                 .thenReturn(Optional.of(user(9L, oldRoles)))
                 .thenReturn(Optional.of(user(9L, newRoles)));
+        when(orgRepository.findById(1L)).thenReturn(Optional.of(activeOrg(1L)));
 
         AdminUserAppService.UserSummary result =
                 adminUserAppService.replaceRoles(9L, List.of("TENDERER", "EXPERT"));
@@ -168,6 +169,53 @@ class AdminUserAppServiceTest {
         assertTrue(result.getRoleCodes().contains("EXPERT"));
         verify(userRepository).replaceRoles(eq(9L), eq(newRoles));
         verify(userRepository).bumpTokenVersion(9L);
+    }
+
+    @Test
+    void createBidderUserSuccessInBidderOrg() {
+        when(orgRepository.findById(2L)).thenReturn(Optional.of(bidderOrg(2L)));
+        when(userRepository.existsByUsername("bidder")).thenReturn(false);
+        when(userRepository.existsByPhone("13800138009")).thenReturn(false);
+        when(userRepository.existsByEmail("bidder@example.com")).thenReturn(false);
+        when(passwordEncoder.encode("Passw0rd!")).thenReturn("hashed");
+        when(userRepository.insert(eq(2L), eq("bidder"), eq("hashed"), eq("投标管理员"),
+                eq("13800138009"), eq("bidder@example.com"), eq("ACTIVE"), eq(true), eq(1L)))
+                .thenReturn(30L);
+
+        Set<String> roles = new HashSet<>();
+        roles.add(RoleCode.BIDDER.name());
+        when(userRepository.findById(30L)).thenReturn(Optional.of(
+                new UserAccount(30L, 2L, "bidder", "hashed", "投标管理员",
+                        "13800138009", "bidder@example.com", "ACTIVE",
+                        true, 0, Instant.now(), Instant.now(), 1L, roles)
+        ));
+        Set<String> adminRoles = new HashSet<>();
+        adminRoles.add(RoleCode.PLATFORM_ADMIN.name());
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user(1L, adminRoles)));
+
+        AdminUserAppService.UserSummary summary = adminUserAppService.createUser(
+                2L, "bidder", "Passw0rd!", "投标管理员", "13800138009",
+                "bidder@example.com", List.of("BIDDER"));
+
+        assertTrue(summary.getRoleCodes().contains("BIDDER"));
+    }
+
+    @Test
+    void createUserRejectRoleNotMatchOrgType() {
+        when(orgRepository.findById(2L)).thenReturn(Optional.of(bidderOrg(2L)));
+        when(userRepository.existsByUsername("tenderer")).thenReturn(false);
+        when(userRepository.existsByPhone("13800138008")).thenReturn(false);
+        when(userRepository.existsByEmail("tenderer@example.com")).thenReturn(false);
+
+        BizException ex = assertThrows(BizException.class,
+                () -> adminUserAppService.createUser(
+                        2L, "tenderer", "Passw0rd!", "招标管理员", "13800138008",
+                        "tenderer@example.com", List.of("TENDERER")));
+
+        assertEquals(ErrorCode.BAD_REQUEST, ex.errorCode());
+        verify(userRepository, never()).insert(
+                anyLong(), anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), anyBoolean(), any());
     }
 
     @Test
@@ -372,7 +420,7 @@ class AdminUserAppServiceTest {
     }
 
     @Test
-    void updateTendererProfileSuccess() {
+    void updateOrgBusinessUserProfileSuccessForTendererOrg() {
         when(orgRepository.findById(2L)).thenReturn(Optional.of(activeOrg(2L)));
 
         Set<String> roles = new HashSet<>();
@@ -389,7 +437,7 @@ class AdminUserAppServiceTest {
         when(userRepository.existsByPhoneExceptUserId("13900139000", 9L)).thenReturn(false);
         when(userRepository.existsByEmailExceptUserId("wangwu@example.com", 9L)).thenReturn(false);
 
-        AdminUserAppService.UserSummary summary = adminUserAppService.updateTendererProfile(
+        AdminUserAppService.UserSummary summary = adminUserAppService.updateOrgBusinessUserProfile(
                 2L, 9L, "王五", "13900139000", "wangwu@example.com");
 
         assertEquals("王五", summary.getDisplayName());
@@ -399,7 +447,34 @@ class AdminUserAppServiceTest {
     }
 
     @Test
-    void updateTendererProfileRejectNonTenderer() {
+    void updateOrgBusinessUserProfileSuccessForBidderOrg() {
+        when(orgRepository.findById(2L)).thenReturn(Optional.of(bidderOrg(2L)));
+
+        Set<String> roles = new HashSet<>();
+        roles.add(RoleCode.BIDDER.name());
+        UserAccount before = new UserAccount(
+                9L, 2L, "bidder", "hash", "投标管理员", "13800138000", "old@example.com",
+                "ACTIVE", false, 0, Instant.now(), Instant.now(), null, roles);
+        UserAccount after = new UserAccount(
+                9L, 2L, "bidder", "hash", "王五", "13900139000", "wangwu@example.com",
+                "ACTIVE", false, 0, Instant.now(), Instant.now(), null, roles);
+        when(userRepository.findById(9L))
+                .thenReturn(Optional.of(before))
+                .thenReturn(Optional.of(after));
+        when(userRepository.existsByPhoneExceptUserId("13900139000", 9L)).thenReturn(false);
+        when(userRepository.existsByEmailExceptUserId("wangwu@example.com", 9L)).thenReturn(false);
+
+        AdminUserAppService.UserSummary summary = adminUserAppService.updateOrgBusinessUserProfile(
+                2L, 9L, "王五", "13900139000", "wangwu@example.com");
+
+        assertEquals("王五", summary.getDisplayName());
+        assertEquals("13900139000", summary.getPhone());
+        assertEquals("wangwu@example.com", summary.getEmail());
+        verify(userRepository).updateProfile(9L, "王五", "13900139000", "wangwu@example.com");
+    }
+
+    @Test
+    void updateOrgBusinessUserProfileRejectRoleNotMatchOrgType() {
         when(orgRepository.findById(2L)).thenReturn(Optional.of(activeOrg(2L)));
         Set<String> roles = new HashSet<>();
         roles.add(RoleCode.BIDDER.name());
@@ -408,20 +483,20 @@ class AdminUserAppServiceTest {
                         "ACTIVE", false, 0, Instant.now(), Instant.now(), null, roles)));
 
         BizException ex = assertThrows(BizException.class,
-                () -> adminUserAppService.updateTendererProfile(
+                () -> adminUserAppService.updateOrgBusinessUserProfile(
                         2L, 9L, "王五", "13900139000", "wangwu@example.com"));
         assertEquals(ErrorCode.BAD_REQUEST, ex.errorCode());
         verify(userRepository, never()).updateProfile(anyLong(), anyString(), anyString(), anyString());
     }
 
     @Test
-    void updateTendererProfileRejectSystemOrg() {
+    void updateOrgBusinessUserProfileRejectSystemOrg() {
         when(orgRepository.findById(1L)).thenReturn(Optional.of(
                 new Org(1L, "SYSTEM", "系统组织", "系统", "ACTIVE",
                         1L, Instant.now(), Instant.now())));
 
         BizException ex = assertThrows(BizException.class,
-                () -> adminUserAppService.updateTendererProfile(
+                () -> adminUserAppService.updateOrgBusinessUserProfile(
                         1L, 9L, "王五", "13900139000", "wangwu@example.com"));
         assertEquals(ErrorCode.BAD_REQUEST, ex.errorCode());
         verify(userRepository, never()).updateProfile(anyLong(), anyString(), anyString(), anyString());
@@ -497,6 +572,11 @@ class AdminUserAppServiceTest {
 
     private static Org activeOrg(long id) {
         return new Org(id, "ORG_" + id, "组织" + id, "北京", "ACTIVE",
+                1L, Instant.now(), Instant.now());
+    }
+
+    private static Org bidderOrg(long id) {
+        return new Org(id, "ORG_" + id, "组织" + id, "北京", "BIDDER", "ACTIVE",
                 1L, Instant.now(), Instant.now());
     }
 

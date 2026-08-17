@@ -101,6 +101,8 @@ class BiddingWorkerApplicationTest {
         assertEquals(true, valueAt(bidding, "index", "worker-enabled"));
         assertEquals(true, valueAt(bidding, "checklist", "worker-enabled"));
         assertEquals(true, valueAt(bidding, "review", "worker-enabled"));
+        assertEquals(true, valueAt(bidding, "tender-analysis", "worker-enabled"));
+        assertEquals(true, valueAt(bidding, "bid-simulation-audit", "worker-enabled"));
         assertEquals(true, valueAt(bidding, "ai-review-pipeline", "worker-enabled"));
     }
 
@@ -139,6 +141,10 @@ class BiddingWorkerApplicationTest {
         assertEquals("${INDEX_WORKER_ENABLED:false}", valueAt(bidding, "index", "worker-enabled"));
         assertEquals("${CHECKLIST_WORKER_ENABLED:false}", valueAt(bidding, "checklist", "worker-enabled"));
         assertEquals("${REVIEW_WORKER_ENABLED:false}", valueAt(bidding, "review", "worker-enabled"));
+        assertEquals("${TENDER_ANALYSIS_WORKER_ENABLED:false}",
+                valueAt(bidding, "tender-analysis", "worker-enabled"));
+        assertEquals("${BID_SIMULATION_AUDIT_WORKER_ENABLED:false}",
+                valueAt(bidding, "bid-simulation-audit", "worker-enabled"));
         assertEquals("${AI_REVIEW_PIPELINE_WORKER_ENABLED:false}",
                 valueAt(bidding, "ai-review-pipeline", "worker-enabled"));
         assertEquals("${STALE_RECOVERY_ENABLED:false}", valueAt(bidding, "recovery", "enabled"));

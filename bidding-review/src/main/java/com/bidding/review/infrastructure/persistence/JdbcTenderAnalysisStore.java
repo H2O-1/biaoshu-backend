@@ -23,10 +23,21 @@ import java.util.List;
 public class JdbcTenderAnalysisStore implements TenderAnalysisPort {
 
     private static final String SUMMARY_COLUMNS =
-            "id, org_id, package_id, name, status, job_id, document_ids_json, "
-                    + "tenderer, agency, budget_amount_text, bid_deadline_text, bid_deadline_at, "
-                    + "project_intro, project_background, project_overview, evidence_json, "
-                    + "error_message, created_by, created_at, updated_at";
+            "a.id, a.org_id, a.package_id, a.name, a.status, a.job_id, a.document_ids_json, "
+                    + "a.tenderer, a.agency, a.budget_amount_text, a.bid_deadline_text, a.bid_deadline_at, "
+                    + "a.project_intro, a.project_background, a.project_overview, a.evidence_json, "
+                    + "a.error_message, "
+                    + "COALESCE(item_stats.requirement_count, 0) AS requirement_count, "
+                    + "COALESCE(item_stats.issue_count, 0) AS issue_count, "
+                    + "a.created_by, a.created_at, a.updated_at";
+
+    private static final String ITEM_STATS_JOIN =
+            " LEFT JOIN ("
+                    + "SELECT analysis_id, "
+                    + "SUM(CASE WHEN item_type IN ('QUALIFICATION', 'SCORING') THEN 1 ELSE 0 END) AS requirement_count, "
+                    + "SUM(CASE WHEN item_type IN ('LOGIC_ISSUE', 'TYPO') THEN 1 ELSE 0 END) AS issue_count "
+                    + "FROM biz_tender_analysis_item GROUP BY analysis_id"
+                    + ") item_stats ON item_stats.analysis_id = a.id";
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -174,12 +185,14 @@ public class JdbcTenderAnalysisStore implements TenderAnalysisPort {
         args.add(orgId);
         StringBuilder sql = new StringBuilder();
         sql.append("SELECT ").append(SUMMARY_COLUMNS)
-                .append(" FROM biz_tender_analysis WHERE org_id = ? AND status <> '")
+                .append(" FROM biz_tender_analysis a")
+                .append(ITEM_STATS_JOIN)
+                .append(" WHERE a.org_id = ? AND a.status <> '")
                 .append(STATUS_OBSOLETE)
                 .append("'");
         appendStatus(sql, args, safeStatus);
         appendKeyword(sql, args, kw);
-        sql.append(" ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?");
+        sql.append(" ORDER BY a.created_at DESC, a.id DESC LIMIT ? OFFSET ?");
         args.add(safeLimit);
         args.add(safeOffset);
         return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> mapSummary(rs), args.toArray());
@@ -193,7 +206,7 @@ public class JdbcTenderAnalysisStore implements TenderAnalysisPort {
         List<Object> args = new ArrayList<>();
         args.add(orgId);
         StringBuilder sql = new StringBuilder();
-        sql.append("SELECT COUNT(1) FROM biz_tender_analysis WHERE org_id = ? AND status <> '")
+        sql.append("SELECT COUNT(1) FROM biz_tender_analysis a WHERE a.org_id = ? AND a.status <> '")
                 .append(STATUS_OBSOLETE)
                 .append("'");
         appendStatus(sql, args, safeStatus);
@@ -207,7 +220,9 @@ public class JdbcTenderAnalysisStore implements TenderAnalysisPort {
     public AnalysisSummary findById(long orgId, long analysisId) {
         List<AnalysisSummary> list = jdbcTemplate.query(
                 "SELECT " + SUMMARY_COLUMNS
-                        + " FROM biz_tender_analysis WHERE id = ? AND org_id = ? AND status <> ?",
+                        + " FROM biz_tender_analysis a"
+                        + ITEM_STATS_JOIN
+                        + " WHERE a.id = ? AND a.org_id = ? AND a.status <> ?",
                 (rs, rowNum) -> mapSummary(rs),
                 analysisId,
                 orgId,
@@ -218,10 +233,27 @@ public class JdbcTenderAnalysisStore implements TenderAnalysisPort {
 
     @Override
     @Transactional(readOnly = true)
+    public AnalysisSummary findAnyById(long orgId, long analysisId) {
+        List<AnalysisSummary> list = jdbcTemplate.query(
+                "SELECT " + SUMMARY_COLUMNS
+                        + " FROM biz_tender_analysis a"
+                        + ITEM_STATS_JOIN
+                        + " WHERE a.id = ? AND a.org_id = ?",
+                (rs, rowNum) -> mapSummary(rs),
+                analysisId,
+                orgId
+        );
+        return list.isEmpty() ? null : list.get(0);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public AnalysisDetail findDetail(long orgId, long analysisId) {
         List<AnalysisDetail> heads = jdbcTemplate.query(
-                "SELECT " + SUMMARY_COLUMNS + ", basic_info_raw_json, checklist_raw_json "
-                        + "FROM biz_tender_analysis WHERE id = ? AND org_id = ? AND status <> ?",
+                "SELECT " + SUMMARY_COLUMNS + ", a.basic_info_raw_json, a.checklist_raw_json "
+                        + "FROM biz_tender_analysis a"
+                        + ITEM_STATS_JOIN
+                        + " WHERE a.id = ? AND a.org_id = ? AND a.status <> ?",
                 (rs, rowNum) -> {
                     AnalysisDetail detail = new AnalysisDetail();
                     copySummary(mapSummary(rs), detail);
@@ -254,7 +286,7 @@ public class JdbcTenderAnalysisStore implements TenderAnalysisPort {
         if (keyword == null || keyword.isEmpty()) {
             return;
         }
-        sql.append(" AND (name LIKE ? OR tenderer LIKE ? OR agency LIKE ?)");
+        sql.append(" AND (a.name LIKE ? OR a.tenderer LIKE ? OR a.agency LIKE ?)");
         String pattern = "%" + keyword + "%";
         args.add(pattern);
         args.add(pattern);
@@ -265,7 +297,7 @@ public class JdbcTenderAnalysisStore implements TenderAnalysisPort {
         if (status == null || status.isEmpty()) {
             return;
         }
-        sql.append(" AND status = ?");
+        sql.append(" AND a.status = ?");
         args.add(status);
     }
 
@@ -289,6 +321,8 @@ public class JdbcTenderAnalysisStore implements TenderAnalysisPort {
         summary.setProjectOverview(rs.getString("project_overview"));
         summary.setEvidenceJson(rs.getString("evidence_json"));
         summary.setErrorMessage(rs.getString("error_message"));
+        summary.setRequirementCount(rs.getInt("requirement_count"));
+        summary.setIssueCount(rs.getInt("issue_count"));
         summary.setCreatedBy(rs.getLong("created_by"));
         summary.setCreatedAt(toInstant(rs.getTimestamp("created_at")));
         summary.setUpdatedAt(toInstant(rs.getTimestamp("updated_at")));
@@ -313,6 +347,8 @@ public class JdbcTenderAnalysisStore implements TenderAnalysisPort {
         to.setProjectOverview(from.getProjectOverview());
         to.setEvidenceJson(from.getEvidenceJson());
         to.setErrorMessage(from.getErrorMessage());
+        to.setRequirementCount(from.getRequirementCount());
+        to.setIssueCount(from.getIssueCount());
         to.setCreatedBy(from.getCreatedBy());
         to.setCreatedAt(from.getCreatedAt());
         to.setUpdatedAt(from.getUpdatedAt());

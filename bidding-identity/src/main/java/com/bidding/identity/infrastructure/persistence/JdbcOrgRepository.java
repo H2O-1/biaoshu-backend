@@ -23,7 +23,7 @@ import java.util.Optional;
 public class JdbcOrgRepository implements OrgRepository {
 
     private static final String ORG_COLUMNS =
-            "id, code, name, city, status, created_by, created_at, updated_at";
+            "id, code, name, city, org_type, status, created_by, created_at, updated_at";
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -39,6 +39,7 @@ public class JdbcOrgRepository implements OrgRepository {
                 rs.getString("code"),
                 rs.getString("name"),
                 rs.getString("city"),
+                rs.getString("org_type"),
                 rs.getString("status"),
                 createdBy,
                 toInstant(rs.getTimestamp("created_at")),
@@ -194,29 +195,39 @@ public class JdbcOrgRepository implements OrgRepository {
     @Override
     public long countTendererOrgs() {
         Long count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(1) FROM sys_org WHERE status <> 'DELETED' AND code <> 'SYSTEM'",
+                "SELECT COUNT(1) FROM sys_org WHERE status <> 'DELETED' AND org_type = 'TENDERER'",
                 Long.class
         );
         return count == null ? 0 : count;
     }
 
     @Override
-    public long insert(String code, String name, String city, String status, Long createdBy) {
+    public long countBidderOrgs() {
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM sys_org WHERE status <> 'DELETED' AND org_type = 'BIDDER'",
+                Long.class
+        );
+        return count == null ? 0 : count;
+    }
+
+    @Override
+    public long insert(String code, String name, String city, String orgType, String status, Long createdBy) {
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(con -> {
             PreparedStatement ps = con.prepareStatement(
-                    "INSERT INTO sys_org(code, name, city, status, created_by, created_at, updated_at) "
-                            + "VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                    "INSERT INTO sys_org(code, name, city, org_type, status, created_by, created_at, updated_at) "
+                            + "VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
                     Statement.RETURN_GENERATED_KEYS
             );
             ps.setString(1, code);
             ps.setString(2, name);
             ps.setString(3, city);
-            ps.setString(4, status);
+            ps.setString(4, orgType);
+            ps.setString(5, status);
             if (createdBy == null) {
-                ps.setNull(5, Types.BIGINT);
+                ps.setNull(6, Types.BIGINT);
             } else {
-                ps.setLong(5, createdBy);
+                ps.setLong(6, createdBy);
             }
             return ps;
         }, keyHolder);

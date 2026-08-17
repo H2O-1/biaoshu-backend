@@ -69,13 +69,14 @@ class AdminRoleFlowIT {
     @Test
     void adminCanCreateUser() throws Exception {
         String token = loginAsAdmin();
+        long bidderOrgId = createBidderOrg(token, "投标用户01组织");
 
         mockMvc.perform(post("/api/admin/users")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "orgId": 1,
+                                  "orgId": %d,
                                   "username": "bidder01",
                                   "password": "Passw0rd!",
                                   "displayName": "投标用户01",
@@ -83,7 +84,7 @@ class AdminRoleFlowIT {
                                   "email": "bidder01@example.com",
                                   "roleCodes": ["BIDDER"]
                                 }
-                                """))
+                                """.formatted(bidderOrgId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.username").value("bidder01"))
@@ -96,13 +97,14 @@ class AdminRoleFlowIT {
     @Test
     void mustChangePasswordBlocksAdminApis_untilChanged() throws Exception {
         String adminToken = loginAsAdmin();
+        long bidderOrgId = createBidderOrg(adminToken, "强制改密用户组织");
 
         mockMvc.perform(post("/api/admin/users")
                         .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "orgId": 1,
+                                  "orgId": %d,
                                   "username": "force_pwd_user",
                                   "password": "InitPass1",
                                   "displayName": "强制改密用户",
@@ -110,7 +112,7 @@ class AdminRoleFlowIT {
                                   "email": "force@example.com",
                                   "roleCodes": ["BIDDER"]
                                 }
-                                """))
+                                """.formatted(bidderOrgId)))
                 .andExpect(status().isOk());
 
         MvcResult login = mockMvc.perform(post("/api/auth/login")
@@ -155,13 +157,14 @@ class AdminRoleFlowIT {
     @Test
     void resetPasswordInvalidatesOldToken_andReturnsTempOnce() throws Exception {
         String adminToken = loginAsAdmin();
+        long bidderOrgId = createBidderOrg(adminToken, "重置用户组织");
 
         mockMvc.perform(post("/api/admin/users")
                         .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "orgId": 1,
+                                  "orgId": %d,
                                   "username": "reset_pwd_user",
                                   "password": "InitPass1",
                                   "displayName": "重置用户",
@@ -169,7 +172,7 @@ class AdminRoleFlowIT {
                                   "email": "reset@example.com",
                                   "roleCodes": ["BIDDER"]
                                 }
-                                """))
+                                """.formatted(bidderOrgId)))
                 .andExpect(status().isOk());
 
         // 先改密，拿可用 Token
@@ -225,6 +228,24 @@ class AdminRoleFlowIT {
                 .andExpect(status().isOk())
                 .andReturn();
         return extractToken(login);
+    }
+
+    private long createBidderOrg(String token, String name) throws Exception {
+        MvcResult created = mockMvc.perform(post("/api/admin/orgs")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name": "%s",
+                                  "city": "北京市",
+                                  "orgType": "BIDDER"
+                                }
+                                """.formatted(name)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.orgType").value("BIDDER"))
+                .andReturn();
+        return Long.parseLong(created.getResponse().getContentAsString()
+                .replaceAll("(?s).*\"id\"\\s*:\\s*(\\d+).*", "$1"));
     }
 
     private static String extractToken(MvcResult login) throws Exception {

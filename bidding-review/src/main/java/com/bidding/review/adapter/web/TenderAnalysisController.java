@@ -82,6 +82,19 @@ public class TenderAnalysisController {
         return ApiResponse.ok(null);
     }
 
+    @PostMapping("/{analysisId}/rerun")
+    public ApiResponse<CreateResponse> rerun(@PathVariable("analysisId") long analysisId) {
+        TenderAnalysisAppService.CreateResult rerun = tenderAnalysisAppService.rerun(analysisId);
+        CreateResponse response = new CreateResponse();
+        response.setAnalysisId(rerun.getAnalysisId());
+        response.setJobId(rerun.getJobId());
+        response.setPackageId(rerun.getPackageId());
+        response.setDocumentIds(rerun.getDocumentIds());
+        response.setIndexJobIds(rerun.getIndexJobIds());
+        response.setFiles(rerun.getFiles());
+        return ApiResponse.ok(response);
+    }
+
     private AnalysisSummaryDto toSummaryDto(TenderAnalysisPort.AnalysisSummary s) {
         AnalysisSummaryDto dto = new AnalysisSummaryDto();
         dto.setId(s.getId());
@@ -98,6 +111,8 @@ public class TenderAnalysisController {
         dto.setBidDeadlineText(s.getBidDeadlineText());
         dto.setBidDeadlineAt(s.getBidDeadlineAt());
         dto.setErrorMessage(s.getErrorMessage());
+        dto.setRequirementCount(s.getRequirementCount());
+        dto.setIssueCount(s.getIssueCount());
         dto.setCreatedBy(s.getCreatedBy());
         dto.setCreatedAt(s.getCreatedAt());
         dto.setUpdatedAt(s.getUpdatedAt());
@@ -346,6 +361,8 @@ public class TenderAnalysisController {
         private String bidDeadlineText;
         private Instant bidDeadlineAt;
         private String errorMessage;
+        private int requirementCount;
+        private int issueCount;
         private long createdBy;
         private Instant createdAt;
         private Instant updatedAt;
@@ -460,6 +477,22 @@ public class TenderAnalysisController {
 
         public void setErrorMessage(String errorMessage) {
             this.errorMessage = errorMessage;
+        }
+
+        public int getRequirementCount() {
+            return requirementCount;
+        }
+
+        public void setRequirementCount(int requirementCount) {
+            this.requirementCount = requirementCount;
+        }
+
+        public int getIssueCount() {
+            return issueCount;
+        }
+
+        public void setIssueCount(int issueCount) {
+            this.issueCount = issueCount;
         }
 
         public long getCreatedBy() {

@@ -91,9 +91,9 @@ class AdminOrgAppServiceTest {
         when(orgRepository.existsByName("华能招标有限公司")).thenReturn(false);
         when(orgRepository.existsByCode(anyString())).thenReturn(false);
         when(orgRepository.insert(anyString(), eq("华能招标有限公司"), eq("北京市"),
-                eq("ACTIVE"), eq(1L))).thenReturn(10L);
+                eq("TENDERER"), eq("ACTIVE"), eq(1L))).thenReturn(10L);
 
-        Org created = org(10L, "ORG_ABCDEF123456", "华能招标有限公司", "北京市", "ACTIVE");
+        Org created = org(10L, "ORG_ABCDEF123456", "华能招标有限公司", "北京市", "TENDERER", "ACTIVE");
         when(orgRepository.findById(10L)).thenReturn(Optional.of(created));
         when(orgRepository.countUsersByOrgId(10L)).thenReturn(0L);
         when(projectCountPort.countByOrgId(10L)).thenReturn(0L);
@@ -105,6 +105,7 @@ class AdminOrgAppServiceTest {
         assertEquals(10L, summary.getId());
         assertEquals("华能招标有限公司", summary.getName());
         assertEquals("北京市", summary.getCity());
+        assertEquals("TENDERER", summary.getOrgType());
         assertEquals("ACTIVE", summary.getStatus());
         assertEquals(0L, summary.getUserCount());
         assertTrue(summary.getCode().startsWith("ORG_"));
@@ -112,8 +113,25 @@ class AdminOrgAppServiceTest {
 
         ArgumentCaptor<String> codeCaptor = ArgumentCaptor.forClass(String.class);
         verify(orgRepository).insert(codeCaptor.capture(), eq("华能招标有限公司"),
-                eq("北京市"), eq("ACTIVE"), eq(1L));
+                eq("北京市"), eq("TENDERER"), eq("ACTIVE"), eq(1L));
         assertTrue(codeCaptor.getValue().startsWith("ORG_"));
+    }
+
+    @Test
+    void createBidderOrgSuccess() {
+        when(cityCatalog.containsName("北京市")).thenReturn(true);
+        when(orgRepository.existsByName("投标公司")).thenReturn(false);
+        when(orgRepository.existsByCode(anyString())).thenReturn(false);
+        when(orgRepository.insert(anyString(), eq("投标公司"), eq("北京市"),
+                eq("BIDDER"), eq("ACTIVE"), eq(1L))).thenReturn(11L);
+        Org created = org(11L, "ORG_BIDDER", "投标公司", "北京市", "BIDDER", "ACTIVE");
+        when(orgRepository.findById(11L)).thenReturn(Optional.of(created));
+        when(userRepository.findById(1L)).thenReturn(Optional.of(adminUser()));
+
+        AdminOrgAppService.OrgSummary summary =
+                adminOrgAppService.createOrg("投标公司", "北京市", "BIDDER");
+
+        assertEquals("BIDDER", summary.getOrgType());
     }
 
     @Test
@@ -427,7 +445,11 @@ class AdminOrgAppServiceTest {
     }
 
     private static Org org(long id, String code, String name, String city, String status) {
-        return new Org(id, code, name, city, status, 1L, Instant.now(), Instant.now());
+        return org(id, code, name, city, "TENDERER", status);
+    }
+
+    private static Org org(long id, String code, String name, String city, String orgType, String status) {
+        return new Org(id, code, name, city, orgType, status, 1L, Instant.now(), Instant.now());
     }
 
     private static UserAccount adminUser() {

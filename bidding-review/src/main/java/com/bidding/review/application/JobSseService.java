@@ -3,8 +3,8 @@ package com.bidding.review.application;
 import com.bidding.common.error.BizException;
 import com.bidding.common.error.ErrorCode;
 import com.bidding.common.port.JobPort;
+import com.bidding.common.security.BusinessAuth;
 import com.bidding.common.security.CurrentUser;
-import com.bidding.common.security.TendererAuth;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -68,13 +68,13 @@ public class JobSseService {
     }
 
     /**
-     * 打开任务事件流。调用方须已登录招标方。
+     * 打开任务事件流。调用方须已登录招标方或投标方。
      */
     public SseEmitter openStream(long jobId) {
         if (!enabled) {
             throw new BizException(ErrorCode.BAD_REQUEST, "任务 SSE 未启用");
         }
-        CurrentUser operator = TendererAuth.requireTenderer("仅招标方可订阅任务进度");
+        CurrentUser operator = BusinessAuth.requireTendererOrBidder("仅招标方或投标方可订阅任务进度");
         JobAppService.JobSummary first = jobAppService.getJob(jobId);
         long orgId = operator.getOrgId();
 

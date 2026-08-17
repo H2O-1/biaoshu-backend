@@ -12,7 +12,6 @@ com\bidding\identity\adapter\web\AdminUserController$CreatePlatformAdminRequest.
 com\bidding\identity\application\AuthAppService$LoginResult.class
 com\bidding\identity\infrastructure\city\CityCatalog.class
 com\bidding\identity\infrastructure\security\JwtAuthenticationFilter.class
-com\bidding\identity\adapter\web\AdminOrgController$UpdateTendererProfileRequest.class
 com\bidding\identity\application\BootstrapAdminRunner.class
 com\bidding\identity\application\AdminDashboardAppService$DashboardSummary.class
 com\bidding\identity\domain\model\Role.class

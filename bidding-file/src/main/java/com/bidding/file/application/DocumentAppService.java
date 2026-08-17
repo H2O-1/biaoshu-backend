@@ -170,7 +170,7 @@ public class DocumentAppService {
     }
 
     /**
-     * 招标解析内部上传：调用方已校验组织与内部招标包；上传后自动排队 INDEX。
+     * 内部分析文件上传：调用方已校验组织与内部标包；上传后自动排队 INDEX。
      */
     @Transactional
     public InternalUploadResult uploadTenderAnalysisFile(long orgId,

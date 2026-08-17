@@ -152,6 +152,8 @@
         "jobId": 101,
         "documentIds": [7, 8],
         "fileCount": 2,
+        "requirementCount": 12,
+        "issueCount": 3,
         "tenderer": "上海智慧园区发展有限公司",
         "agency": "中建咨询（招标代理）",
         "budgetAmountText": "￥12,800,000.00（含税最高限价）",
@@ -174,6 +176,8 @@
 |------|------|
 | `documentIds` | 参与解析的招标文档 ID 数组 |
 | `fileCount` | 由 `documentIds` 数组长度派生 |
+| `requirementCount` | 招标要求数量；`QUALIFICATION` + `SCORING` 条目数 |
+| `issueCount` | 发现问题数量；`LOGIC_ISSUE` + `TYPO` 条目数 |
 | `status` | 解析状态：`BUILDING` 解析中 / `SUCCESS` 解析完成 / `FAILED` 解析失败 |
 | `jobId` | 解析任务 ID；`BUILDING` 时可用于查询进度 |
 
@@ -393,6 +397,39 @@
 | 40100 | 未登录或 token 失效 |
 | 40300 | 当前用户不是招标方 |
 | 40400 | 解析记录不存在、不属于本组织或已删除 |
+
+### 3.5 重试解析
+
+`POST /api/tender-analyses/{analysisId}/rerun`
+
+重试一条招标解析记录。后端会将旧记录标记为 `OBSOLETE`，复用原包与原文件重新创建一条 `BUILDING` 记录，并重新创建 `TENDER_ANALYSIS` 总任务。
+
+**成功响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "analysisId": 2,
+    "jobId": 102,
+    "packageId": 50,
+    "documentIds": [7, 8],
+    "indexJobIds": [],
+    "files": []
+  }
+}
+```
+
+**常见错误**
+
+| code | 场景 |
+|------|------|
+| 40000 | 原记录缺少文档信息 |
+| 40100 | 未登录或 token 失效 |
+| 40300 | 当前用户不是招标方 |
+| 40400 | 解析记录不存在、不属于本组织 |
+| 40900 | 原记录仍处于解析中 |
 
 ---
 

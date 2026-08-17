@@ -104,6 +104,11 @@ bidding:
     worker-enabled: true
     poll-ms: ${TENDER_ANALYSIS_POLL_MS:3000}
     worker-id: ${TENDER_ANALYSIS_WORKER_ID:}
+  # 投标模拟审核 BID_SIMULATION_AUDIT（本进程写死开启，原因同 index.worker-enabled）
+  bid-simulation-audit:
+    worker-enabled: true
+    poll-ms: ${BID_SIMULATION_AUDIT_POLL_MS:3000}
+    worker-id: ${BID_SIMULATION_AUDIT_WORKER_ID:}
   # 一键审查总流程（本进程写死开启，原因同 index.worker-enabled）
   ai-review-pipeline:
     worker-enabled: true

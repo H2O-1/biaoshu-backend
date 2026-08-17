@@ -113,6 +113,11 @@ bidding:
     worker-enabled: ${TENDER_ANALYSIS_WORKER_ENABLED:false}
     poll-ms: ${TENDER_ANALYSIS_POLL_MS:3000}
     worker-id: ${TENDER_ANALYSIS_WORKER_ID:}
+  # 投标模拟审核 BID_SIMULATION_AUDIT（worker-enabled 默认 false，同 index 说明）
+  bid-simulation-audit:
+    worker-enabled: ${BID_SIMULATION_AUDIT_WORKER_ENABLED:false}
+    poll-ms: ${BID_SIMULATION_AUDIT_POLL_MS:3000}
+    worker-id: ${BID_SIMULATION_AUDIT_WORKER_ID:}
   # 任务进度 SSE（GET /api/jobs/{id}/events）；短轮询 GET /api/jobs/{id} 仍保留
   job:
     sse:

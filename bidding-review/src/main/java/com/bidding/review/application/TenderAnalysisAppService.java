@@ -9,6 +9,7 @@ import com.bidding.common.port.TenderAnalysisDocumentCommandPort;
 import com.bidding.common.port.TenderAnalysisPort;
 import com.bidding.common.security.CurrentUser;
 import com.bidding.common.security.TendererAuth;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -152,6 +153,61 @@ public class TenderAnalysisAppService {
         }
     }
 
+    /**
+     * 重试招标解析：旧记录作废，新建一条 BUILDING 记录并重新创建总任务。
+     */
+    @Transactional
+    public CreateResult rerun(long analysisId) {
+        CurrentUser operator = TendererAuth.requireTenderer("仅招标方可操作招标解析");
+        TenderAnalysisPort.AnalysisSummary existing =
+                tenderAnalysisPort.findAnyById(operator.getOrgId(), analysisId);
+        if (existing == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "招标解析记录不存在");
+        }
+        if (TenderAnalysisPort.STATUS_BUILDING.equals(existing.getStatus())) {
+            throw new BizException(ErrorCode.CONFLICT, "招标解析进行中，请稍后重试");
+        }
+        if (!TenderAnalysisPort.STATUS_OBSOLETE.equals(existing.getStatus())) {
+            tenderAnalysisPort.markObsolete(operator.getOrgId(), analysisId);
+        }
+
+        String documentIdsJson = existing.getDocumentIdsJson();
+        if (documentIdsJson == null || documentIdsJson.isBlank()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "招标解析记录缺少文档信息");
+        }
+
+        long newAnalysisId = tenderAnalysisPort.createBuilding(
+                operator.getOrgId(),
+                existing.getPackageId(),
+                existing.getName(),
+                documentIdsJson,
+                operator.getUserId());
+
+        String payload = "{\"analysisId\":" + newAnalysisId
+                + ",\"sourceAnalysisId\":" + analysisId
+                + ",\"packageId\":" + existing.getPackageId()
+                + ",\"documentIds\":" + documentIdsJson
+                + "}";
+        long jobId = jobPort.insert(
+                operator.getOrgId(),
+                null,
+                JobPort.TYPE_TENDER_ANALYSIS,
+                JobPort.STATUS_PENDING,
+                payload,
+                operator.getUserId()
+        );
+        tenderAnalysisPort.bindJob(newAnalysisId, jobId);
+
+        CreateResult result = new CreateResult();
+        result.setAnalysisId(newAnalysisId);
+        result.setJobId(jobId);
+        result.setPackageId(existing.getPackageId());
+        result.setDocumentIds(parseLongArray(documentIdsJson));
+        result.setIndexJobIds(new ArrayList<>());
+        result.setFiles(new ArrayList<>());
+        return result;
+    }
+
     private List<UploadFileCommand> requireUploadFiles(List<MultipartFile> files, List<String> fileTypes) {
         if (files == null || files.isEmpty()) {
             throw new BizException(ErrorCode.BAD_REQUEST, "请选择要上传的招标文件");
@@ -232,6 +288,28 @@ public class TenderAnalysisAppService {
         } catch (Exception ex) {
             throw new BizException(ErrorCode.INTERNAL, "序列化招标解析文件 ID 失败");
         }
+    }
+
+    private List<Long> parseLongArray(String json) {
+        List<Long> result = new ArrayList<>();
+        if (json == null || json.isBlank()) {
+            return result;
+        }
+        try {
+            JsonNode node = objectMapper.readTree(json);
+            if (node == null || !node.isArray()) {
+                return result;
+            }
+            for (int i = 0; i < node.size(); i++) {
+                JsonNode item = node.get(i);
+                if (item != null && item.canConvertToLong()) {
+                    result.add(item.asLong());
+                }
+            }
+        } catch (Exception ignored) {
+            // 非法 JSON 返回空数组
+        }
+        return result;
     }
 
     /** 创建任务结果。 */

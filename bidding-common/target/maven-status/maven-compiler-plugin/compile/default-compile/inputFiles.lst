@@ -4,6 +4,7 @@ D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\co
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\error\ErrorCode.java
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\package-info.java
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\BidPackageReviewSummaryPort.java
+D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\BidSimulationAuditPort.java
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\ChunkingPort.java
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\DocumentAccessPort.java
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\DocumentCascadePort.java
@@ -34,6 +35,8 @@ D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\co
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\TenderAnalysisDocumentCommandPort.java
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\TenderAnalysisPort.java
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\VectorRecallPort.java
+D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\security\BidderAuth.java
+D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\security\BusinessAuth.java
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\security\CurrentUser.java
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\security\TendererAuth.java
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\security\UserContext.java

@@ -3,12 +3,12 @@ package com.bidding.common.port;
 import org.springframework.web.multipart.MultipartFile;
 
 /**
- * 招标解析文件写操作（实现在 file 模块）。
+ * 内部文件写操作（实现在 file 模块），用于招标解析 / 投标模拟审核等异步分析场景。
  */
 public interface TenderAnalysisDocumentCommandPort {
 
     /**
-     * 上传招标解析文件到指定内部招标包，并自动排队 INDEX。
+     * 上传文件到指定内部标包，并自动排队 INDEX。
      */
     UploadResult uploadAndIndex(long orgId,
                                 long packageId,

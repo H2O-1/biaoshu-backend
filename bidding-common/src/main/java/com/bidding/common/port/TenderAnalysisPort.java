@@ -76,6 +76,11 @@ public interface TenderAnalysisPort {
     AnalysisSummary findById(long orgId, long analysisId);
 
     /**
+     * 按组织查询主记录；包含 OBSOLETE。
+     */
+    AnalysisSummary findAnyById(long orgId, long analysisId);
+
+    /**
      * 按组织查询详情，含条目；不存在或不属于该组织返回 null。
      */
     AnalysisDetail findDetail(long orgId, long analysisId);
@@ -314,6 +319,8 @@ public interface TenderAnalysisPort {
         private String projectOverview;
         private String evidenceJson;
         private String errorMessage;
+        private int requirementCount;
+        private int issueCount;
         private long createdBy;
         private Instant createdAt;
         private Instant updatedAt;
@@ -452,6 +459,22 @@ public interface TenderAnalysisPort {
 
         public void setErrorMessage(String errorMessage) {
             this.errorMessage = errorMessage;
+        }
+
+        public int getRequirementCount() {
+            return requirementCount;
+        }
+
+        public void setRequirementCount(int requirementCount) {
+            this.requirementCount = requirementCount;
+        }
+
+        public int getIssueCount() {
+            return issueCount;
+        }
+
+        public void setIssueCount(int issueCount) {
+            this.issueCount = issueCount;
         }
 
         public long getCreatedBy() {

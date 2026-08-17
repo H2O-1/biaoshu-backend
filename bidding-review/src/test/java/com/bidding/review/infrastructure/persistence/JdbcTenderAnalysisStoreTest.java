@@ -39,7 +39,10 @@ class JdbcTenderAnalysisStoreTest {
         ArgumentCaptor<Object[]> listArgs = ArgumentCaptor.forClass(Object[].class);
         verify(jdbcTemplate).query(listSql.capture(), any(RowMapper.class), listArgs.capture());
         assertTrue(listSql.getValue().contains("status <> 'OBSOLETE'"));
-        assertTrue(listSql.getValue().contains("AND status = ?"));
+        assertTrue(listSql.getValue().contains("biz_tender_analysis_item"));
+        assertTrue(listSql.getValue().contains("requirement_count"));
+        assertTrue(listSql.getValue().contains("issue_count"));
+        assertTrue(listSql.getValue().contains("AND a.status = ?"));
         assertEquals(2L, listArgs.getValue()[0]);
         assertEquals(TenderAnalysisPort.STATUS_FAILED, listArgs.getValue()[1]);
         assertEquals(10, listArgs.getValue()[2]);
@@ -49,7 +52,7 @@ class JdbcTenderAnalysisStoreTest {
         ArgumentCaptor<Object[]> countArgs = ArgumentCaptor.forClass(Object[].class);
         verify(jdbcTemplate).queryForObject(countSql.capture(), eq(Long.class), countArgs.capture());
         assertTrue(countSql.getValue().contains("status <> 'OBSOLETE'"));
-        assertTrue(countSql.getValue().contains("AND status = ?"));
+        assertTrue(countSql.getValue().contains("AND a.status = ?"));
         assertEquals(2L, countArgs.getValue()[0]);
         assertEquals(TenderAnalysisPort.STATUS_FAILED, countArgs.getValue()[1]);
     }
