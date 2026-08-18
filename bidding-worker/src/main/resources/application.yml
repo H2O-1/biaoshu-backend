@@ -109,6 +109,11 @@ bidding:
     worker-enabled: true
     poll-ms: ${BID_SIMULATION_AUDIT_POLL_MS:3000}
     worker-id: ${BID_SIMULATION_AUDIT_WORKER_ID:}
+  # 专家评审截止自动提交（本进程写死开启，原因同 index.worker-enabled）
+  expert-review:
+    deadline-worker-enabled: true
+    deadline-poll-ms: ${EXPERT_REVIEW_DEADLINE_POLL_MS:60000}
+    deadline-batch-size: ${EXPERT_REVIEW_DEADLINE_BATCH_SIZE:20}
   # 一键审查总流程（本进程写死开启，原因同 index.worker-enabled）
   ai-review-pipeline:
     worker-enabled: true

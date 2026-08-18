@@ -7,6 +7,7 @@ import com.bidding.common.port.BidPackageReviewSummaryPort;
 import com.bidding.common.port.DocumentCountPort;
 import com.bidding.common.port.DocumentProjectBindPort;
 import com.bidding.common.port.OrgLookupPort;
+import com.bidding.common.port.ProjectArtifactInvalidationPort;
 import com.bidding.common.port.ProjectReviewProgressPort;
 import com.bidding.common.port.ReviewPort;
 import com.bidding.common.security.CurrentUser;
@@ -78,6 +79,7 @@ public class ProjectAppService {
     private final OrgLookupPort orgLookupPort;
     private final ProjectReviewProgressPort projectReviewProgressPort;
     private final BidPackageReviewSummaryPort bidPackageReviewSummaryPort;
+    private final ProjectArtifactInvalidationPort projectArtifactInvalidationPort;
 
     public ProjectAppService(ProjectRepository projectRepository,
                              PackageRepository packageRepository,
@@ -85,7 +87,8 @@ public class ProjectAppService {
                              DocumentProjectBindPort documentProjectBindPort,
                              OrgLookupPort orgLookupPort,
                              ProjectReviewProgressPort projectReviewProgressPort,
-                             BidPackageReviewSummaryPort bidPackageReviewSummaryPort) {
+                             BidPackageReviewSummaryPort bidPackageReviewSummaryPort,
+                             ProjectArtifactInvalidationPort projectArtifactInvalidationPort) {
         this.projectRepository = projectRepository;
         this.packageRepository = packageRepository;
         this.documentCountPort = documentCountPort;
@@ -93,6 +96,7 @@ public class ProjectAppService {
         this.orgLookupPort = orgLookupPort;
         this.projectReviewProgressPort = projectReviewProgressPort;
         this.bidPackageReviewSummaryPort = bidPackageReviewSummaryPort;
+        this.projectArtifactInvalidationPort = projectArtifactInvalidationPort;
     }
 
     /**
@@ -288,6 +292,7 @@ public class ProjectAppService {
         if (project.isDeleted()) {
             return;
         }
+        projectArtifactInvalidationPort.deleteExpertReviewsByProjectId(project.getOrgId(), projectId);
         projectRepository.updateStatus(projectId, STATUS_DELETED);
     }
 

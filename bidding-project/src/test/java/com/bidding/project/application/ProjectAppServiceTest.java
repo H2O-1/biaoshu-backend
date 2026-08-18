@@ -7,6 +7,7 @@ import com.bidding.common.port.BidPackageReviewSummaryPort;
 import com.bidding.common.port.DocumentCountPort;
 import com.bidding.common.port.DocumentProjectBindPort;
 import com.bidding.common.port.OrgLookupPort;
+import com.bidding.common.port.ProjectArtifactInvalidationPort;
 import com.bidding.common.port.ProjectReviewProgressPort;
 import com.bidding.common.port.ReviewPort;
 import com.bidding.common.security.CurrentUser;
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -38,6 +40,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -65,6 +68,9 @@ class ProjectAppServiceTest {
 
     @Mock
     private BidPackageReviewSummaryPort bidPackageReviewSummaryPort;
+
+    @Mock
+    private ProjectArtifactInvalidationPort projectArtifactInvalidationPort;
 
     @InjectMocks
     private ProjectAppService projectAppService;
@@ -232,6 +238,21 @@ class ProjectAppServiceTest {
         assertNull(summary.getProjectType());
         assertNull(summary.getLeaderName());
         verify(projectRepository).updateBasicInfo(100L, "新名称", null, null, null);
+    }
+
+    @Test
+    void deleteCleansExpertReviewsBeforeProjectDeleted() {
+        when(projectRepository.findById(100L)).thenReturn(Optional.of(
+                project(100L, 2L, "市政道路改造", "ACTIVE")));
+        when(projectArtifactInvalidationPort.deleteExpertReviewsByProjectId(2L, 100L))
+                .thenReturn(1);
+
+        projectAppService.delete(100L);
+
+        InOrder inOrder = inOrder(projectRepository, projectArtifactInvalidationPort);
+        inOrder.verify(projectRepository).findById(100L);
+        inOrder.verify(projectArtifactInvalidationPort).deleteExpertReviewsByProjectId(2L, 100L);
+        inOrder.verify(projectRepository).updateStatus(100L, "DELETED");
     }
 
     @Test

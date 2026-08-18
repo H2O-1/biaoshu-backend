@@ -3,3 +3,4 @@ D:\Work\bidding-architecture\backend\bidding-identity\src\test\java\com\bidding\
 D:\Work\bidding-architecture\backend\bidding-identity\src\test\java\com\bidding\identity\application\AdminUserAppServiceTest.java
 D:\Work\bidding-architecture\backend\bidding-identity\src\test\java\com\bidding\identity\application\AuthAppServiceTest.java
 D:\Work\bidding-architecture\backend\bidding-identity\src\test\java\com\bidding\identity\infrastructure\city\CityCatalogTest.java
+D:\Work\bidding-architecture\backend\bidding-identity\src\test\java\com\bidding\identity\infrastructure\port\ExpertAccountPortAdapterTest.java

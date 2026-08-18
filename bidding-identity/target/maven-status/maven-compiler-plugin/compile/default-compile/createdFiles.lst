@@ -22,10 +22,11 @@ com\bidding\identity\application\AdminOrgAppService$OrgDetail.class
 com\bidding\identity\domain\port\UserRepository.class
 com\bidding\identity\application\AuthAppService$MeResult.class
 com\bidding\identity\infrastructure\persistence\JdbcOrgRepository.class
+com\bidding\identity\adapter\web\AdminOrgController$UpdateBusinessUserProfileRequest.class
 com\bidding\identity\adapter\web\AuthController$LoginRequest.class
 com\bidding\identity\application\AuthAppService$OrgInfo.class
 com\bidding\identity\infrastructure\security\PasswordEncoderConfig.class
-com\bidding\identity\application\AdminUserAppService$PlatformAdminPage.class
+com\bidding\identity\infrastructure\port\ExpertAccountPortAdapter.class
 com\bidding\identity\application\AdminUserAppService$UserSummary.class
 com\bidding\identity\adapter\web\AdminCityController$ProvinceListResult.class
 com\bidding\identity\application\AdminDashboardAppService.class

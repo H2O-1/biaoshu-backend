@@ -2,6 +2,8 @@ D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\re
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\adapter\web\AiReviewPipelineController.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\adapter\web\BidSimulationAuditController.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\adapter\web\ChecklistController.java
+D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\adapter\web\ExpertReviewController.java
+D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\adapter\web\ExpertReviewTaskController.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\adapter\web\JobController.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\adapter\web\RecallDebugController.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\adapter\web\RerankDebugController.java
@@ -16,6 +18,8 @@ D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\re
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\ChecklistAppService.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\ChecklistBuildPipeline.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\ChecklistRecallDebugAppService.java
+D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\ExpertReviewAppService.java
+D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\ExpertReviewExportService.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\IndexJobExecutor.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\JobAppService.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\JobSseService.java
@@ -32,6 +36,7 @@ D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\re
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\persistence\BidPackageReviewSummaryPortAdapter.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\persistence\JdbcBidSimulationAuditStore.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\persistence\JdbcDocumentIndexStore.java
+D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\persistence\JdbcExpertReviewStore.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\persistence\JdbcJobRepository.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\persistence\JdbcRequirementChecklistStore.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\persistence\JdbcReviewDimensionStore.java
@@ -49,6 +54,7 @@ D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\re
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\worker\AiReviewPipelineJobPoller.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\worker\BidSimulationAuditJobPoller.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\worker\BuildChecklistJobPoller.java
+D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\worker\ExpertReviewDeadlinePoller.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\worker\IndexJobPoller.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\worker\ReviewJobPoller.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\worker\StaleAiWorkRecovery.java

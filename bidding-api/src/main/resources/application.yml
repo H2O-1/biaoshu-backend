@@ -118,6 +118,11 @@ bidding:
     worker-enabled: ${BID_SIMULATION_AUDIT_WORKER_ENABLED:false}
     poll-ms: ${BID_SIMULATION_AUDIT_POLL_MS:3000}
     worker-id: ${BID_SIMULATION_AUDIT_WORKER_ID:}
+  # 专家评审截止自动提交（worker-enabled 默认 false，同 index 说明）
+  expert-review:
+    deadline-worker-enabled: ${EXPERT_REVIEW_DEADLINE_WORKER_ENABLED:false}
+    deadline-poll-ms: ${EXPERT_REVIEW_DEADLINE_POLL_MS:60000}
+    deadline-batch-size: ${EXPERT_REVIEW_DEADLINE_BATCH_SIZE:20}
   # 任务进度 SSE（GET /api/jobs/{id}/events）；短轮询 GET /api/jobs/{id} 仍保留
   job:
     sse:

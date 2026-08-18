@@ -39,4 +39,11 @@ public interface ProjectArtifactInvalidationPort {
      * @return 更新行数
      */
     int obsoleteChecklistsByProjectId(long projectId, String reason);
+
+    /**
+     * 项目删除时清理专家评审记录和临时专家账号。
+     *
+     * @return 删除的专家评审主记录数
+     */
+    int deleteExpertReviewsByProjectId(long orgId, long projectId);
 }

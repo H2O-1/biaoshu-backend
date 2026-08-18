@@ -36,3 +36,5 @@ bidding:
     worker-enabled: true
   ai-review-pipeline:
     worker-enabled: true
+  expert-review:
+    deadline-worker-enabled: true

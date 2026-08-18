@@ -21,6 +21,7 @@ D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\
 D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\infrastructure\city\CityCatalog.java
 D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\infrastructure\persistence\JdbcOrgRepository.java
 D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\infrastructure\persistence\JdbcUserRepository.java
+D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\infrastructure\port\ExpertAccountPortAdapter.java
 D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\infrastructure\port\OrgLookupPortAdapter.java
 D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\infrastructure\security\CorsConfig.java
 D:\Work\bidding-architecture\backend\bidding-identity\src\main\java\com\bidding\identity\infrastructure\security\JwtAuthenticationFilter.java
