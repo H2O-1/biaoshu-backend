@@ -434,6 +434,18 @@ public class JdbcExpertReviewStore {
     }
 
     @Transactional
+    public int markMemberDeleted(long reviewId, long memberId) {
+        return jdbcTemplate.update(
+                "UPDATE biz_expert_review_member SET status = ?, updated_at = CURRENT_TIMESTAMP "
+                        + "WHERE review_id = ? AND id = ? AND status = ?",
+                MEMBER_STATUS_DELETED,
+                reviewId,
+                memberId,
+                MEMBER_STATUS_ACTIVE
+        );
+    }
+
+    @Transactional
     public int updateItemResult(long reviewId,
                                 long memberId,
                                 long itemId,

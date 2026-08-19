@@ -13,6 +13,7 @@ D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\re
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\AiReviewPipelineAppService.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\AiReviewPipelineJobExecutor.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\BidSimulationAuditAppService.java
+D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\BidSimulationAuditExportService.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\BidSimulationAuditJobExecutor.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\BuildChecklistJobExecutor.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\ChecklistAppService.java
@@ -30,6 +31,7 @@ D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\re
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\ReviewDimensionAppService.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\ReviewJobExecutor.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\TenderAnalysisAppService.java
+D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\TenderAnalysisExportService.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\TenderAnalysisJobExecutor.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\application\TenderIssueScanPipeline.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\logging\AiPipelineLog.java

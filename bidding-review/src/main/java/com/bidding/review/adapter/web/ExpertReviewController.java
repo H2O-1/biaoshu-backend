@@ -9,6 +9,7 @@ import jakarta.validation.constraints.NotNull;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -63,6 +64,13 @@ public class ExpertReviewController {
                                                  @Valid @RequestBody DisplayNameRequest request) {
         return ApiResponse.ok(toMemberResponse(
                 expertReviewAppService.addMember(projectId, request.getDisplayName())));
+    }
+
+    @DeleteMapping("/members/{memberId}")
+    public ApiResponse<Void> removeMember(@PathVariable("projectId") long projectId,
+                                          @PathVariable("memberId") long memberId) {
+        expertReviewAppService.removeMember(projectId, memberId);
+        return ApiResponse.ok(null);
     }
 
     @PostMapping("/push")

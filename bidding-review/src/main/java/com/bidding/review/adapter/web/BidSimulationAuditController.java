@@ -5,8 +5,10 @@ import com.bidding.common.api.PageResult;
 import com.bidding.common.port.BidSimulationAuditPort;
 import com.bidding.common.port.DocumentAccessPort;
 import com.bidding.review.application.BidSimulationAuditAppService;
+import com.bidding.review.application.BidSimulationAuditExportService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.http.HttpHeaders;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -16,10 +18,13 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -31,14 +36,20 @@ import java.util.List;
 @RequestMapping("/api/bid-simulation-audits")
 public class BidSimulationAuditController {
 
+    private static final MediaType XLSX_MEDIA_TYPE =
+            MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+
     private final BidSimulationAuditAppService bidSimulationAuditAppService;
+    private final BidSimulationAuditExportService bidSimulationAuditExportService;
     private final DocumentAccessPort documentAccessPort;
     private final ObjectMapper objectMapper;
 
     public BidSimulationAuditController(BidSimulationAuditAppService bidSimulationAuditAppService,
+                                        BidSimulationAuditExportService bidSimulationAuditExportService,
                                         DocumentAccessPort documentAccessPort,
                                         ObjectMapper objectMapper) {
         this.bidSimulationAuditAppService = bidSimulationAuditAppService;
+        this.bidSimulationAuditExportService = bidSimulationAuditExportService;
         this.documentAccessPort = documentAccessPort;
         this.objectMapper = objectMapper;
     }
@@ -52,6 +63,16 @@ public class BidSimulationAuditController {
             @RequestPart("bidFiles") List<MultipartFile> bidFiles) {
         BidSimulationAuditAppService.CreateResult created =
                 bidSimulationAuditAppService.create(name, tenderFiles, tenderFileTypes, bidFiles, bidFileTypes);
+        return ApiResponse.ok(toCreateResponse(created));
+    }
+
+    @PostMapping("/{auditId}/rerun")
+    public ApiResponse<CreateResponse> rerun(@PathVariable("auditId") long auditId) {
+        BidSimulationAuditAppService.CreateResult rerun = bidSimulationAuditAppService.rerun(auditId);
+        return ApiResponse.ok(toCreateResponse(rerun));
+    }
+
+    private CreateResponse toCreateResponse(BidSimulationAuditAppService.CreateResult created) {
         CreateResponse response = new CreateResponse();
         response.setAuditId(created.getAuditId());
         response.setJobId(created.getJobId());
@@ -62,7 +83,7 @@ public class BidSimulationAuditController {
         response.setIndexJobIds(created.getIndexJobIds());
         response.setTenderFiles(created.getTenderFiles());
         response.setBidFiles(created.getBidFiles());
-        return ApiResponse.ok(response);
+        return response;
     }
 
     @GetMapping
@@ -84,6 +105,18 @@ public class BidSimulationAuditController {
     @GetMapping("/{auditId}")
     public ApiResponse<AuditDetailDto> get(@PathVariable("auditId") long auditId) {
         return ApiResponse.ok(toDetailDto(bidSimulationAuditAppService.get(auditId)));
+    }
+
+    @GetMapping("/{auditId}/export")
+    public ResponseEntity<byte[]> export(@PathVariable("auditId") long auditId) {
+        BidSimulationAuditExportService.ExportFile file = bidSimulationAuditExportService.exportAudit(auditId);
+        String encodedFileName = URLEncoder.encode(file.getFileName(), StandardCharsets.UTF_8)
+                .replace("+", "%20");
+        return ResponseEntity.ok()
+                .contentType(XLSX_MEDIA_TYPE)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename*=UTF-8''" + encodedFileName)
+                .body(file.getContent());
     }
 
     @DeleteMapping("/{auditId}")

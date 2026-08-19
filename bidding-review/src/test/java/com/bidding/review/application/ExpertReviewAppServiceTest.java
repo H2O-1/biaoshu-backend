@@ -1,6 +1,7 @@
 package com.bidding.review.application;
 
 import com.bidding.common.error.BizException;
+import com.bidding.common.error.ErrorCode;
 import com.bidding.common.port.ExpertAccountPort;
 import com.bidding.common.port.PackageLookupPort;
 import com.bidding.common.port.ProjectLookupPort;
@@ -104,6 +105,40 @@ class ExpertReviewAppServiceTest {
         assertEquals("张三", result.getDisplayName());
         assertEquals("Temp1234!", result.getTemporaryPassword());
         assertTrue(!result.isAppended());
+    }
+
+    @Test
+    void removeMemberDeletesTemporaryAccountAndRefreshesCount() {
+        ProjectLookupPort.ProjectRef project = project();
+        ReviewRow review = buildingReview();
+        MemberRow member = member(88L, 77L);
+        when(projectLookupPort.findActiveById(100L)).thenReturn(project);
+        when(expertReviewStore.findLatestByProject(2L, 100L)).thenReturn(review);
+        when(expertReviewStore.findMemberById(501L, 88L)).thenReturn(member);
+        when(expertReviewStore.markMemberDeleted(501L, 88L)).thenReturn(1);
+        when(expertReviewStore.countMembers(501L)).thenReturn(1);
+        when(expertReviewStore.updateExpertCount(501L, 1)).thenReturn(1);
+
+        service.removeMember(100L, 88L);
+
+        verify(expertReviewStore).markMemberDeleted(501L, 88L);
+        verify(expertAccountPort).deleteTemporaryExpert(77L);
+        verify(expertReviewStore).updateExpertCount(501L, 1);
+    }
+
+    @Test
+    void removeMemberRejectsPushedReview() {
+        ProjectLookupPort.ProjectRef project = project();
+        when(projectLookupPort.findActiveById(100L)).thenReturn(project);
+        when(expertReviewStore.findLatestByProject(2L, 100L))
+                .thenReturn(runningReview(Instant.parse("2026-08-20T09:00:00Z")));
+
+        BizException exception = assertThrows(BizException.class,
+                () -> service.removeMember(100L, 88L));
+
+        assertEquals(ErrorCode.CONFLICT, exception.errorCode());
+        verify(expertReviewStore, never()).markMemberDeleted(anyLong(), anyLong());
+        verify(expertAccountPort, never()).deleteTemporaryExpert(anyLong());
     }
 
     @Test

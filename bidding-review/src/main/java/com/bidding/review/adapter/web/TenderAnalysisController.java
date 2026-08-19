@@ -4,8 +4,10 @@ import com.bidding.common.api.ApiResponse;
 import com.bidding.common.api.PageResult;
 import com.bidding.common.port.TenderAnalysisPort;
 import com.bidding.review.application.TenderAnalysisAppService;
+import com.bidding.review.application.TenderAnalysisExportService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.http.HttpHeaders;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -15,9 +17,12 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -29,12 +34,18 @@ import java.util.List;
 @RequestMapping("/api/tender-analyses")
 public class TenderAnalysisController {
 
+    private static final MediaType XLSX_MEDIA_TYPE =
+            MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+
     private final TenderAnalysisAppService tenderAnalysisAppService;
+    private final TenderAnalysisExportService tenderAnalysisExportService;
     private final ObjectMapper objectMapper;
 
     public TenderAnalysisController(TenderAnalysisAppService tenderAnalysisAppService,
+                                    TenderAnalysisExportService tenderAnalysisExportService,
                                     ObjectMapper objectMapper) {
         this.tenderAnalysisAppService = tenderAnalysisAppService;
+        this.tenderAnalysisExportService = tenderAnalysisExportService;
         this.objectMapper = objectMapper;
     }
 
@@ -74,6 +85,18 @@ public class TenderAnalysisController {
     @GetMapping("/{analysisId}")
     public ApiResponse<AnalysisDetailDto> get(@PathVariable("analysisId") long analysisId) {
         return ApiResponse.ok(toDetailDto(tenderAnalysisAppService.get(analysisId)));
+    }
+
+    @GetMapping("/{analysisId}/export")
+    public ResponseEntity<byte[]> export(@PathVariable("analysisId") long analysisId) {
+        TenderAnalysisExportService.ExportFile file = tenderAnalysisExportService.exportAnalysis(analysisId);
+        String encodedFileName = URLEncoder.encode(file.getFileName(), StandardCharsets.UTF_8)
+                .replace("+", "%20");
+        return ResponseEntity.ok()
+                .contentType(XLSX_MEDIA_TYPE)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename*=UTF-8''" + encodedFileName)
+                .body(file.getContent());
     }
 
     @DeleteMapping("/{analysisId}")

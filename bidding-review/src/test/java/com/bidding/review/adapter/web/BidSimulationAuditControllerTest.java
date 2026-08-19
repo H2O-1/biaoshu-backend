@@ -5,8 +5,11 @@ import com.bidding.common.api.PageResult;
 import com.bidding.common.port.BidSimulationAuditPort;
 import com.bidding.common.port.DocumentAccessPort;
 import com.bidding.review.application.BidSimulationAuditAppService;
+import com.bidding.review.application.BidSimulationAuditExportService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -15,7 +18,9 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -25,9 +30,10 @@ class BidSimulationAuditControllerTest {
     @Test
     void createMapsAppServiceResult() {
         BidSimulationAuditAppService appService = mock(BidSimulationAuditAppService.class);
+        BidSimulationAuditExportService exportService = mock(BidSimulationAuditExportService.class);
         DocumentAccessPort documentAccessPort = mock(DocumentAccessPort.class);
         BidSimulationAuditController controller =
-                new BidSimulationAuditController(appService, documentAccessPort, new ObjectMapper());
+                new BidSimulationAuditController(appService, exportService, documentAccessPort, new ObjectMapper());
         List<MultipartFile> tenderFiles = List.of(file("招标文件.pdf"));
         List<String> tenderFileTypes = List.of("招标正文");
         List<MultipartFile> bidFiles = List.of(file("投标文件.pdf"));
@@ -59,9 +65,10 @@ class BidSimulationAuditControllerTest {
     @Test
     void listPassesStatusFilterAndMapsSummary() {
         BidSimulationAuditAppService appService = mock(BidSimulationAuditAppService.class);
+        BidSimulationAuditExportService exportService = mock(BidSimulationAuditExportService.class);
         DocumentAccessPort documentAccessPort = mock(DocumentAccessPort.class);
         BidSimulationAuditController controller =
-                new BidSimulationAuditController(appService, documentAccessPort, new ObjectMapper());
+                new BidSimulationAuditController(appService, exportService, documentAccessPort, new ObjectMapper());
         BidSimulationAuditPort.AuditSummary summary = new BidSimulationAuditPort.AuditSummary();
         summary.setId(55L);
         summary.setName("投标文件.pdf");
@@ -97,9 +104,10 @@ class BidSimulationAuditControllerTest {
     @Test
     void getClassifiesAllItemTypesAndMapsDisplayFields() {
         BidSimulationAuditAppService appService = mock(BidSimulationAuditAppService.class);
+        BidSimulationAuditExportService exportService = mock(BidSimulationAuditExportService.class);
         DocumentAccessPort documentAccessPort = mock(DocumentAccessPort.class);
         BidSimulationAuditController controller =
-                new BidSimulationAuditController(appService, documentAccessPort, new ObjectMapper());
+                new BidSimulationAuditController(appService, exportService, documentAccessPort, new ObjectMapper());
         when(appService.get(55L)).thenReturn(detail());
         when(documentAccessPort.listActiveByPackageId(66L)).thenReturn(List.of(doc(7L, 66L, "招标文件.pdf", "pdf")));
         when(documentAccessPort.listActiveByPackageId(67L)).thenReturn(List.of(doc(8L, 67L, "投标文件.pdf", "pdf")));
@@ -160,13 +168,65 @@ class BidSimulationAuditControllerTest {
     @Test
     void deleteDelegatesToAppService() {
         BidSimulationAuditAppService appService = mock(BidSimulationAuditAppService.class);
+        BidSimulationAuditExportService exportService = mock(BidSimulationAuditExportService.class);
         DocumentAccessPort documentAccessPort = mock(DocumentAccessPort.class);
         BidSimulationAuditController controller =
-                new BidSimulationAuditController(appService, documentAccessPort, new ObjectMapper());
+                new BidSimulationAuditController(appService, exportService, documentAccessPort, new ObjectMapper());
 
         controller.delete(55L);
 
         verify(appService).delete(55L);
+    }
+
+    @Test
+    void rerunMapsAppServiceResult() {
+        BidSimulationAuditAppService appService = mock(BidSimulationAuditAppService.class);
+        BidSimulationAuditExportService exportService = mock(BidSimulationAuditExportService.class);
+        DocumentAccessPort documentAccessPort = mock(DocumentAccessPort.class);
+        BidSimulationAuditController controller =
+                new BidSimulationAuditController(appService, exportService, documentAccessPort, new ObjectMapper());
+        BidSimulationAuditAppService.CreateResult rerun = new BidSimulationAuditAppService.CreateResult();
+        rerun.setAuditId(56L);
+        rerun.setJobId(67L);
+        rerun.setTenderPackageId(77L);
+        rerun.setBidPackageId(88L);
+        rerun.setTenderDocumentIds(List.of(7L));
+        rerun.setBidDocumentIds(List.of(8L));
+        rerun.setIndexJobIds(new ArrayList<>());
+        when(appService.rerun(55L)).thenReturn(rerun);
+
+        ApiResponse<BidSimulationAuditController.CreateResponse> response = controller.rerun(55L);
+
+        assertEquals(56L, response.getData().getAuditId());
+        assertEquals(67L, response.getData().getJobId());
+        assertEquals(77L, response.getData().getTenderPackageId());
+        assertEquals(88L, response.getData().getBidPackageId());
+        assertEquals(List.of(7L), response.getData().getTenderDocumentIds());
+        assertEquals(List.of(8L), response.getData().getBidDocumentIds());
+        assertEquals(0, response.getData().getIndexJobIds().size());
+        verify(appService).rerun(55L);
+    }
+
+    @Test
+    void exportReturnsXlsxAttachment() {
+        BidSimulationAuditAppService appService = mock(BidSimulationAuditAppService.class);
+        BidSimulationAuditExportService exportService = mock(BidSimulationAuditExportService.class);
+        DocumentAccessPort documentAccessPort = mock(DocumentAccessPort.class);
+        BidSimulationAuditController controller =
+                new BidSimulationAuditController(appService, exportService, documentAccessPort, new ObjectMapper());
+        byte[] content = new byte[] {4, 5, 6};
+        when(exportService.exportAudit(55L)).thenReturn(
+                new BidSimulationAuditExportService.ExportFile("投标文件-投标模拟审核结果.xlsx", content));
+
+        ResponseEntity<byte[]> response = controller.export(55L);
+
+        assertEquals(200, response.getStatusCode().value());
+        assertEquals("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                response.getHeaders().getContentType().toString());
+        assertTrue(response.getHeaders().getFirst(HttpHeaders.CONTENT_DISPOSITION)
+                .startsWith("attachment; filename*=UTF-8''"));
+        assertArrayEquals(content, response.getBody());
+        verify(exportService).exportAudit(55L);
     }
 
     private static BidSimulationAuditPort.AuditDetail detail() {

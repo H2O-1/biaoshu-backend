@@ -4,13 +4,18 @@ import com.bidding.common.api.ApiResponse;
 import com.bidding.common.api.PageResult;
 import com.bidding.common.port.TenderAnalysisPort;
 import com.bidding.review.application.TenderAnalysisAppService;
+import com.bidding.review.application.TenderAnalysisExportService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseEntity;
 
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -20,8 +25,9 @@ class TenderAnalysisControllerTest {
     @Test
     void listPassesStatusFilter() {
         TenderAnalysisAppService appService = mock(TenderAnalysisAppService.class);
+        TenderAnalysisExportService exportService = mock(TenderAnalysisExportService.class);
         TenderAnalysisController controller =
-                new TenderAnalysisController(appService, new ObjectMapper());
+                new TenderAnalysisController(appService, exportService, new ObjectMapper());
         TenderAnalysisPort.AnalysisSummary summary = new TenderAnalysisPort.AnalysisSummary();
         summary.setId(55L);
         summary.setName("招标文件.pdf");
@@ -46,8 +52,9 @@ class TenderAnalysisControllerTest {
     @Test
     void getClassifiesIssueAndTypoItems() {
         TenderAnalysisAppService appService = mock(TenderAnalysisAppService.class);
+        TenderAnalysisExportService exportService = mock(TenderAnalysisExportService.class);
         TenderAnalysisController controller =
-                new TenderAnalysisController(appService, new ObjectMapper());
+                new TenderAnalysisController(appService, exportService, new ObjectMapper());
         when(appService.get(55L)).thenReturn(detail());
 
         ApiResponse<TenderAnalysisController.AnalysisDetailDto> response = controller.get(55L);
@@ -81,8 +88,9 @@ class TenderAnalysisControllerTest {
     @Test
     void rerunReturnsNewAnalysisResponse() {
         TenderAnalysisAppService appService = mock(TenderAnalysisAppService.class);
+        TenderAnalysisExportService exportService = mock(TenderAnalysisExportService.class);
         TenderAnalysisController controller =
-                new TenderAnalysisController(appService, new ObjectMapper());
+                new TenderAnalysisController(appService, exportService, new ObjectMapper());
         TenderAnalysisAppService.CreateResult created = new TenderAnalysisAppService.CreateResult();
         created.setAnalysisId(77L);
         created.setJobId(88L);
@@ -98,6 +106,27 @@ class TenderAnalysisControllerTest {
         assertEquals(List.of(7L, 8L), response.getData().getDocumentIds());
         assertEquals(0, response.getData().getFiles().size());
         verify(appService).rerun(55L);
+    }
+
+    @Test
+    void exportReturnsXlsxAttachment() {
+        TenderAnalysisAppService appService = mock(TenderAnalysisAppService.class);
+        TenderAnalysisExportService exportService = mock(TenderAnalysisExportService.class);
+        TenderAnalysisController controller =
+                new TenderAnalysisController(appService, exportService, new ObjectMapper());
+        byte[] content = new byte[] {1, 2, 3};
+        when(exportService.exportAnalysis(55L)).thenReturn(
+                new TenderAnalysisExportService.ExportFile("招标文件-招标解析结果.xlsx", content));
+
+        ResponseEntity<byte[]> response = controller.export(55L);
+
+        assertEquals(200, response.getStatusCode().value());
+        assertEquals("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                response.getHeaders().getContentType().toString());
+        assertTrue(response.getHeaders().getFirst(HttpHeaders.CONTENT_DISPOSITION)
+                .startsWith("attachment; filename*=UTF-8''"));
+        assertArrayEquals(content, response.getBody());
+        verify(exportService).exportAnalysis(55L);
     }
 
     private static TenderAnalysisPort.AnalysisDetail detail() {

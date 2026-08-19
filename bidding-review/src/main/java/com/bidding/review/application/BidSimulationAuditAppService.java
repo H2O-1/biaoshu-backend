@@ -9,6 +9,7 @@ import com.bidding.common.port.PackageCommandPort;
 import com.bidding.common.port.TenderAnalysisDocumentCommandPort;
 import com.bidding.common.security.BidderAuth;
 import com.bidding.common.security.CurrentUser;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -87,13 +88,14 @@ public class BidSimulationAuditAppService {
                 operator.getUserId()
         );
 
-        String payload = "{\"auditId\":" + auditId
-                + ",\"tenderPackageId\":" + tenderPackageId
-                + ",\"bidPackageId\":" + bidPackageId
-                + ",\"tenderDocumentIds\":" + tenderDocumentIdsJson
-                + ",\"bidDocumentIds\":" + bidDocumentIdsJson
-                + ",\"indexJobIds\":" + toJsonLongArray(indexJobIds)
-                + "}";
+        String payload = buildPayload(
+                auditId,
+                null,
+                tenderPackageId,
+                bidPackageId,
+                tenderDocumentIdsJson,
+                bidDocumentIdsJson,
+                toJsonLongArray(indexJobIds));
         long jobId = jobPort.insert(
                 operator.getOrgId(),
                 null,
@@ -114,6 +116,74 @@ public class BidSimulationAuditAppService {
         result.setIndexJobIds(indexJobIds);
         result.setTenderFiles(tenderFileResults);
         result.setBidFiles(bidFileResults);
+        return result;
+    }
+
+    /**
+     * 重新发起投标模拟审核：旧记录作废，复用原内部包和文档新建一条审核记录与总任务。
+     */
+    @Transactional
+    public CreateResult rerun(long auditId) {
+        CurrentUser operator = BidderAuth.requireBidder("仅投标方可操作投标模拟审核");
+        BidSimulationAuditPort.AuditSummary existing =
+                bidSimulationAuditPort.findById(operator.getOrgId(), auditId);
+        if (existing == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "投标模拟审核记录不存在");
+        }
+        if (BidSimulationAuditPort.STATUS_BUILDING.equals(existing.getStatus())) {
+            throw new BizException(ErrorCode.CONFLICT, "投标模拟审核进行中，请稍后重试");
+        }
+        if (existing.getTenderPackageId() < 1 || existing.getBidPackageId() < 1) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "投标模拟审核记录缺少内部包信息");
+        }
+
+        List<Long> tenderDocumentIds =
+                parseRequiredLongArray(existing.getTenderDocumentIdsJson(), "投标模拟审核记录缺少招标文件信息");
+        List<Long> bidDocumentIds =
+                parseRequiredLongArray(existing.getBidDocumentIdsJson(), "投标模拟审核记录缺少投标文件信息");
+
+        int updated = bidSimulationAuditPort.markObsolete(operator.getOrgId(), auditId);
+        if (updated < 1) {
+            throw new BizException(ErrorCode.NOT_FOUND, "投标模拟审核记录不存在");
+        }
+
+        long newAuditId = bidSimulationAuditPort.createBuilding(
+                operator.getOrgId(),
+                existing.getName(),
+                existing.getTenderPackageId(),
+                existing.getBidPackageId(),
+                existing.getTenderDocumentIdsJson(),
+                existing.getBidDocumentIdsJson(),
+                operator.getUserId()
+        );
+        String payload = buildPayload(
+                newAuditId,
+                auditId,
+                existing.getTenderPackageId(),
+                existing.getBidPackageId(),
+                existing.getTenderDocumentIdsJson(),
+                existing.getBidDocumentIdsJson(),
+                "[]");
+        long jobId = jobPort.insert(
+                operator.getOrgId(),
+                null,
+                JobPort.TYPE_BID_SIMULATION_AUDIT,
+                JobPort.STATUS_PENDING,
+                payload,
+                operator.getUserId()
+        );
+        bidSimulationAuditPort.bindJob(newAuditId, jobId);
+
+        CreateResult result = new CreateResult();
+        result.setAuditId(newAuditId);
+        result.setJobId(jobId);
+        result.setTenderPackageId(existing.getTenderPackageId());
+        result.setBidPackageId(existing.getBidPackageId());
+        result.setTenderDocumentIds(tenderDocumentIds);
+        result.setBidDocumentIds(bidDocumentIds);
+        result.setIndexJobIds(new ArrayList<>());
+        result.setTenderFiles(new ArrayList<>());
+        result.setBidFiles(new ArrayList<>());
         return result;
     }
 
@@ -267,6 +337,52 @@ public class BidSimulationAuditAppService {
             return objectMapper.writeValueAsString(ids == null ? new ArrayList<>() : ids);
         } catch (Exception ex) {
             throw new BizException(ErrorCode.INTERNAL, "序列化投标模拟审核文件 ID 失败");
+        }
+    }
+
+    private String buildPayload(long auditId,
+                                Long sourceAuditId,
+                                long tenderPackageId,
+                                long bidPackageId,
+                                String tenderDocumentIdsJson,
+                                String bidDocumentIdsJson,
+                                String indexJobIdsJson) {
+        StringBuilder payload = new StringBuilder();
+        payload.append("{\"auditId\":").append(auditId);
+        if (sourceAuditId != null) {
+            payload.append(",\"sourceAuditId\":").append(sourceAuditId);
+        }
+        payload.append(",\"tenderPackageId\":").append(tenderPackageId)
+                .append(",\"bidPackageId\":").append(bidPackageId)
+                .append(",\"tenderDocumentIds\":").append(tenderDocumentIdsJson)
+                .append(",\"bidDocumentIds\":").append(bidDocumentIdsJson)
+                .append(",\"indexJobIds\":").append(indexJobIdsJson)
+                .append("}");
+        return payload.toString();
+    }
+
+    private List<Long> parseRequiredLongArray(String json, String errorMessage) {
+        if (json == null || json.isBlank()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, errorMessage);
+        }
+        try {
+            JsonNode node = objectMapper.readTree(json);
+            if (node == null || !node.isArray() || node.isEmpty()) {
+                throw new BizException(ErrorCode.BAD_REQUEST, errorMessage);
+            }
+            List<Long> result = new ArrayList<>();
+            for (int i = 0; i < node.size(); i++) {
+                JsonNode item = node.get(i);
+                if (item == null || !item.canConvertToLong()) {
+                    throw new BizException(ErrorCode.BAD_REQUEST, errorMessage);
+                }
+                result.add(item.asLong());
+            }
+            return result;
+        } catch (BizException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new BizException(ErrorCode.BAD_REQUEST, errorMessage);
         }
     }
 

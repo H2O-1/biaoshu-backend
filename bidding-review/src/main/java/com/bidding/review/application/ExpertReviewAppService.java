@@ -86,6 +86,40 @@ public class ExpertReviewAppService {
     }
 
     @Transactional
+    public void removeMember(long projectId, long memberId) {
+        CurrentUser operator = TendererAuth.requireTenderer("仅招标方可移除专家");
+        ProjectLookupPort.ProjectRef project = requireProject(projectId, operator.getOrgId());
+        ReviewRow review = expertReviewStore.findLatestByProject(operator.getOrgId(), projectId);
+        if (review == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "专家评审不存在");
+        }
+        if (!STATUS_BUILDING.equalsIgnoreCase(review.getStatus())) {
+            throw new BizException(ErrorCode.CONFLICT, "专家评审已推送，不能移除专家");
+        }
+        MemberRow member = expertReviewStore.findMemberById(review.getId(), memberId);
+        if (member == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "专家成员不存在");
+        }
+        if (member.getProjectId() != project.getId()) {
+            throw new BizException(ErrorCode.CONFLICT, "专家成员项目不匹配");
+        }
+        if (!MEMBER_STATUS_ACTIVE.equalsIgnoreCase(member.getStatus())) {
+            throw new BizException(ErrorCode.CONFLICT, "专家成员状态不支持移除");
+        }
+        int deleted = expertReviewStore.markMemberDeleted(review.getId(), memberId);
+        if (deleted != 1) {
+            throw new BizException(ErrorCode.CONFLICT, "专家成员状态已变化，请刷新后重试");
+        }
+        expertAccountPort.deleteTemporaryExpert(member.getUserId());
+
+        int memberCount = expertReviewStore.countMembers(review.getId());
+        int updated = expertReviewStore.updateExpertCount(review.getId(), memberCount);
+        if (updated != 1) {
+            throw new BizException(ErrorCode.CONFLICT, "专家评审状态已变化，请刷新后重试");
+        }
+    }
+
+    @Transactional
     public PushResult push(long projectId, Instant deadlineAt, String pushMessage) {
         CurrentUser operator = TendererAuth.requireTenderer("仅招标方可推送专家评审");
         ProjectLookupPort.ProjectRef project = requireProject(projectId, operator.getOrgId());

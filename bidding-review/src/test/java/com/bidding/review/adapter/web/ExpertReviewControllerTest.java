@@ -34,4 +34,15 @@ class ExpertReviewControllerTest {
         assertArrayEquals(content, response.getBody());
         verify(exportService).exportProjectReview(100L);
     }
+
+    @Test
+    void removeMemberDelegatesToAppService() {
+        ExpertReviewAppService appService = mock(ExpertReviewAppService.class);
+        ExpertReviewExportService exportService = mock(ExpertReviewExportService.class);
+        ExpertReviewController controller = new ExpertReviewController(appService, exportService);
+
+        controller.removeMember(100L, 88L);
+
+        verify(appService).removeMember(100L, 88L);
+    }
 }
