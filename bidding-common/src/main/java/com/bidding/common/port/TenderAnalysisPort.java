@@ -34,6 +34,19 @@ public interface TenderAnalysisPort {
                         long createdBy);
 
     /**
+     * 创建重试解析主记录。
+     *
+     * @return analysisId
+     */
+    long createRerunBuilding(long orgId,
+                             long packageId,
+                             String name,
+                             String documentIdsJson,
+                             long createdBy,
+                             long sourceAnalysisId,
+                             Instant originalCreatedAt);
+
+    /**
      * 绑定对应异步任务 ID。
      */
     void bindJob(long analysisId, long jobId);
@@ -322,6 +335,8 @@ public interface TenderAnalysisPort {
         private int requirementCount;
         private int issueCount;
         private long createdBy;
+        private Long sourceAnalysisId;
+        private Instant originalCreatedAt;
         private Instant createdAt;
         private Instant updatedAt;
 
@@ -483,6 +498,22 @@ public interface TenderAnalysisPort {
 
         public void setCreatedBy(long createdBy) {
             this.createdBy = createdBy;
+        }
+
+        public Long getSourceAnalysisId() {
+            return sourceAnalysisId;
+        }
+
+        public void setSourceAnalysisId(Long sourceAnalysisId) {
+            this.sourceAnalysisId = sourceAnalysisId;
+        }
+
+        public Instant getOriginalCreatedAt() {
+            return originalCreatedAt;
+        }
+
+        public void setOriginalCreatedAt(Instant originalCreatedAt) {
+            this.originalCreatedAt = originalCreatedAt;
         }
 
         public Instant getCreatedAt() {

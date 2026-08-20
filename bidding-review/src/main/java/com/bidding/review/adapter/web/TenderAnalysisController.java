@@ -137,6 +137,8 @@ public class TenderAnalysisController {
         dto.setRequirementCount(s.getRequirementCount());
         dto.setIssueCount(s.getIssueCount());
         dto.setCreatedBy(s.getCreatedBy());
+        dto.setSourceAnalysisId(s.getSourceAnalysisId());
+        dto.setOriginalCreatedAt(s.getOriginalCreatedAt());
         dto.setCreatedAt(s.getCreatedAt());
         dto.setUpdatedAt(s.getUpdatedAt());
         return dto;
@@ -160,6 +162,8 @@ public class TenderAnalysisController {
         dto.setBidDeadlineAt(base.getBidDeadlineAt());
         dto.setErrorMessage(base.getErrorMessage());
         dto.setCreatedBy(base.getCreatedBy());
+        dto.setSourceAnalysisId(base.getSourceAnalysisId());
+        dto.setOriginalCreatedAt(base.getOriginalCreatedAt());
         dto.setCreatedAt(base.getCreatedAt());
         dto.setUpdatedAt(base.getUpdatedAt());
 
@@ -387,6 +391,8 @@ public class TenderAnalysisController {
         private int requirementCount;
         private int issueCount;
         private long createdBy;
+        private Long sourceAnalysisId;
+        private Instant originalCreatedAt;
         private Instant createdAt;
         private Instant updatedAt;
 
@@ -524,6 +530,22 @@ public class TenderAnalysisController {
 
         public void setCreatedBy(long createdBy) {
             this.createdBy = createdBy;
+        }
+
+        public Long getSourceAnalysisId() {
+            return sourceAnalysisId;
+        }
+
+        public void setSourceAnalysisId(Long sourceAnalysisId) {
+            this.sourceAnalysisId = sourceAnalysisId;
+        }
+
+        public Instant getOriginalCreatedAt() {
+            return originalCreatedAt;
+        }
+
+        public void setOriginalCreatedAt(Instant originalCreatedAt) {
+            this.originalCreatedAt = originalCreatedAt;
         }
 
         public Instant getCreatedAt() {

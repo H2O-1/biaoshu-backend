@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -176,12 +177,21 @@ public class TenderAnalysisAppService {
             throw new BizException(ErrorCode.BAD_REQUEST, "招标解析记录缺少文档信息");
         }
 
-        long newAnalysisId = tenderAnalysisPort.createBuilding(
+        Instant originalCreatedAt = existing.getOriginalCreatedAt() == null
+                ? existing.getCreatedAt()
+                : existing.getOriginalCreatedAt();
+        if (originalCreatedAt == null) {
+            throw new BizException(ErrorCode.CONFLICT, "招标解析记录缺少创建时间");
+        }
+
+        long newAnalysisId = tenderAnalysisPort.createRerunBuilding(
                 operator.getOrgId(),
                 existing.getPackageId(),
                 existing.getName(),
                 documentIdsJson,
-                operator.getUserId());
+                operator.getUserId(),
+                analysisId,
+                originalCreatedAt);
 
         String payload = "{\"analysisId\":" + newAnalysisId
                 + ",\"sourceAnalysisId\":" + analysisId

@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -35,6 +36,8 @@ class TenderAnalysisControllerTest {
         summary.setDocumentIdsJson("[7,8]");
         summary.setRequirementCount(12);
         summary.setIssueCount(3);
+        summary.setSourceAnalysisId(44L);
+        summary.setOriginalCreatedAt(Instant.parse("2026-08-10T08:30:00Z"));
         when(appService.list("园区", TenderAnalysisPort.STATUS_FAILED, 2, 10))
                 .thenReturn(new PageResult<>(List.of(summary), 1, 2, 10));
 
@@ -46,6 +49,8 @@ class TenderAnalysisControllerTest {
         assertEquals(2, dto.getFileCount());
         assertEquals(12, dto.getRequirementCount());
         assertEquals(3, dto.getIssueCount());
+        assertEquals(44L, dto.getSourceAnalysisId());
+        assertEquals(Instant.parse("2026-08-10T08:30:00Z"), dto.getOriginalCreatedAt());
         verify(appService).list("园区", TenderAnalysisPort.STATUS_FAILED, 2, 10);
     }
 
@@ -60,6 +65,8 @@ class TenderAnalysisControllerTest {
         ApiResponse<TenderAnalysisController.AnalysisDetailDto> response = controller.get(55L);
 
         TenderAnalysisController.AnalysisDetailDto data = response.getData();
+        assertEquals(44L, data.getSourceAnalysisId());
+        assertEquals(Instant.parse("2026-08-10T08:30:00Z"), data.getOriginalCreatedAt());
         assertEquals(1, data.getQualificationItems().size());
         assertEquals("Q1", data.getQualificationItems().get(0).getRequirementCode());
         assertEquals(1, data.getScoringItems().size());
@@ -138,6 +145,8 @@ class TenderAnalysisControllerTest {
         detail.setStatus(TenderAnalysisPort.STATUS_SUCCESS);
         detail.setDocumentIdsJson("[7]");
         detail.setEvidenceJson("[]");
+        detail.setSourceAnalysisId(44L);
+        detail.setOriginalCreatedAt(Instant.parse("2026-08-10T08:30:00Z"));
         detail.setItems(items());
         return detail;
     }

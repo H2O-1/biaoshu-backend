@@ -6,7 +6,7 @@
 > 任务进度见：[任务进度 SSE](./API-任务进度SSE.md)  
 > 账号 / 组织 / 项目见：[账号组织项目](./API-账号组织项目.md) · [总索引](./API.md)  
 > Base URL（本地）：`http://localhost:8080`  
-> 更新：2026-08-18
+> 更新：2026-08-20
 
 ## 通用约定（摘要）
 
@@ -33,6 +33,7 @@
 | 逻辑问题 | 全文 chunk 分批扫描后合并，沿用 `逻辑问题-1` / `逻辑问题-2` 编号 |
 | 错别字识别 | 全文 chunk 分批扫描后合并，沿用 `错别字-1` / `错别字-2` 编号 |
 | 查看原文片段 | 返回 evidence，前端可通过 chunk / page / quote 定位原文片段 |
+| 重试链路追踪 | 重试解析生成新记录，并返回来源记录与首次创建时间 |
 | 导出结果 | 成功解析后可导出 xlsx 结果文件 |
 
 ---
@@ -162,6 +163,8 @@
         "bidDeadlineAt": "2026-08-15T09:00:00Z",
         "errorMessage": null,
         "createdBy": 10,
+        "sourceAnalysisId": null,
+        "originalCreatedAt": "2026-08-11T08:30:00Z",
         "createdAt": "2026-08-11T08:30:00Z",
         "updatedAt": "2026-08-11T08:35:00Z"
       }
@@ -181,6 +184,9 @@
 | `issueCount` | 发现问题数量；`LOGIC_ISSUE` + `TYPO` 条目数 |
 | `status` | 解析状态：`BUILDING` 解析中 / `SUCCESS` 解析完成 / `FAILED` 解析失败 |
 | `jobId` | 解析任务 ID；`BUILDING` 时可用于查询进度 |
+| `sourceAnalysisId` | 重试解析来源记录 ID；首次创建为空 |
+| `originalCreatedAt` | 首次创建时间；首次创建时等于 `createdAt`，重试解析记录继承来源记录的首次创建时间 |
+| `createdAt` | 当前这次解析任务的创建时间；重试解析会生成新记录，因此该字段会变成本次重试时间 |
 
 **常见错误**
 
@@ -210,6 +216,10 @@
     "packageId": 50,
     "documentIds": [7, 8],
     "fileCount": 2,
+    "sourceAnalysisId": null,
+    "originalCreatedAt": "2026-08-11T08:30:00Z",
+    "createdAt": "2026-08-11T08:30:00Z",
+    "updatedAt": "2026-08-11T08:35:00Z",
     "basicInfo": {
       "tenderer": "上海智慧园区发展有限公司",
       "agency": "中建咨询（招标代理）",
@@ -405,6 +415,8 @@
 
 重试一条招标解析记录。后端会将旧记录标记为 `OBSOLETE`，复用原包与原文件重新创建一条 `BUILDING` 记录，并重新创建 `TENDER_ANALYSIS` 总任务。
 
+新记录的 `createdAt` 表示本次重试任务创建时间；列表 / 详情会额外返回 `sourceAnalysisId` 和 `originalCreatedAt`，用于前端展示来源记录与首次创建时间。
+
 **成功响应**
 
 ```json
@@ -501,3 +513,4 @@ Content-Disposition: attachment; filename*=UTF-8''...xlsx
 - 逻辑问题 / 错别字识别不复用建清单召回链路；文件 INDEX 成功后读取本次文档 chunk，按批次交给 LLM 扫描候选问题，再由后端合并去重后返回。
 - 本期不做法律风险识别，不接入法律库。
 - 导出解析结果复用详情聚合数据与内部包文件列表，只允许 `SUCCESS` 记录导出。
+- 重试解析不会改旧记录 `createdAt`；旧记录标记为 `OBSOLETE`，新记录使用新的 `createdAt`，并通过 `sourceAnalysisId` / `originalCreatedAt` 关联首次创建信息。

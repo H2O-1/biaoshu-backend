@@ -29,7 +29,9 @@ public class JdbcTenderAnalysisStore implements TenderAnalysisPort {
                     + "a.error_message, "
                     + "COALESCE(item_stats.requirement_count, 0) AS requirement_count, "
                     + "COALESCE(item_stats.issue_count, 0) AS issue_count, "
-                    + "a.created_by, a.created_at, a.updated_at";
+                    + "a.created_by, a.source_analysis_id, "
+                    + "COALESCE(a.original_created_at, a.created_at) AS original_created_at, "
+                    + "a.created_at, a.updated_at";
 
     private static final String ITEM_STATS_JOIN =
             " LEFT JOIN ("
@@ -56,8 +58,9 @@ public class JdbcTenderAnalysisStore implements TenderAnalysisPort {
         jdbcTemplate.update(connection -> {
             PreparedStatement ps = connection.prepareStatement(
                     "INSERT INTO biz_tender_analysis ("
-                            + "org_id, package_id, name, status, document_ids_json, created_by) "
-                            + "VALUES (?, ?, ?, ?, ?, ?)",
+                            + "org_id, package_id, name, status, document_ids_json, "
+                            + "created_by, original_created_at) "
+                            + "VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
                     Statement.RETURN_GENERATED_KEYS
             );
             ps.setLong(1, orgId);
@@ -77,6 +80,47 @@ public class JdbcTenderAnalysisStore implements TenderAnalysisPort {
         }
         if (key == null) {
             throw new IllegalStateException("插入招标解析记录后未返回 id");
+        }
+        return key.longValue();
+    }
+
+    @Override
+    @Transactional
+    public long createRerunBuilding(long orgId,
+                                    long packageId,
+                                    String name,
+                                    String documentIdsJson,
+                                    long createdBy,
+                                    long sourceAnalysisId,
+                                    Instant originalCreatedAt) {
+        KeyHolder keyHolder = new GeneratedKeyHolder();
+        jdbcTemplate.update(connection -> {
+            PreparedStatement ps = connection.prepareStatement(
+                    "INSERT INTO biz_tender_analysis ("
+                            + "org_id, package_id, name, status, document_ids_json, created_by, "
+                            + "source_analysis_id, original_created_at) "
+                            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    Statement.RETURN_GENERATED_KEYS
+            );
+            ps.setLong(1, orgId);
+            ps.setLong(2, packageId);
+            ps.setString(3, name);
+            ps.setString(4, STATUS_BUILDING);
+            ps.setString(5, documentIdsJson);
+            ps.setLong(6, createdBy);
+            ps.setLong(7, sourceAnalysisId);
+            ps.setTimestamp(8, toTimestamp(originalCreatedAt));
+            return ps;
+        }, keyHolder);
+        Number key = null;
+        if (keyHolder.getKeys() != null && keyHolder.getKeys().get("id") != null) {
+            key = (Number) keyHolder.getKeys().get("id");
+        }
+        if (key == null) {
+            key = keyHolder.getKey();
+        }
+        if (key == null) {
+            throw new IllegalStateException("插入重试招标解析记录后未返回 id");
         }
         return key.longValue();
     }
@@ -324,6 +368,9 @@ public class JdbcTenderAnalysisStore implements TenderAnalysisPort {
         summary.setRequirementCount(rs.getInt("requirement_count"));
         summary.setIssueCount(rs.getInt("issue_count"));
         summary.setCreatedBy(rs.getLong("created_by"));
+        long sourceAnalysisId = rs.getLong("source_analysis_id");
+        summary.setSourceAnalysisId(rs.wasNull() ? null : sourceAnalysisId);
+        summary.setOriginalCreatedAt(toInstant(rs.getTimestamp("original_created_at")));
         summary.setCreatedAt(toInstant(rs.getTimestamp("created_at")));
         summary.setUpdatedAt(toInstant(rs.getTimestamp("updated_at")));
         return summary;
@@ -350,6 +397,8 @@ public class JdbcTenderAnalysisStore implements TenderAnalysisPort {
         to.setRequirementCount(from.getRequirementCount());
         to.setIssueCount(from.getIssueCount());
         to.setCreatedBy(from.getCreatedBy());
+        to.setSourceAnalysisId(from.getSourceAnalysisId());
+        to.setOriginalCreatedAt(from.getOriginalCreatedAt());
         to.setCreatedAt(from.getCreatedAt());
         to.setUpdatedAt(from.getUpdatedAt());
     }

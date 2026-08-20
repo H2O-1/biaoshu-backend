@@ -13,6 +13,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 
@@ -54,8 +55,17 @@ class TenderAnalysisAppServiceTest {
         existing.setName("招标文件.pdf");
         existing.setStatus(TenderAnalysisPort.STATUS_FAILED);
         existing.setDocumentIdsJson("[7,8]");
+        existing.setCreatedAt(Instant.parse("2026-08-11T08:30:00Z"));
+        existing.setOriginalCreatedAt(Instant.parse("2026-08-10T08:30:00Z"));
         when(tenderAnalysisPort.findAnyById(2L, 55L)).thenReturn(existing);
-        when(tenderAnalysisPort.createBuilding(2L, 66L, "招标文件.pdf", "[7,8]", 10L))
+        when(tenderAnalysisPort.createRerunBuilding(
+                2L,
+                66L,
+                "招标文件.pdf",
+                "[7,8]",
+                10L,
+                55L,
+                Instant.parse("2026-08-10T08:30:00Z")))
                 .thenReturn(77L);
         when(jobPort.insert(eq(2L), eq(null), eq(JobPort.TYPE_TENDER_ANALYSIS),
                 eq(JobPort.STATUS_PENDING), anyString(), eq(10L))).thenReturn(88L);
