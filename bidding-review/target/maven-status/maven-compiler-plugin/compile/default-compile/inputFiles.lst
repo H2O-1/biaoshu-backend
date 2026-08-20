@@ -45,6 +45,7 @@ D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\re
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\persistence\JdbcReviewStore.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\persistence\JdbcTenderAnalysisStore.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\persistence\ProjectArtifactInvalidationPortAdapter.java
+D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\persistence\ProjectExpertReviewProgressPortAdapter.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\persistence\ProjectReviewProgressPortAdapter.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\persistence\ReviewStatusCountPortAdapter.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\port\DocumentIndexJobPortAdapter.java

@@ -2,6 +2,7 @@ package com.bidding.review.application;
 
 import com.bidding.common.error.BizException;
 import com.bidding.common.error.ErrorCode;
+import com.bidding.common.port.BinaryObjectStoragePort;
 import com.bidding.common.port.ExpertAccountPort;
 import com.bidding.common.port.PackageLookupPort;
 import com.bidding.common.port.ProjectLookupPort;
@@ -9,21 +10,30 @@ import com.bidding.common.port.ProjectReviewProgressPort;
 import com.bidding.common.security.CurrentUser;
 import com.bidding.common.security.UserContext;
 import com.bidding.review.infrastructure.persistence.JdbcExpertReviewStore;
+import com.bidding.review.infrastructure.persistence.JdbcExpertReviewStore.AttachmentRow;
 import com.bidding.review.infrastructure.persistence.JdbcExpertReviewStore.CompanyRow;
+import com.bidding.review.infrastructure.persistence.JdbcExpertReviewStore.EvidenceChunkRef;
 import com.bidding.review.infrastructure.persistence.JdbcExpertReviewStore.ItemRow;
 import com.bidding.review.infrastructure.persistence.JdbcExpertReviewStore.MemberRow;
 import com.bidding.review.infrastructure.persistence.JdbcExpertReviewStore.ReviewItemSeed;
 import com.bidding.review.infrastructure.persistence.JdbcExpertReviewStore.ReviewRow;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.mock.web.MockMultipartFile;
 
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -35,6 +45,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -57,6 +68,9 @@ class ExpertReviewAppServiceTest {
     @Mock
     private JdbcExpertReviewStore expertReviewStore;
 
+    @Mock
+    private BinaryObjectStoragePort objectStoragePort;
+
     private ExpertReviewAppService service;
 
     @BeforeEach
@@ -66,7 +80,10 @@ class ExpertReviewAppServiceTest {
                 projectReviewProgressPort,
                 packageLookupPort,
                 expertAccountPort,
-                expertReviewStore
+                expertReviewStore,
+                objectStoragePort,
+                10 * 1024 * 1024L,
+                5
         );
         UserContext.set(new CurrentUser(9L, 2L, "tenderer", Set.of("TENDERER"), 0, false));
     }
@@ -84,9 +101,9 @@ class ExpertReviewAppServiceTest {
         when(expertReviewStore.findLatestByProject(2L, 100L)).thenReturn(null, buildingReview());
         when(expertReviewStore.createBuilding(2L, 100L, 9L)).thenReturn(501L);
         when(expertReviewStore.existsMemberDisplayName(501L, "张三")).thenReturn(false);
-        when(expertReviewStore.insertMember(501L, 100L, 77L, "expert_x", "张三", "hash-1"))
+        when(expertReviewStore.insertMember(501L, 100L, 77L, "expert_x", "张三", "hash-1", "ACTIVE"))
                 .thenReturn(88L);
-        when(expertReviewStore.countMembers(501L)).thenReturn(1);
+        when(expertReviewStore.countConfirmedMembers(501L)).thenReturn(1);
         when(expertReviewStore.updateExpertCount(501L, 1)).thenReturn(1);
         ExpertAccountPort.CreateResult account = new ExpertAccountPort.CreateResult();
         account.setUserId(77L);
@@ -116,7 +133,7 @@ class ExpertReviewAppServiceTest {
         when(expertReviewStore.findLatestByProject(2L, 100L)).thenReturn(review);
         when(expertReviewStore.findMemberById(501L, 88L)).thenReturn(member);
         when(expertReviewStore.markMemberDeleted(501L, 88L)).thenReturn(1);
-        when(expertReviewStore.countMembers(501L)).thenReturn(1);
+        when(expertReviewStore.countConfirmedMembers(501L)).thenReturn(1);
         when(expertReviewStore.updateExpertCount(501L, 1)).thenReturn(1);
 
         service.removeMember(100L, 88L);
@@ -132,6 +149,7 @@ class ExpertReviewAppServiceTest {
         when(projectLookupPort.findActiveById(100L)).thenReturn(project);
         when(expertReviewStore.findLatestByProject(2L, 100L))
                 .thenReturn(runningReview(Instant.parse("2026-08-20T09:00:00Z")));
+        when(expertReviewStore.findMemberById(501L, 88L)).thenReturn(member(88L, 77L));
 
         BizException exception = assertThrows(BizException.class,
                 () -> service.removeMember(100L, 88L));
@@ -139,6 +157,86 @@ class ExpertReviewAppServiceTest {
         assertEquals(ErrorCode.CONFLICT, exception.errorCode());
         verify(expertReviewStore, never()).markMemberDeleted(anyLong(), anyLong());
         verify(expertAccountPort, never()).deleteTemporaryExpert(anyLong());
+    }
+
+    @Test
+    void appendCreatesPendingMemberWithoutReviewItems() {
+        ProjectLookupPort.ProjectRef project = project();
+        ReviewRow review = runningReview(Instant.parse("2026-08-20T09:00:00Z"));
+        when(projectLookupPort.findActiveById(100L)).thenReturn(project);
+        when(projectReviewProgressPort.findLatestReviewStatus(100L)).thenReturn("SUCCESS");
+        when(expertReviewStore.findLatestByProject(2L, 100L)).thenReturn(review);
+        when(expertReviewStore.existsMemberDisplayName(501L, "李四")).thenReturn(false);
+        ExpertAccountPort.CreateResult account = new ExpertAccountPort.CreateResult();
+        account.setUserId(78L);
+        account.setUsername("expert_y");
+        account.setDisplayName("李四");
+        account.setTemporaryPassword("Temp5678!");
+        account.setPasswordHash("hash-2");
+        when(expertAccountPort.createTemporaryExpert(2L, "李四", 9L)).thenReturn(account);
+        when(expertReviewStore.insertMember(501L, 100L, 78L, "expert_y", "李四", "hash-2", "PENDING_APPEND"))
+                .thenReturn(89L);
+        when(expertReviewStore.countConfirmedMembers(501L)).thenReturn(2);
+        when(expertReviewStore.updateExpertCount(501L, 2)).thenReturn(1);
+
+        ExpertReviewAppService.MemberResult result = service.append(100L, " 李四 ");
+
+        assertEquals(89L, result.getMemberId());
+        assertEquals("expert_y", result.getUsername());
+        assertTrue(result.isAppended());
+        verify(expertReviewStore, never()).listSeedTemplates(anyLong());
+        verify(expertReviewStore, never()).insertReviewItemsForMembers(anyLong(), anyLong(), any(), any());
+    }
+
+    @Test
+    void pushAppendActivatesPendingMembersAndSeedsItems() {
+        ProjectLookupPort.ProjectRef project = project();
+        ReviewRow review = runningReview(Instant.parse("2026-08-20T09:00:00Z"));
+        MemberRow pendingA = pendingAppendMember(89L, 78L);
+        MemberRow pendingB = pendingAppendMember(90L, 79L);
+        List<MemberRow> pendingMembers = List.of(pendingA, pendingB);
+        List<ReviewItemSeed> seeds = List.of(
+                seed(701L, 9001L, 81L, "QUALIFICATION", "Q1"),
+                seed(702L, 9002L, 81L, "SCORING", "S1")
+        );
+        when(projectLookupPort.findActiveById(100L)).thenReturn(project);
+        when(projectReviewProgressPort.findLatestReviewStatus(100L)).thenReturn("SUCCESS");
+        when(expertReviewStore.findLatestByProject(2L, 100L)).thenReturn(review);
+        when(expertReviewStore.listPendingAppendMembers(501L)).thenReturn(pendingMembers);
+        when(expertReviewStore.listSeedTemplates(501L)).thenReturn(seeds);
+        when(expertReviewStore.insertReviewItemsForMembers(501L, 100L, pendingMembers, seeds)).thenReturn(4);
+        when(expertReviewStore.activatePendingAppendMembers(501L, List.of(89L, 90L))).thenReturn(2);
+        when(expertReviewStore.countConfirmedMembers(501L)).thenReturn(4);
+        when(expertReviewStore.updateExpertCount(501L, 4)).thenReturn(1);
+
+        ExpertReviewAppService.AppendPushResult result = service.pushAppend(100L);
+
+        assertEquals(501L, result.getReviewId());
+        assertEquals(100L, result.getProjectId());
+        assertEquals("RUNNING", result.getStatus());
+        assertEquals(2, result.getAppendedExpertCount());
+        assertEquals(4, result.getExpertCount());
+        assertEquals(4, result.getReviewItemCount());
+        verify(expertReviewStore).activatePendingAppendMembers(501L, List.of(89L, 90L));
+    }
+
+    @Test
+    void removeMemberDeletesPendingAppendAfterReviewRunning() {
+        ProjectLookupPort.ProjectRef project = project();
+        ReviewRow review = runningReview(Instant.parse("2026-08-20T09:00:00Z"));
+        MemberRow member = pendingAppendMember(89L, 78L);
+        when(projectLookupPort.findActiveById(100L)).thenReturn(project);
+        when(expertReviewStore.findLatestByProject(2L, 100L)).thenReturn(review);
+        when(expertReviewStore.findMemberById(501L, 89L)).thenReturn(member);
+        when(expertReviewStore.markMemberDeleted(501L, 89L)).thenReturn(1);
+        when(expertReviewStore.countConfirmedMembers(501L)).thenReturn(2);
+        when(expertReviewStore.updateExpertCount(501L, 2)).thenReturn(1);
+
+        service.removeMember(100L, 89L);
+
+        verify(expertReviewStore).markMemberDeleted(501L, 89L);
+        verify(expertAccountPort).deleteTemporaryExpert(78L);
+        verify(expertReviewStore).updateExpertCount(501L, 2);
     }
 
     @Test
@@ -163,7 +261,8 @@ class ExpertReviewAppServiceTest {
                 seed(702L, 9002L, 81L, "SCORING", "S1")
         );
         when(expertReviewStore.findLatestAiReviewSeeds(2L, 100L, List.of(81L))).thenReturn(seeds);
-        when(expertReviewStore.updatePushInfo(501L, Instant.parse("2026-08-20T09:00:00Z"), "请评审", 2))
+        when(expertReviewStore.updatePushInfo(
+                501L, Instant.parse("2026-08-20T09:00:00Z"), "请评审", 2, 9L))
                 .thenReturn(1);
 
         ExpertReviewAppService.PushResult result =
@@ -184,14 +283,24 @@ class ExpertReviewAppServiceTest {
         UserContext.set(new CurrentUser(77L, 2L, "expert_x", Set.of("EXPERT"), 0, false));
         Instant deadlineAt = Instant.now().plusSeconds(2 * 86_400L);
         ReviewRow review = runningReview(deadlineAt);
+        review.setPusherName("陈明");
         MemberRow member = member(88L, 77L);
         CompanyRow company = company();
         ItemRow item = item();
+        item.setTenderEvidenceJson("[{\"fragmentId\":27833,\"page\":44,\"quote\":\"招标评分标准\"}]");
+        item.setEvidenceJson("[{\"fragmentId\":30012,\"page\":18,\"quote\":\"投标技术方案\"}]");
+        Map<Long, EvidenceChunkRef> refs = new LinkedHashMap<>();
+        refs.put(27833L, evidenceRef(27833L, 551L, 424L, "招标文件.docx"));
+        refs.put(30012L, evidenceRef(30012L, 660L, 81L, "投标文件.docx"));
+        AttachmentRow attachment = attachment(901L, 801L, "说明.png", "image/png", "object-key");
 
         when(expertReviewStore.findCurrentMemberByUserId(77L)).thenReturn(member);
         when(expertReviewStore.findById(501L)).thenReturn(review);
         when(projectLookupPort.findActiveById(100L)).thenReturn(project());
         when(expertReviewStore.listItemsForMember(501L, 88L)).thenReturn(List.of(item));
+        when(expertReviewStore.findEvidenceChunkRefs(any())).thenReturn(refs);
+        when(expertReviewStore.listAttachmentsByItemIds(List.of(801L)))
+                .thenReturn(Map.of(801L, List.of(attachment)));
         when(expertReviewStore.listCompanies(501L)).thenReturn(List.of(company));
 
         ExpertReviewAppService.CurrentTaskDetail detail = service.getCurrentTask();
@@ -200,6 +309,7 @@ class ExpertReviewAppServiceTest {
         assertEquals(501L, detail.getReviewId());
         assertEquals("投标项目A", detail.getProjectName());
         assertEquals("RUNNING", detail.getReviewStatus());
+        assertEquals("陈明", detail.getPusherName());
         assertFalse(detail.isReadOnly());
         assertTrue(detail.getRemainingDays() >= 1);
         assertEquals(1, detail.getCompanies().size());
@@ -213,6 +323,23 @@ class ExpertReviewAppServiceTest {
         assertEquals("SCORING", taskItem.getItemType());
         assertEquals(new BigDecimal("9.50"), taskItem.getAiSuggestedScore());
         assertEquals(new BigDecimal("10.00"), taskItem.getFullScore());
+        assertEquals(1, taskItem.getTenderEvidence().size());
+        assertEquals(Long.valueOf(27833L), taskItem.getTenderEvidence().get(0).getFragmentId());
+        assertEquals(Integer.valueOf(44), taskItem.getTenderEvidence().get(0).getPage());
+        assertEquals("招标评分标准", taskItem.getTenderEvidence().get(0).getQuote());
+        assertEquals(Long.valueOf(551L), taskItem.getTenderEvidence().get(0).getDocumentId());
+        assertEquals(Long.valueOf(424L), taskItem.getTenderEvidence().get(0).getPackageId());
+        assertEquals("招标文件.docx", taskItem.getTenderEvidence().get(0).getFileName());
+        assertEquals(1, taskItem.getBidEvidence().size());
+        assertEquals(Long.valueOf(30012L), taskItem.getBidEvidence().get(0).getFragmentId());
+        assertEquals(Integer.valueOf(18), taskItem.getBidEvidence().get(0).getPage());
+        assertEquals("投标技术方案", taskItem.getBidEvidence().get(0).getQuote());
+        assertEquals(Long.valueOf(660L), taskItem.getBidEvidence().get(0).getDocumentId());
+        assertEquals(Long.valueOf(81L), taskItem.getBidEvidence().get(0).getPackageId());
+        assertEquals("投标文件.docx", taskItem.getBidEvidence().get(0).getFileName());
+        assertEquals(1, taskItem.getAttachments().size());
+        assertEquals(901L, taskItem.getAttachments().get(0).getAttachmentId());
+        assertEquals("说明.png", taskItem.getAttachments().get(0).getFileName());
         assertNull(taskItem.getScoreValue());
     }
 
@@ -243,6 +370,13 @@ class ExpertReviewAppServiceTest {
                 scoringItem(802L, 82L, "8.00"),
                 scoringItem(803L, 83L, "10.00")
         ));
+        when(expertReviewStore.listItemsForMember(501L, 89L)).thenReturn(List.of(
+                pendingScoringItem(811L, 89L, 81L),
+                pendingScoringItem(812L, 89L, 82L),
+                pendingScoringItem(813L, 89L, 83L)
+        ));
+        when(expertReviewStore.listAttachmentsByItemIds(List.of(801L, 802L, 803L, 811L, 812L, 813L)))
+                .thenReturn(Map.of());
 
         ExpertReviewAppService.ReviewSnapshot snapshot = service.getSnapshot(100L);
 
@@ -265,6 +399,69 @@ class ExpertReviewAppServiceTest {
         assertEquals(302L, snapshot.getVetoPendingItems().get(0).getCompanyId());
         assertEquals(1, snapshot.getScoreCompareItems().get(0).getExpertScores().size());
         assertTrue(snapshot.getScoreCompareItems().get(2).getExpertScores().isEmpty());
+        assertEquals(3, snapshot.getItemReviewGroups().size());
+        assertEquals(2, snapshot.getItemReviewGroups().get(0).getExpertReviews().size());
+        assertEquals("专家77", snapshot.getItemReviewGroups().get(0).getExpertReviews().get(0).getDisplayName());
+        assertEquals(new BigDecimal("9.00"), snapshot.getItemReviewGroups().get(0).getExpertReviews().get(0).getScoreValue());
+        assertEquals("NOT_SUBMITTED", snapshot.getItemReviewGroups().get(0).getExpertReviews().get(1).getSubmitStatus());
+        assertEquals(new BigDecimal("9.00"), snapshot.getItemReviewGroups().get(0).getAverageScore());
+    }
+
+    @Test
+    void getSnapshotReturnsItemReviewGroupsWithQualificationAndAttachments() {
+        ReviewRow review = runningReview(Instant.now().plusSeconds(86_400L));
+        review.setHasAnyCompleteSubmission(true);
+        MemberRow expertA = submittedMember(88L, 77L);
+        expertA.setDisplayName("专家甲");
+        MemberRow expertB = submittedMember(89L, 78L);
+        expertB.setDisplayName("专家乙");
+        CompanyRow company = company(301L, 81L, "投标单位A");
+        ItemRow qualificationA = qualificationItem(800L, 88L, 81L, 9001L, 700L);
+        qualificationA.setResult("PASS");
+        qualificationA.setComment("资质齐全");
+        qualificationA.setSubmittedAt(Instant.parse("2026-08-18T02:00:00Z"));
+        ItemRow qualificationB = qualificationItem(810L, 89L, 81L, 9001L, 700L);
+        qualificationB.setResult("FAIL");
+        qualificationB.setComment("缺少证明");
+        qualificationB.setVeto(true);
+        qualificationB.setVetoReason("核心资格证明缺失");
+        qualificationB.setSubmittedAt(Instant.parse("2026-08-18T02:00:00Z"));
+        ItemRow scoringA = scoringItem(801L, 88L, 81L, 9002L, 701L, "4.00");
+        scoringA.setComment("方案完整");
+        ItemRow scoringB = scoringItem(811L, 89L, 81L, 9002L, 701L, "2.00");
+        scoringB.setComment("实施细节不足");
+        AttachmentRow attachment = attachment(901L, 810L, "现场照片.png", "image/png", "object-key");
+
+        when(projectLookupPort.findActiveById(100L)).thenReturn(project());
+        when(expertReviewStore.findLatestByProject(2L, 100L)).thenReturn(review);
+        when(expertReviewStore.listMembers(501L)).thenReturn(List.of(expertA, expertB));
+        when(expertReviewStore.listCompanies(501L)).thenReturn(List.of(company));
+        when(expertReviewStore.listItemsForMember(501L, 88L)).thenReturn(List.of(qualificationA, scoringA));
+        when(expertReviewStore.listItemsForMember(501L, 89L)).thenReturn(List.of(qualificationB, scoringB));
+        when(expertReviewStore.listAttachmentsByItemIds(List.of(800L, 801L, 810L, 811L)))
+                .thenReturn(Map.of(810L, List.of(attachment)));
+
+        ExpertReviewAppService.ReviewSnapshot snapshot = service.getSnapshot(100L);
+
+        assertEquals(2, snapshot.getItemReviewGroups().size());
+        ExpertReviewAppService.ItemReviewGroup qualificationGroup = snapshot.getItemReviewGroups().get(0);
+        assertEquals("QUALIFICATION", qualificationGroup.getItemType());
+        assertNull(qualificationGroup.getAverageScore());
+        assertEquals(2, qualificationGroup.getExpertReviews().size());
+        assertEquals("PASS", qualificationGroup.getExpertReviews().get(0).getResult());
+        assertEquals("资质齐全", qualificationGroup.getExpertReviews().get(0).getComment());
+        assertEquals("FAIL", qualificationGroup.getExpertReviews().get(1).getResult());
+        assertTrue(qualificationGroup.getExpertReviews().get(1).isVeto());
+        assertEquals("核心资格证明缺失", qualificationGroup.getExpertReviews().get(1).getVetoReason());
+        assertEquals(1, qualificationGroup.getExpertReviews().get(1).getAttachments().size());
+        assertEquals("现场照片.png", qualificationGroup.getExpertReviews().get(1).getAttachments().get(0).getFileName());
+
+        ExpertReviewAppService.ItemReviewGroup scoringGroup = snapshot.getItemReviewGroups().get(1);
+        assertEquals("SCORING", scoringGroup.getItemType());
+        assertEquals(new BigDecimal("3.00"), scoringGroup.getAverageScore());
+        assertEquals(new BigDecimal("4.00"), scoringGroup.getExpertReviews().get(0).getScoreValue());
+        assertEquals("方案完整", scoringGroup.getExpertReviews().get(0).getComment());
+        assertEquals(new BigDecimal("2.00"), scoringGroup.getExpertReviews().get(1).getScoreValue());
     }
 
     @Test
@@ -287,6 +484,7 @@ class ExpertReviewAppServiceTest {
                 overdueScoredItem(802L, 89L, 81L, "7.00"),
                 overdueBlankScoringItem(803L, 89L, 81L)
         ));
+        when(expertReviewStore.listAttachmentsByItemIds(List.of(801L, 802L, 803L))).thenReturn(Map.of());
 
         ExpertReviewAppService.ReviewSnapshot snapshot = service.getSnapshot(100L);
 
@@ -295,6 +493,50 @@ class ExpertReviewAppServiceTest {
         assertEquals(new BigDecimal("9.00"), snapshot.getCompanyTabs().get(0).getAverageScore());
         assertEquals(1, snapshot.getScoreCompareItems().get(0).getExpertScores().size());
         assertEquals(88L, snapshot.getScoreCompareItems().get(0).getExpertScores().get(0).getMemberId());
+    }
+
+    @Test
+    void getSnapshotKeepsNullScoresForSubmittedVetoShortcutItems() {
+        ReviewRow review = runningReview(Instant.now().plusSeconds(86_400L));
+        review.setHasAnyCompleteSubmission(true);
+        review.setSubmittedExpertCount(2);
+        MemberRow expertA = submittedMember(88L, 77L);
+        MemberRow expertB = submittedMember(89L, 78L);
+        CompanyRow company = company(301L, 81L, "投标单位A");
+
+        ItemRow qualificationA = qualificationItem(800L, 88L, 81L, 9001L, 700L);
+        qualificationA.setResult("PASS");
+        qualificationA.setSubmittedAt(Instant.parse("2026-08-18T02:00:00Z"));
+        ItemRow scoringA = scoringItem(801L, 88L, 81L, 9002L, 701L, "9.00");
+
+        ItemRow qualificationB = qualificationItem(810L, 89L, 81L, 9001L, 700L);
+        qualificationB.setResult("FAIL");
+        qualificationB.setVeto(true);
+        qualificationB.setVetoReason("核心资格证明缺失");
+        qualificationB.setSubmittedAt(Instant.parse("2026-08-18T02:00:00Z"));
+        ItemRow blankScoringB = overdueBlankScoringItem(811L, 89L, 81L);
+
+        when(projectLookupPort.findActiveById(100L)).thenReturn(project());
+        when(expertReviewStore.findLatestByProject(2L, 100L)).thenReturn(review);
+        when(expertReviewStore.listMembers(501L)).thenReturn(List.of(expertA, expertB));
+        when(expertReviewStore.listCompanies(501L)).thenReturn(List.of(company));
+        when(expertReviewStore.listItemsForMember(501L, 88L)).thenReturn(List.of(qualificationA, scoringA));
+        when(expertReviewStore.listItemsForMember(501L, 89L)).thenReturn(List.of(qualificationB, blankScoringB));
+        when(expertReviewStore.listAttachmentsByItemIds(List.of(800L, 801L, 810L, 811L))).thenReturn(Map.of());
+
+        ExpertReviewAppService.ReviewSnapshot snapshot = service.getSnapshot(100L);
+
+        assertEquals(new BigDecimal("9.00"), snapshot.getCompanyTabs().get(0).getAverageScore());
+        assertEquals(1, snapshot.getScoreCompareItems().get(0).getExpertScores().size());
+        assertEquals(88L, snapshot.getScoreCompareItems().get(0).getExpertScores().get(0).getMemberId());
+
+        ExpertReviewAppService.ItemReviewGroup scoringGroup = snapshot.getItemReviewGroups().get(1);
+        assertEquals("SCORING", scoringGroup.getItemType());
+        assertEquals(new BigDecimal("9.00"), scoringGroup.getAverageScore());
+        assertEquals(new BigDecimal("9.00"), scoringGroup.getExpertReviews().get(0).getScoreValue());
+        assertNull(scoringGroup.getExpertReviews().get(1).getResult());
+        assertNull(scoringGroup.getExpertReviews().get(1).getScoreValue());
+        assertEquals("SUBMITTED", scoringGroup.getExpertReviews().get(1).getSubmitStatus());
     }
 
     @Test
@@ -311,6 +553,7 @@ class ExpertReviewAppServiceTest {
         when(expertReviewStore.findMemberByIdAndUserId(88L, 77L)).thenReturn(member);
         when(expertReviewStore.findById(501L)).thenReturn(review);
         when(expertReviewStore.findItemByIdForMember(501L, 88L, 801L)).thenReturn(item, saved);
+        when(expertReviewStore.listAttachments(801L)).thenReturn(List.of());
         when(expertReviewStore.updateItemResult(
                 501L,
                 88L,
@@ -340,6 +583,114 @@ class ExpertReviewAppServiceTest {
                 false,
                 null
         );
+    }
+
+    @Test
+    void uploadAttachmentStoresImageForEditableItem() {
+        UserContext.set(new CurrentUser(77L, 2L, "expert_x", Set.of("EXPERT"), 0, false));
+        ReviewRow review = runningReview(Instant.now().plusSeconds(86_400L));
+        MemberRow member = member(88L, 77L);
+        ItemRow item = item();
+        AttachmentRow saved = attachment(901L, 801L, "现场照片.png", "image/png", "object-key");
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "现场照片.png",
+                "image/png",
+                new byte[] {1, 2, 3}
+        );
+
+        when(expertReviewStore.findMemberByIdAndUserId(88L, 77L)).thenReturn(member);
+        when(expertReviewStore.findById(501L)).thenReturn(review);
+        when(expertReviewStore.findItemByIdForMember(501L, 88L, 801L)).thenReturn(item);
+        when(expertReviewStore.countAttachments(801L)).thenReturn(0);
+        when(expertReviewStore.insertAttachment(eq(801L), anyString(), eq("现场照片.png"), eq("image/png"), eq(1)))
+                .thenReturn(901L);
+        when(expertReviewStore.findAttachment(801L, 901L)).thenReturn(saved);
+
+        ExpertReviewAppService.AttachmentSummary result = service.uploadAttachment(88L, 801L, file);
+
+        assertEquals(901L, result.getAttachmentId());
+        assertEquals("现场照片.png", result.getFileName());
+        assertEquals("image/png", result.getContentType());
+        ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);
+        verify(objectStoragePort).put(keyCaptor.capture(), any(InputStream.class), eq(3L), eq("image/png"));
+        assertTrue(keyCaptor.getValue().startsWith("org/2/expert-review/501/item/801/"));
+    }
+
+    @Test
+    void uploadAttachmentRejectsNonImage() {
+        UserContext.set(new CurrentUser(77L, 2L, "expert_x", Set.of("EXPERT"), 0, false));
+        ReviewRow review = runningReview(Instant.now().plusSeconds(86_400L));
+        MemberRow member = member(88L, 77L);
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "说明.pdf",
+                "application/pdf",
+                new byte[] {1, 2, 3}
+        );
+
+        when(expertReviewStore.findMemberByIdAndUserId(88L, 77L)).thenReturn(member);
+        when(expertReviewStore.findById(501L)).thenReturn(review);
+        when(expertReviewStore.findItemByIdForMember(501L, 88L, 801L)).thenReturn(item());
+
+        BizException exception = assertThrows(BizException.class, () -> service.uploadAttachment(88L, 801L, file));
+
+        assertEquals(ErrorCode.BAD_REQUEST, exception.errorCode());
+        verify(objectStoragePort, never()).put(anyString(), any(InputStream.class), anyLong(), anyString());
+    }
+
+    @Test
+    void listAttachmentsAllowsSubmittedTask() {
+        UserContext.set(new CurrentUser(77L, 2L, "expert_x", Set.of("EXPERT"), 0, false));
+        ReviewRow review = runningReview(Instant.now().plusSeconds(86_400L));
+        review.setStatus("SUCCESS");
+        MemberRow member = submittedMember(88L, 77L);
+
+        when(expertReviewStore.findMemberByIdAndUserId(88L, 77L)).thenReturn(member);
+        when(expertReviewStore.findById(501L)).thenReturn(review);
+        when(expertReviewStore.findItemByIdForMember(501L, 88L, 801L)).thenReturn(item());
+        when(expertReviewStore.listAttachments(801L))
+                .thenReturn(List.of(attachment(901L, 801L, "说明.png", "image/png", "object-key")));
+
+        List<ExpertReviewAppService.AttachmentSummary> result = service.listAttachments(88L, 801L);
+
+        assertEquals(1, result.size());
+        assertEquals("说明.png", result.get(0).getFileName());
+    }
+
+    @Test
+    void openAttachmentForPreviewReturnsInlineContent() throws Exception {
+        UserContext.set(new CurrentUser(77L, 2L, "expert_x", Set.of("EXPERT"), 0, false));
+        ReviewRow review = runningReview(Instant.now().plusSeconds(86_400L));
+        MemberRow member = member(88L, 77L);
+
+        when(expertReviewStore.findMemberByIdAndUserId(88L, 77L)).thenReturn(member);
+        when(expertReviewStore.findById(501L)).thenReturn(review);
+        when(expertReviewStore.findItemByIdForMember(501L, 88L, 801L)).thenReturn(item());
+        when(expertReviewStore.findAttachment(801L, 901L))
+                .thenReturn(attachment(901L, 801L, "说明.png", "image/png", "object-key"));
+        when(objectStoragePort.open("object-key")).thenReturn(new ByteArrayInputStream(new byte[] {7, 8}));
+
+        ExpertReviewAppService.AttachmentContent result = service.openAttachmentForPreview(88L, 801L, 901L);
+
+        assertEquals("说明.png", result.getFileName());
+        assertEquals("image/png", result.getContentType());
+        Assertions.assertArrayEquals(new byte[] {7, 8}, result.getInputStream().readAllBytes());
+    }
+
+    @Test
+    void deleteAttachmentRejectsSubmittedTask() {
+        UserContext.set(new CurrentUser(77L, 2L, "expert_x", Set.of("EXPERT"), 0, false));
+        ReviewRow review = runningReview(Instant.now().plusSeconds(86_400L));
+        MemberRow member = submittedMember(88L, 77L);
+
+        when(expertReviewStore.findMemberByIdAndUserId(88L, 77L)).thenReturn(member);
+        when(expertReviewStore.findById(501L)).thenReturn(review);
+
+        assertThrows(BizException.class, () -> service.deleteAttachment(88L, 801L, 901L));
+
+        verify(expertReviewStore, never()).deleteAttachment(anyLong(), anyLong());
+        verify(objectStoragePort, never()).delete(anyString());
     }
 
     @Test
@@ -427,6 +778,38 @@ class ExpertReviewAppServiceTest {
         assertFalse(result.isReviewCompleted());
         verify(expertAccountPort, never()).disableTemporaryExpert(anyLong());
         verify(expertReviewStore, never()).markSubmittedMembersDisabled(501L);
+    }
+
+    @Test
+    void submitAllowsRemainingItemsBlankWhenAnyQualificationVetoed() {
+        UserContext.set(new CurrentUser(77L, 2L, "expert_x", Set.of("EXPERT"), 0, false));
+        ReviewRow review = runningReview(Instant.now().plusSeconds(86_400L));
+        ReviewRow stillRunning = runningReview(review.getDeadlineAt());
+        stillRunning.setSubmittedExpertCount(1);
+        MemberRow member = member(88L, 77L);
+        ItemRow vetoedQualification = qualificationItem();
+        vetoedQualification.setResult("FAIL");
+        vetoedQualification.setVeto(true);
+        vetoedQualification.setVetoReason("核心资格证明缺失");
+        ItemRow blankQualification = qualificationItem(802L, 88L, 82L, 9003L, 702L);
+        ItemRow blankScoring = pendingScoringItem(803L, 88L, 82L);
+
+        when(expertReviewStore.findMemberByIdAndUserId(88L, 77L)).thenReturn(member);
+        when(expertReviewStore.findById(501L)).thenReturn(review, stillRunning);
+        when(expertReviewStore.listItemsForMember(501L, 88L))
+                .thenReturn(List.of(vetoedQualification, blankQualification, blankScoring));
+        when(expertReviewStore.markItemsSubmitted(eq(501L), eq(88L), any(Instant.class))).thenReturn(3);
+        when(expertReviewStore.markMemberSubmitted(eq(88L), eq(77L), any(Instant.class))).thenReturn(1);
+        when(expertReviewStore.refreshCompanyVetoStats(501L)).thenReturn(1);
+        when(expertReviewStore.refreshSubmissionStats(501L)).thenReturn(1);
+
+        ExpertReviewAppService.SubmitResult result = service.submit(88L);
+
+        assertEquals("READ_ONLY", result.getMemberStatus());
+        assertEquals("RUNNING", result.getReviewStatus());
+        assertFalse(result.isReviewCompleted());
+        verify(expertReviewStore).markItemsSubmitted(eq(501L), eq(88L), any(Instant.class));
+        verify(expertReviewStore).refreshCompanyVetoStats(501L);
     }
 
     @Test
@@ -613,6 +996,12 @@ class ExpertReviewAppServiceTest {
         return row;
     }
 
+    private static MemberRow pendingAppendMember(long memberId, long userId) {
+        MemberRow row = member(memberId, userId);
+        row.setStatus("PENDING_APPEND");
+        return row;
+    }
+
     private static MemberRow overdueSubmittedMember(long memberId, long userId) {
         MemberRow row = member(memberId, userId);
         row.setStatus("READ_ONLY");
@@ -687,16 +1076,39 @@ class ExpertReviewAppServiceTest {
         row.setAiDeductionReason("参考扣分");
         row.setFullScore(new BigDecimal("10.00"));
         row.setEvidenceJson("[]");
+        row.setSortOrder(2);
         return row;
     }
 
     private static ItemRow scoringItem(long itemId, long bidPackageId, String score) {
+        return scoringItem(itemId, 88L, bidPackageId, 9002L, 701L, score);
+    }
+
+    private static ItemRow scoringItem(long itemId,
+                                       long memberId,
+                                       long bidPackageId,
+                                       long requirementItemId,
+                                       long sourceReviewItemId,
+                                       String score) {
         ItemRow row = item();
         row.setId(itemId);
+        row.setMemberId(memberId);
         row.setBidPackageId(bidPackageId);
+        row.setRequirementItemId(requirementItemId);
+        row.setSourceReviewItemId(sourceReviewItemId);
         row.setResult("SCORE");
         row.setScoreValue(new BigDecimal(score));
         row.setSubmittedAt(Instant.parse("2026-08-18T02:00:00Z"));
+        return row;
+    }
+
+    private static ItemRow pendingScoringItem(long itemId, long memberId, long bidPackageId) {
+        ItemRow row = item();
+        row.setId(itemId);
+        row.setMemberId(memberId);
+        row.setBidPackageId(bidPackageId);
+        row.setResult(null);
+        row.setScoreValue(null);
         return row;
     }
 
@@ -723,20 +1135,54 @@ class ExpertReviewAppServiceTest {
     }
 
     private static ItemRow qualificationItem() {
+        return qualificationItem(800L, 88L, 81L, 9001L, 700L);
+    }
+
+    private static ItemRow qualificationItem(long itemId,
+                                             long memberId,
+                                             long bidPackageId,
+                                             long requirementItemId,
+                                             long sourceReviewItemId) {
         ItemRow row = new ItemRow();
-        row.setId(800L);
+        row.setId(itemId);
         row.setReviewId(501L);
-        row.setMemberId(88L);
-        row.setSourceReviewItemId(700L);
+        row.setMemberId(memberId);
+        row.setSourceReviewItemId(sourceReviewItemId);
         row.setProjectId(100L);
-        row.setBidPackageId(81L);
-        row.setRequirementItemId(9001L);
+        row.setBidPackageId(bidPackageId);
+        row.setRequirementItemId(requirementItemId);
         row.setItemType("QUALIFICATION");
         row.setRequirementCode("Q1");
         row.setTitle("资格项");
         row.setContent("资格内容");
         row.setAiStatus("无法判断");
         row.setEvidenceJson("[]");
+        row.setSortOrder(1);
+        return row;
+    }
+
+    private static EvidenceChunkRef evidenceRef(long chunkId, long documentId, long packageId, String fileName) {
+        EvidenceChunkRef ref = new EvidenceChunkRef();
+        ref.setChunkId(chunkId);
+        ref.setDocumentId(documentId);
+        ref.setPackageId(packageId);
+        ref.setFileName(fileName);
+        return ref;
+    }
+
+    private static AttachmentRow attachment(long attachmentId,
+                                            long itemId,
+                                            String fileName,
+                                            String contentType,
+                                            String objectKey) {
+        AttachmentRow row = new AttachmentRow();
+        row.setId(attachmentId);
+        row.setItemId(itemId);
+        row.setFileName(fileName);
+        row.setContentType(contentType);
+        row.setObjectKey(objectKey);
+        row.setSortOrder(1);
+        row.setCreatedAt(Instant.parse("2026-08-18T03:00:00Z"));
         return row;
     }
 }

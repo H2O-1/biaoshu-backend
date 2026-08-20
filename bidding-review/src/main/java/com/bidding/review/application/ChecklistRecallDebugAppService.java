@@ -89,9 +89,13 @@ public class ChecklistRecallDebugAppService {
         result.setDimensionCount(context.dimensions.size());
         result.setQueryTexts(rerank.getQueryTexts());
         result.setRerankQuery(rerank.getRerankQuery());
+        result.setQualificationRerankQuery(rerank.getQualificationRerankQuery());
+        result.setScoringRerankQuery(rerank.getScoringRerankQuery());
         result.setRecallTopK(rerank.getRecallTopK());
         result.setRecallHitCount(rerank.getRecallHitCount());
         result.setRerankTopN(rerank.getRerankTopN());
+        result.setQualificationHits(rerank.getQualificationHits());
+        result.setScoringHits(rerank.getScoringHits());
         result.setHits(rerank.getHits());
         return result;
     }
@@ -244,10 +248,14 @@ public class ChecklistRecallDebugAppService {
         private int dimensionCount;
         private List<String> queryTexts = new ArrayList<>();
         private String rerankQuery;
+        private String qualificationRerankQuery;
+        private String scoringRerankQuery;
         private int recallTopK;
         private int recallHitCount;
         private int rerankTopN;
         private List<ChecklistBuildPipeline.RerankHitView> hits = new ArrayList<>();
+        private List<ChecklistBuildPipeline.RerankHitView> qualificationHits = new ArrayList<>();
+        private List<ChecklistBuildPipeline.RerankHitView> scoringHits = new ArrayList<>();
 
         public long getProjectId() {
             return projectId;
@@ -309,6 +317,22 @@ public class ChecklistRecallDebugAppService {
             this.rerankQuery = rerankQuery;
         }
 
+        public String getQualificationRerankQuery() {
+            return qualificationRerankQuery;
+        }
+
+        public void setQualificationRerankQuery(String qualificationRerankQuery) {
+            this.qualificationRerankQuery = qualificationRerankQuery;
+        }
+
+        public String getScoringRerankQuery() {
+            return scoringRerankQuery;
+        }
+
+        public void setScoringRerankQuery(String scoringRerankQuery) {
+            this.scoringRerankQuery = scoringRerankQuery;
+        }
+
         public int getRecallTopK() {
             return recallTopK;
         }
@@ -343,6 +367,30 @@ public class ChecklistRecallDebugAppService {
 
         public int getRerankHitCount() {
             return hits.size();
+        }
+
+        public List<ChecklistBuildPipeline.RerankHitView> getQualificationHits() {
+            return qualificationHits;
+        }
+
+        public void setQualificationHits(List<ChecklistBuildPipeline.RerankHitView> qualificationHits) {
+            this.qualificationHits = qualificationHits == null ? new ArrayList<>() : qualificationHits;
+        }
+
+        public int getQualificationHitCount() {
+            return qualificationHits.size();
+        }
+
+        public List<ChecklistBuildPipeline.RerankHitView> getScoringHits() {
+            return scoringHits;
+        }
+
+        public void setScoringHits(List<ChecklistBuildPipeline.RerankHitView> scoringHits) {
+            this.scoringHits = scoringHits == null ? new ArrayList<>() : scoringHits;
+        }
+
+        public int getScoringHitCount() {
+            return scoringHits.size();
         }
     }
 

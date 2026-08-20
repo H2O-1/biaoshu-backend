@@ -110,15 +110,13 @@ public class TenderAnalysisJobExecutor {
             }
 
             if (failedDoc != null) {
-                fail(jobId, payload.analysisId, "文件索引失败: " + failedDoc.getFileName()
-                        + " (documentId=" + failedDoc.getId() + ")");
+                fail(jobId, payload.analysisId, "文件解析失败：" + failedDoc.getFileName());
                 return;
             }
 
             if (waiting > 0) {
                 int progress = 10 + Math.min(30, success * 30 / payload.documentIds.size());
-                jobPort.markRunningProgress(jobId, progress,
-                        "文件解析中 success=" + success + " waiting=" + waiting);
+                jobPort.markRunningProgress(jobId, progress, "文件解析中");
                 return;
             }
 

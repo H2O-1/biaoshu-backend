@@ -45,4 +45,15 @@ class ExpertReviewControllerTest {
 
         verify(appService).removeMember(100L, 88L);
     }
+
+    @Test
+    void pushAppendDelegatesToAppService() {
+        ExpertReviewAppService appService = mock(ExpertReviewAppService.class);
+        ExpertReviewExportService exportService = mock(ExpertReviewExportService.class);
+        ExpertReviewController controller = new ExpertReviewController(appService, exportService);
+
+        controller.pushAppend(100L);
+
+        verify(appService).pushAppend(100L);
+    }
 }

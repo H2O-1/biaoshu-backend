@@ -17,7 +17,9 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -32,6 +34,7 @@ public class JdbcExpertReviewStore {
     private static final String STATUS_DELETED = "DELETED";
     private static final String MEMBER_STATUS_DELETED = "DELETED";
     private static final String MEMBER_STATUS_ACTIVE = "ACTIVE";
+    private static final String MEMBER_STATUS_PENDING_APPEND = "PENDING_APPEND";
     private static final String MEMBER_STATUS_READ_ONLY = "READ_ONLY";
     private static final String MEMBER_STATUS_DISABLED = "DISABLED";
     private static final String SUBMIT_STATUS_NOT_SUBMITTED = "NOT_SUBMITTED";
@@ -53,12 +56,15 @@ public class JdbcExpertReviewStore {
     @Transactional(readOnly = true)
     public ReviewRow findLatestByProject(long orgId, long projectId) {
         List<ReviewRow> rows = jdbcTemplate.query(
-                "SELECT id, org_id, project_id, version, status, deadline_at, push_message, "
-                        + "expert_count, submitted_expert_count, submitted_company_count, "
-                        + "has_any_complete_submission, is_locked, created_by, created_at, updated_at "
-                        + "FROM biz_expert_review "
-                        + "WHERE org_id = ? AND project_id = ? AND status NOT IN (?, ?) "
-                        + "ORDER BY version DESC, id DESC LIMIT 1",
+                "SELECT r.id, r.org_id, r.project_id, r.version, r.status, "
+                        + "r.deadline_at, r.push_message, r.expert_count, "
+                        + "r.submitted_expert_count, r.submitted_company_count, "
+                        + "r.has_any_complete_submission, r.is_locked, r.created_by, r.pushed_by, "
+                        + "(SELECT u.display_name FROM sys_user u WHERE u.id = r.pushed_by) AS pusher_name, "
+                        + "r.created_at, r.updated_at "
+                        + "FROM biz_expert_review r "
+                        + "WHERE r.org_id = ? AND r.project_id = ? AND r.status NOT IN (?, ?) "
+                        + "ORDER BY r.version DESC, r.id DESC LIMIT 1",
                 (rs, rowNum) -> mapReview(rs),
                 orgId,
                 projectId,
@@ -71,10 +77,13 @@ public class JdbcExpertReviewStore {
     @Transactional(readOnly = true)
     public ReviewRow findById(long reviewId) {
         List<ReviewRow> rows = jdbcTemplate.query(
-                "SELECT id, org_id, project_id, version, status, deadline_at, push_message, "
-                        + "expert_count, submitted_expert_count, submitted_company_count, "
-                        + "has_any_complete_submission, is_locked, created_by, created_at, updated_at "
-                        + "FROM biz_expert_review WHERE id = ?",
+                "SELECT r.id, r.org_id, r.project_id, r.version, r.status, "
+                        + "r.deadline_at, r.push_message, r.expert_count, "
+                        + "r.submitted_expert_count, r.submitted_company_count, "
+                        + "r.has_any_complete_submission, r.is_locked, r.created_by, r.pushed_by, "
+                        + "(SELECT u.display_name FROM sys_user u WHERE u.id = r.pushed_by) AS pusher_name, "
+                        + "r.created_at, r.updated_at "
+                        + "FROM biz_expert_review r WHERE r.id = ?",
                 (rs, rowNum) -> mapReview(rs),
                 reviewId
         );
@@ -84,12 +93,15 @@ public class JdbcExpertReviewStore {
     @Transactional(readOnly = true)
     public ReviewRow findFirstExpiredRunningReview(Instant now) {
         List<ReviewRow> rows = jdbcTemplate.query(
-                "SELECT id, org_id, project_id, version, status, deadline_at, push_message, "
-                        + "expert_count, submitted_expert_count, submitted_company_count, "
-                        + "has_any_complete_submission, is_locked, created_by, created_at, updated_at "
-                        + "FROM biz_expert_review "
-                        + "WHERE status = ? AND deadline_at IS NOT NULL AND deadline_at <= ? "
-                        + "ORDER BY deadline_at ASC, id ASC LIMIT 1",
+                "SELECT r.id, r.org_id, r.project_id, r.version, r.status, "
+                        + "r.deadline_at, r.push_message, r.expert_count, "
+                        + "r.submitted_expert_count, r.submitted_company_count, "
+                        + "r.has_any_complete_submission, r.is_locked, r.created_by, r.pushed_by, "
+                        + "(SELECT u.display_name FROM sys_user u WHERE u.id = r.pushed_by) AS pusher_name, "
+                        + "r.created_at, r.updated_at "
+                        + "FROM biz_expert_review r "
+                        + "WHERE r.status = ? AND r.deadline_at IS NOT NULL AND r.deadline_at <= ? "
+                        + "ORDER BY r.deadline_at ASC, r.id ASC LIMIT 1",
                 (rs, rowNum) -> mapReview(rs),
                 STATUS_RUNNING,
                 toTimestamp(now)
@@ -161,6 +173,19 @@ public class JdbcExpertReviewStore {
     }
 
     @Transactional(readOnly = true)
+    public int countConfirmedMembers(long reviewId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM biz_expert_review_member "
+                        + "WHERE review_id = ? AND status NOT IN (?, ?)",
+                Integer.class,
+                reviewId,
+                MEMBER_STATUS_DELETED,
+                MEMBER_STATUS_PENDING_APPEND
+        );
+        return count == null ? 0 : count;
+    }
+
+    @Transactional(readOnly = true)
     public boolean existsMemberDisplayName(long reviewId, String displayName) {
         Integer count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(1) FROM biz_expert_review_member "
@@ -179,11 +204,26 @@ public class JdbcExpertReviewStore {
                 "SELECT id, review_id, project_id, user_id, username, display_name, "
                         + "password_hash, status, submit_status, submitted_at, first_password_shown, "
                         + "created_at, updated_at "
-                        + "FROM biz_expert_review_member WHERE review_id = ? AND status <> ? "
+                        + "FROM biz_expert_review_member WHERE review_id = ? AND status NOT IN (?, ?) "
                         + "ORDER BY id",
                 (rs, rowNum) -> mapMember(rs),
                 reviewId,
-                STATUS_DELETED
+                MEMBER_STATUS_DELETED,
+                MEMBER_STATUS_PENDING_APPEND
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public List<MemberRow> listPendingAppendMembers(long reviewId) {
+        return jdbcTemplate.query(
+                "SELECT id, review_id, project_id, user_id, username, display_name, "
+                        + "password_hash, status, submit_status, submitted_at, first_password_shown, "
+                        + "created_at, updated_at "
+                        + "FROM biz_expert_review_member WHERE review_id = ? AND status = ? "
+                        + "ORDER BY id",
+                (rs, rowNum) -> mapMember(rs),
+                reviewId,
+                MEMBER_STATUS_PENDING_APPEND
         );
     }
 
@@ -340,13 +380,15 @@ public class JdbcExpertReviewStore {
                         + "i.project_id, i.bid_package_id, i.requirement_item_id, "
                         + "i.item_type, i.requirement_code, i.title, i.content, "
                         + "i.result, i.score_value, i.full_score, i.comment, i.is_veto, "
-                        + "i.veto_reason, i.evidence_json, i.sort_order, i.submitted_at, "
+                        + "i.veto_reason, i.evidence_json, req.evidence_json AS tender_evidence_json, "
+                        + "i.sort_order, i.submitted_at, "
                         + "i.updated_at, i.created_at, src.status AS ai_status, "
                         + "src.veto_risk AS ai_veto_risk, src.judgement AS ai_judgement, "
                         + "src.suggested_score AS ai_suggested_score, "
                         + "src.deduction_reason AS ai_deduction_reason "
                         + "FROM biz_expert_review_item i "
                         + "LEFT JOIN biz_review_item src ON src.id = i.source_review_item_id "
+                        + "LEFT JOIN biz_requirement_item req ON req.id = i.requirement_item_id "
                         + "WHERE i.review_id = ? AND i.member_id = ? "
                         + "ORDER BY i.bid_package_id ASC, i.sort_order ASC, i.id ASC",
                 (rs, rowNum) -> mapItem(rs),
@@ -362,13 +404,15 @@ public class JdbcExpertReviewStore {
                         + "i.project_id, i.bid_package_id, i.requirement_item_id, "
                         + "i.item_type, i.requirement_code, i.title, i.content, "
                         + "i.result, i.score_value, i.full_score, i.comment, i.is_veto, "
-                        + "i.veto_reason, i.evidence_json, i.sort_order, i.submitted_at, "
+                        + "i.veto_reason, i.evidence_json, req.evidence_json AS tender_evidence_json, "
+                        + "i.sort_order, i.submitted_at, "
                         + "i.updated_at, i.created_at, src.status AS ai_status, "
                         + "src.veto_risk AS ai_veto_risk, src.judgement AS ai_judgement, "
                         + "src.suggested_score AS ai_suggested_score, "
                         + "src.deduction_reason AS ai_deduction_reason "
                         + "FROM biz_expert_review_item i "
                         + "LEFT JOIN biz_review_item src ON src.id = i.source_review_item_id "
+                        + "LEFT JOIN biz_requirement_item req ON req.id = i.requirement_item_id "
                         + "WHERE i.review_id = ? AND i.member_id = ? AND i.id = ?",
                 (rs, rowNum) -> mapItem(rs),
                 reviewId,
@@ -376,6 +420,146 @@ public class JdbcExpertReviewStore {
                 itemId
         );
         return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    @Transactional(readOnly = true)
+    public int countAttachments(long itemId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM biz_expert_review_attachment WHERE item_id = ?",
+                Integer.class,
+                itemId
+        );
+        return count == null ? 0 : count;
+    }
+
+    @Transactional
+    public long insertAttachment(long itemId, String objectKey, String fileName,
+                                 String contentType, int sortOrder) {
+        KeyHolder keyHolder = new GeneratedKeyHolder();
+        jdbcTemplate.update(con -> {
+            PreparedStatement ps = con.prepareStatement(
+                    "INSERT INTO biz_expert_review_attachment "
+                            + "(item_id, object_key, file_name, content_type, sort_order) "
+                            + "VALUES (?, ?, ?, ?, ?)",
+                    Statement.RETURN_GENERATED_KEYS
+            );
+            ps.setLong(1, itemId);
+            ps.setString(2, objectKey);
+            ps.setString(3, fileName);
+            ps.setString(4, contentType);
+            ps.setInt(5, sortOrder);
+            return ps;
+        }, keyHolder);
+        Number key = null;
+        if (keyHolder.getKeys() != null && keyHolder.getKeys().get("id") != null) {
+            key = (Number) keyHolder.getKeys().get("id");
+        }
+        if (key == null) {
+            key = keyHolder.getKey();
+        }
+        if (key == null) {
+            throw new IllegalStateException("插入专家评审附件后未返回 id");
+        }
+        return key.longValue();
+    }
+
+    @Transactional(readOnly = true)
+    public List<AttachmentRow> listAttachments(long itemId) {
+        return jdbcTemplate.query(
+                "SELECT id, item_id, object_key, file_name, content_type, sort_order, created_at "
+                        + "FROM biz_expert_review_attachment "
+                        + "WHERE item_id = ? ORDER BY sort_order ASC, id ASC",
+                (rs, rowNum) -> mapAttachment(rs),
+                itemId
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public Map<Long, List<AttachmentRow>> listAttachmentsByItemIds(List<Long> itemIds) {
+        Map<Long, List<AttachmentRow>> result = new LinkedHashMap<>();
+        if (itemIds == null || itemIds.isEmpty()) {
+            return result;
+        }
+        List<Long> uniqueIds = new ArrayList<>();
+        Set<Long> seen = new HashSet<>();
+        for (Long itemId : itemIds) {
+            if (itemId != null && seen.add(itemId)) {
+                uniqueIds.add(itemId);
+            }
+        }
+        if (uniqueIds.isEmpty()) {
+            return result;
+        }
+        List<AttachmentRow> rows = jdbcTemplate.query(
+                "SELECT id, item_id, object_key, file_name, content_type, sort_order, created_at "
+                        + "FROM biz_expert_review_attachment "
+                        + "WHERE item_id IN (" + placeholders(uniqueIds.size()) + ") "
+                        + "ORDER BY item_id ASC, sort_order ASC, id ASC",
+                (rs, rowNum) -> mapAttachment(rs),
+                uniqueIds.toArray()
+        );
+        for (AttachmentRow row : rows) {
+            result.computeIfAbsent(row.getItemId(), ignored -> new ArrayList<>()).add(row);
+        }
+        return result;
+    }
+
+    @Transactional(readOnly = true)
+    public AttachmentRow findAttachment(long itemId, long attachmentId) {
+        List<AttachmentRow> rows = jdbcTemplate.query(
+                "SELECT id, item_id, object_key, file_name, content_type, sort_order, created_at "
+                        + "FROM biz_expert_review_attachment WHERE item_id = ? AND id = ?",
+                (rs, rowNum) -> mapAttachment(rs),
+                itemId,
+                attachmentId
+        );
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    @Transactional
+    public int deleteAttachment(long itemId, long attachmentId) {
+        return jdbcTemplate.update(
+                "DELETE FROM biz_expert_review_attachment WHERE item_id = ? AND id = ?",
+                itemId,
+                attachmentId
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public Map<Long, EvidenceChunkRef> findEvidenceChunkRefs(List<Long> chunkIds) {
+        Map<Long, EvidenceChunkRef> result = new LinkedHashMap<>();
+        if (chunkIds == null || chunkIds.isEmpty()) {
+            return result;
+        }
+        List<Long> uniqueIds = new ArrayList<>();
+        Set<Long> seen = new HashSet<>();
+        for (Long chunkId : chunkIds) {
+            if (chunkId != null && seen.add(chunkId)) {
+                uniqueIds.add(chunkId);
+            }
+        }
+        if (uniqueIds.isEmpty()) {
+            return result;
+        }
+        List<EvidenceChunkRef> rows = jdbcTemplate.query(
+                "SELECT c.id AS chunk_id, c.document_id, c.package_id, d.file_name "
+                        + "FROM biz_document_chunk c "
+                        + "LEFT JOIN biz_document d ON d.id = c.document_id "
+                        + "WHERE c.id IN (" + placeholders(uniqueIds.size()) + ")",
+                (rs, rowNum) -> {
+                    EvidenceChunkRef ref = new EvidenceChunkRef();
+                    ref.setChunkId(rs.getLong("chunk_id"));
+                    ref.setDocumentId(rs.getLong("document_id"));
+                    ref.setPackageId(rs.getLong("package_id"));
+                    ref.setFileName(rs.getString("file_name"));
+                    return ref;
+                },
+                uniqueIds.toArray()
+        );
+        for (EvidenceChunkRef row : rows) {
+            result.put(row.getChunkId(), row);
+        }
+        return result;
     }
 
     @Transactional
@@ -408,15 +592,18 @@ public class JdbcExpertReviewStore {
     }
 
     @Transactional
-    public int updatePushInfo(long reviewId, Instant deadlineAt, String pushMessage, int expertCount) {
+    public int updatePushInfo(long reviewId, Instant deadlineAt, String pushMessage,
+                              int expertCount, long pushedBy) {
         return jdbcTemplate.update(
                 "UPDATE biz_expert_review SET status = ?, deadline_at = ?, push_message = ?, "
-                        + "expert_count = ?, is_locked = TRUE, updated_at = CURRENT_TIMESTAMP "
+                        + "expert_count = ?, pushed_by = ?, is_locked = TRUE, "
+                        + "updated_at = CURRENT_TIMESTAMP "
                         + "WHERE id = ? AND status = ?",
                 STATUS_RUNNING,
                 toTimestamp(deadlineAt),
                 pushMessage,
                 Math.max(expertCount, 0),
+                pushedBy,
                 reviewId,
                 STATUS_BUILDING
         );
@@ -437,11 +624,30 @@ public class JdbcExpertReviewStore {
     public int markMemberDeleted(long reviewId, long memberId) {
         return jdbcTemplate.update(
                 "UPDATE biz_expert_review_member SET status = ?, updated_at = CURRENT_TIMESTAMP "
-                        + "WHERE review_id = ? AND id = ? AND status = ?",
+                        + "WHERE review_id = ? AND id = ? AND status IN (?, ?)",
                 MEMBER_STATUS_DELETED,
                 reviewId,
                 memberId,
-                MEMBER_STATUS_ACTIVE
+                MEMBER_STATUS_ACTIVE,
+                MEMBER_STATUS_PENDING_APPEND
+        );
+    }
+
+    @Transactional
+    public int activatePendingAppendMembers(long reviewId, List<Long> memberIds) {
+        if (memberIds == null || memberIds.isEmpty()) {
+            return 0;
+        }
+        List<Object> args = new ArrayList<>();
+        args.add(MEMBER_STATUS_ACTIVE);
+        args.add(reviewId);
+        args.add(MEMBER_STATUS_PENDING_APPEND);
+        args.addAll(memberIds);
+        return jdbcTemplate.update(
+                "UPDATE biz_expert_review_member SET status = ?, updated_at = CURRENT_TIMESTAMP "
+                        + "WHERE review_id = ? AND status = ? AND id IN ("
+                        + placeholders(memberIds.size()) + ")",
+                args.toArray()
         );
     }
 
@@ -553,17 +759,19 @@ public class JdbcExpertReviewStore {
                         + "FROM ("
                         + "SELECT "
                         + "(SELECT COUNT(1) FROM biz_expert_review_member "
-                        + "WHERE review_id = ? AND status <> ?) AS total_count, "
+                        + "WHERE review_id = ? AND status NOT IN (?, ?)) AS total_count, "
                         + "(SELECT COUNT(1) FROM biz_expert_review_member "
-                        + "WHERE review_id = ? AND status <> ? AND submit_status IN (?, ?)) AS submitted_count, "
+                        + "WHERE review_id = ? AND status NOT IN (?, ?) AND submit_status IN (?, ?)) AS submitted_count, "
                         + "(SELECT COUNT(1) FROM biz_expert_review_company WHERE review_id = ?) AS company_count"
                         + ") stats "
                         + "WHERE r.id = ? AND r.status IN (?, ?)",
                 ReviewPort.STATUS_SUCCESS,
                 reviewId,
                 MEMBER_STATUS_DELETED,
+                MEMBER_STATUS_PENDING_APPEND,
                 reviewId,
                 MEMBER_STATUS_DELETED,
+                MEMBER_STATUS_PENDING_APPEND,
                 SUBMIT_STATUS_SUBMITTED,
                 SUBMIT_STATUS_OVERDUE_SUBMITTED,
                 reviewId,
@@ -671,7 +879,8 @@ public class JdbcExpertReviewStore {
                              long userId,
                              String username,
                              String displayName,
-                             String passwordHash) {
+                             String passwordHash,
+                             String status) {
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {
             PreparedStatement ps = connection.prepareStatement(
@@ -686,7 +895,7 @@ public class JdbcExpertReviewStore {
             ps.setString(4, username);
             ps.setString(5, displayName);
             ps.setString(6, passwordHash);
-            ps.setString(7, "ACTIVE");
+            ps.setString(7, status);
             ps.setString(8, "NOT_SUBMITTED");
             return ps;
         }, keyHolder);
@@ -793,6 +1002,9 @@ public class JdbcExpertReviewStore {
         row.setHasAnyCompleteSubmission(rs.getBoolean("has_any_complete_submission"));
         row.setLocked(rs.getBoolean("is_locked"));
         row.setCreatedBy(rs.getLong("created_by"));
+        long pushedBy = rs.getLong("pushed_by");
+        row.setPushedBy(rs.wasNull() ? null : pushedBy);
+        row.setPusherName(rs.getString("pusher_name"));
         row.setCreatedAt(toInstant(rs.getTimestamp("created_at")));
         row.setUpdatedAt(toInstant(rs.getTimestamp("updated_at")));
         return row;
@@ -860,6 +1072,18 @@ public class JdbcExpertReviewStore {
         return row;
     }
 
+    private AttachmentRow mapAttachment(ResultSet rs) throws SQLException {
+        AttachmentRow row = new AttachmentRow();
+        row.setId(rs.getLong("id"));
+        row.setItemId(rs.getLong("item_id"));
+        row.setObjectKey(rs.getString("object_key"));
+        row.setFileName(rs.getString("file_name"));
+        row.setContentType(rs.getString("content_type"));
+        row.setSortOrder(rs.getInt("sort_order"));
+        row.setCreatedAt(toInstant(rs.getTimestamp("created_at")));
+        return row;
+    }
+
     private ItemRow mapItem(ResultSet rs) throws SQLException {
         ItemRow row = new ItemRow();
         row.setId(rs.getLong("id"));
@@ -880,6 +1104,7 @@ public class JdbcExpertReviewStore {
         row.setVeto(rs.getBoolean("is_veto"));
         row.setVetoReason(rs.getString("veto_reason"));
         row.setEvidenceJson(rs.getString("evidence_json"));
+        row.setTenderEvidenceJson(rs.getString("tender_evidence_json"));
         row.setSortOrder(rs.getInt("sort_order"));
         row.setSubmittedAt(toInstant(rs.getTimestamp("submitted_at")));
         row.setUpdatedAt(toInstant(rs.getTimestamp("updated_at")));
@@ -962,6 +1187,8 @@ public class JdbcExpertReviewStore {
         private boolean hasAnyCompleteSubmission;
         private boolean locked;
         private long createdBy;
+        private Long pushedBy;
+        private String pusherName;
         private Instant createdAt;
         private Instant updatedAt;
 
@@ -1067,6 +1294,22 @@ public class JdbcExpertReviewStore {
 
         public void setCreatedBy(long createdBy) {
             this.createdBy = createdBy;
+        }
+
+        public Long getPushedBy() {
+            return pushedBy;
+        }
+
+        public void setPushedBy(Long pushedBy) {
+            this.pushedBy = pushedBy;
+        }
+
+        public String getPusherName() {
+            return pusherName;
+        }
+
+        public void setPusherName(String pusherName) {
+            this.pusherName = pusherName;
         }
 
         public Instant getCreatedAt() {
@@ -1510,6 +1753,7 @@ public class JdbcExpertReviewStore {
         private boolean veto;
         private String vetoReason;
         private String evidenceJson;
+        private String tenderEvidenceJson;
         private int sortOrder;
         private Instant submittedAt;
         private Instant updatedAt;
@@ -1664,6 +1908,14 @@ public class JdbcExpertReviewStore {
             this.evidenceJson = evidenceJson;
         }
 
+        public String getTenderEvidenceJson() {
+            return tenderEvidenceJson;
+        }
+
+        public void setTenderEvidenceJson(String tenderEvidenceJson) {
+            this.tenderEvidenceJson = tenderEvidenceJson;
+        }
+
         public int getSortOrder() {
             return sortOrder;
         }
@@ -1734,6 +1986,111 @@ public class JdbcExpertReviewStore {
 
         public void setAiDeductionReason(String aiDeductionReason) {
             this.aiDeductionReason = aiDeductionReason;
+        }
+    }
+
+    public static class AttachmentRow {
+        private long id;
+        private long itemId;
+        private String objectKey;
+        private String fileName;
+        private String contentType;
+        private int sortOrder;
+        private Instant createdAt;
+
+        public long getId() {
+            return id;
+        }
+
+        public void setId(long id) {
+            this.id = id;
+        }
+
+        public long getItemId() {
+            return itemId;
+        }
+
+        public void setItemId(long itemId) {
+            this.itemId = itemId;
+        }
+
+        public String getObjectKey() {
+            return objectKey;
+        }
+
+        public void setObjectKey(String objectKey) {
+            this.objectKey = objectKey;
+        }
+
+        public String getFileName() {
+            return fileName;
+        }
+
+        public void setFileName(String fileName) {
+            this.fileName = fileName;
+        }
+
+        public String getContentType() {
+            return contentType;
+        }
+
+        public void setContentType(String contentType) {
+            this.contentType = contentType;
+        }
+
+        public int getSortOrder() {
+            return sortOrder;
+        }
+
+        public void setSortOrder(int sortOrder) {
+            this.sortOrder = sortOrder;
+        }
+
+        public Instant getCreatedAt() {
+            return createdAt;
+        }
+
+        public void setCreatedAt(Instant createdAt) {
+            this.createdAt = createdAt;
+        }
+    }
+
+    public static class EvidenceChunkRef {
+        private long chunkId;
+        private long documentId;
+        private long packageId;
+        private String fileName;
+
+        public long getChunkId() {
+            return chunkId;
+        }
+
+        public void setChunkId(long chunkId) {
+            this.chunkId = chunkId;
+        }
+
+        public long getDocumentId() {
+            return documentId;
+        }
+
+        public void setDocumentId(long documentId) {
+            this.documentId = documentId;
+        }
+
+        public long getPackageId() {
+            return packageId;
+        }
+
+        public void setPackageId(long packageId) {
+            this.packageId = packageId;
+        }
+
+        public String getFileName() {
+            return fileName;
+        }
+
+        public void setFileName(String fileName) {
+            this.fileName = fileName;
         }
     }
 }

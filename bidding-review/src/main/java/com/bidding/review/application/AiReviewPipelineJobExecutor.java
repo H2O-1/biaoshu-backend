@@ -191,8 +191,7 @@ public class AiReviewPipelineJobExecutor {
             }
         }
         if (failedDoc != null) {
-            throw new PipelineFatalException("文件索引失败: " + failedDoc.getFileName()
-                    + " (documentId=" + failedDoc.getId() + ")");
+            throw new PipelineFatalException("文件解析失败：" + failedDoc.getFileName());
         }
         if (inFlight == 0 && success == docs.size()) {
             advanceOrThrow(job, workerId, JobPort.PHASE_CHECKLIST_SUBMIT, 35,
@@ -203,7 +202,7 @@ public class AiReviewPipelineJobExecutor {
             throw new PipelineFatalException("等待文件向量化超时");
         }
         advanceOrThrow(job, workerId, JobPort.PHASE_INDEX_WAIT, 10 + Math.min(20, success),
-                "向量化中 success=" + success + " pending=" + inFlight,
+                "文件解析中",
                 nextRunFromNow(waitIntervalMs), null, null, null);
     }
 

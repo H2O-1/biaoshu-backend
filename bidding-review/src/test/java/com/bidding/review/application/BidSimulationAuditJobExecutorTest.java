@@ -68,7 +68,7 @@ class BidSimulationAuditJobExecutorTest {
 
         assertEquals(true, executor.claimAndRunOnce("w1"));
 
-        verify(jobPort).markRunningProgress(101L, 22, "文件解析中 success=1 waiting=1");
+        verify(jobPort).markRunningProgress(101L, 22, "文件解析中");
         verify(bidSimulationAuditPort, never()).markSuccess(eq(55L), any(), any());
         verify(jobPort, never()).markSuccess(eq(101L), anyString());
     }
@@ -85,8 +85,8 @@ class BidSimulationAuditJobExecutorTest {
 
         assertEquals(true, executor.claimAndRunOnce("w1"));
 
-        verify(bidSimulationAuditPort).markFailed(eq(55L), anyString());
-        verify(jobPort).markFailed(eq(101L), anyString());
+        verify(bidSimulationAuditPort).markFailed(55L, "文件解析失败：失败文件.pdf");
+        verify(jobPort).markFailed(101L, "文件解析失败：失败文件.pdf");
         verify(bidSimulationAuditPort, never()).markSuccess(eq(55L), any(), any());
     }
 

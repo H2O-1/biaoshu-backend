@@ -102,15 +102,13 @@ public class BidSimulationAuditJobExecutor {
             allDocumentIds.addAll(payload.bidDocumentIds);
             IndexState indexState = checkIndex(job.getOrgId(), allDocumentIds);
             if (indexState.failedDoc != null) {
-                fail(jobId, payload.auditId, "文件索引失败: " + indexState.failedDoc.getFileName()
-                        + " (documentId=" + indexState.failedDoc.getId() + ")");
+                fail(jobId, payload.auditId, "文件解析失败：" + indexState.failedDoc.getFileName());
                 return;
             }
 
             if (indexState.waiting > 0) {
                 int progress = 10 + Math.min(25, indexState.success * 25 / allDocumentIds.size());
-                jobPort.markRunningProgress(jobId, progress,
-                        "文件解析中 success=" + indexState.success + " waiting=" + indexState.waiting);
+                jobPort.markRunningProgress(jobId, progress, "文件解析中");
                 return;
             }
 

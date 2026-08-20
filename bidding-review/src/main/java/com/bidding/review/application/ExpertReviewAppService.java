@@ -2,6 +2,7 @@ package com.bidding.review.application;
 
 import com.bidding.common.error.BizException;
 import com.bidding.common.error.ErrorCode;
+import com.bidding.common.port.BinaryObjectStoragePort;
 import com.bidding.common.port.ExpertAccountPort;
 import com.bidding.common.port.PackageLookupPort;
 import com.bidding.common.port.ProjectLookupPort;
@@ -11,14 +12,22 @@ import com.bidding.common.security.CurrentUser;
 import com.bidding.common.security.TendererAuth;
 import com.bidding.common.security.UserContext;
 import com.bidding.review.infrastructure.persistence.JdbcExpertReviewStore;
+import com.bidding.review.infrastructure.persistence.JdbcExpertReviewStore.AttachmentRow;
 import com.bidding.review.infrastructure.persistence.JdbcExpertReviewStore.CompanyRow;
+import com.bidding.review.infrastructure.persistence.JdbcExpertReviewStore.EvidenceChunkRef;
 import com.bidding.review.infrastructure.persistence.JdbcExpertReviewStore.ItemRow;
 import com.bidding.review.infrastructure.persistence.JdbcExpertReviewStore.MemberRow;
 import com.bidding.review.infrastructure.persistence.JdbcExpertReviewStore.ReviewItemSeed;
 import com.bidding.review.infrastructure.persistence.JdbcExpertReviewStore.ReviewRow;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Duration;
@@ -28,7 +37,9 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * 项目专家评审：添加专家、推送、追加。
@@ -36,11 +47,14 @@ import java.util.Map;
 @Service
 public class ExpertReviewAppService {
 
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
     private static final String PACKAGE_TYPE_BID = "BID";
     private static final String STATUS_BUILDING = "BUILDING";
     private static final String STATUS_RUNNING = "RUNNING";
     private static final String STATUS_SUCCESS = "SUCCESS";
     private static final String MEMBER_STATUS_ACTIVE = "ACTIVE";
+    private static final String MEMBER_STATUS_PENDING_APPEND = "PENDING_APPEND";
     private static final String MEMBER_STATUS_READ_ONLY = "READ_ONLY";
     private static final String MEMBER_STATUS_DISABLED = "DISABLED";
     private static final String SUBMIT_STATUS_NOT_SUBMITTED = "NOT_SUBMITTED";
@@ -54,23 +68,37 @@ public class ExpertReviewAppService {
     private static final String DISPLAY_MODE_CONTINUE_DISPLAY = "CONTINUE_DISPLAY";
     private static final String ROLE_EXPERT = "EXPERT";
     private static final String RESULT_SCORE = "SCORE";
+    private static final List<String> IMAGE_EXTENSIONS = List.of("jpg", "jpeg", "png", "webp");
+    private static final List<String> IMAGE_CONTENT_TYPES =
+            List.of("image/jpeg", "image/png", "image/webp");
 
     private final ProjectLookupPort projectLookupPort;
     private final ProjectReviewProgressPort projectReviewProgressPort;
     private final PackageLookupPort packageLookupPort;
     private final ExpertAccountPort expertAccountPort;
     private final JdbcExpertReviewStore expertReviewStore;
+    private final BinaryObjectStoragePort objectStoragePort;
+    private final long maxAttachmentBytes;
+    private final int maxAttachmentsPerItem;
 
     public ExpertReviewAppService(ProjectLookupPort projectLookupPort,
                                   ProjectReviewProgressPort projectReviewProgressPort,
                                   PackageLookupPort packageLookupPort,
                                   ExpertAccountPort expertAccountPort,
-                                  JdbcExpertReviewStore expertReviewStore) {
+                                  JdbcExpertReviewStore expertReviewStore,
+                                  BinaryObjectStoragePort objectStoragePort,
+                                  @Value("${bidding.expert-review.attachment.max-size-bytes:10485760}")
+                                  long maxAttachmentBytes,
+                                  @Value("${bidding.expert-review.attachment.max-per-item:5}")
+                                  int maxAttachmentsPerItem) {
         this.projectLookupPort = projectLookupPort;
         this.projectReviewProgressPort = projectReviewProgressPort;
         this.packageLookupPort = packageLookupPort;
         this.expertAccountPort = expertAccountPort;
         this.expertReviewStore = expertReviewStore;
+        this.objectStoragePort = objectStoragePort;
+        this.maxAttachmentBytes = maxAttachmentBytes;
+        this.maxAttachmentsPerItem = maxAttachmentsPerItem;
     }
 
     @Transactional
@@ -82,7 +110,7 @@ public class ExpertReviewAppService {
         if (STATUS_RUNNING.equalsIgnoreCase(review.getStatus())) {
             throw new BizException(ErrorCode.BAD_REQUEST, "专家评审已开始，请使用追加专家");
         }
-        return createMember(review, project, displayName, false);
+        return createMember(review, project, displayName, false, MEMBER_STATUS_ACTIVE);
     }
 
     @Transactional
@@ -93,8 +121,9 @@ public class ExpertReviewAppService {
         if (review == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "专家评审不存在");
         }
-        if (!STATUS_BUILDING.equalsIgnoreCase(review.getStatus())) {
-            throw new BizException(ErrorCode.CONFLICT, "专家评审已推送，不能移除专家");
+        if (!STATUS_BUILDING.equalsIgnoreCase(review.getStatus())
+                && !STATUS_RUNNING.equalsIgnoreCase(review.getStatus())) {
+            throw new BizException(ErrorCode.CONFLICT, "当前专家评审状态不能移除专家");
         }
         MemberRow member = expertReviewStore.findMemberById(review.getId(), memberId);
         if (member == null) {
@@ -103,8 +132,13 @@ public class ExpertReviewAppService {
         if (member.getProjectId() != project.getId()) {
             throw new BizException(ErrorCode.CONFLICT, "专家成员项目不匹配");
         }
-        if (!MEMBER_STATUS_ACTIVE.equalsIgnoreCase(member.getStatus())) {
+        if (STATUS_BUILDING.equalsIgnoreCase(review.getStatus())
+                && !MEMBER_STATUS_ACTIVE.equalsIgnoreCase(member.getStatus())) {
             throw new BizException(ErrorCode.CONFLICT, "专家成员状态不支持移除");
+        }
+        if (STATUS_RUNNING.equalsIgnoreCase(review.getStatus())
+                && !MEMBER_STATUS_PENDING_APPEND.equalsIgnoreCase(member.getStatus())) {
+            throw new BizException(ErrorCode.CONFLICT, "追加专家已确认，不能移除");
         }
         int deleted = expertReviewStore.markMemberDeleted(review.getId(), memberId);
         if (deleted != 1) {
@@ -112,7 +146,7 @@ public class ExpertReviewAppService {
         }
         expertAccountPort.deleteTemporaryExpert(member.getUserId());
 
-        int memberCount = expertReviewStore.countMembers(review.getId());
+        int memberCount = expertReviewStore.countConfirmedMembers(review.getId());
         int updated = expertReviewStore.updateExpertCount(review.getId(), memberCount);
         if (updated != 1) {
             throw new BizException(ErrorCode.CONFLICT, "专家评审状态已变化，请刷新后重试");
@@ -161,7 +195,8 @@ public class ExpertReviewAppService {
                 review.getId(),
                 deadlineAt,
                 normalizePushMessage(pushMessage),
-                expertCount
+                expertCount,
+                operator.getUserId()
         );
         if (updated != 1) {
             throw new BizException(ErrorCode.CONFLICT, "专家评审状态已变化，请刷新后重试");
@@ -191,13 +226,60 @@ public class ExpertReviewAppService {
         if (!STATUS_RUNNING.equalsIgnoreCase(review.getStatus())) {
             throw new BizException(ErrorCode.CONFLICT, "当前项目未处于专家评审中");
         }
-        MemberResult result = createMember(review, project, displayName, true);
+        return createMember(review, project, displayName, true, MEMBER_STATUS_PENDING_APPEND);
+    }
+
+    @Transactional
+    public AppendPushResult pushAppend(long projectId) {
+        CurrentUser operator = TendererAuth.requireTenderer("仅招标方可确认追加专家");
+        ProjectLookupPort.ProjectRef project = requireProject(projectId, operator.getOrgId());
+        requireAiReviewSuccess(projectId);
+        ReviewRow review = expertReviewStore.findLatestByProject(operator.getOrgId(), projectId);
+        if (review == null) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "请先推送专家评审");
+        }
+        if (!STATUS_RUNNING.equalsIgnoreCase(review.getStatus())) {
+            throw new BizException(ErrorCode.CONFLICT, "当前项目未处于专家评审中");
+        }
+
+        List<MemberRow> pendingMembers = expertReviewStore.listPendingAppendMembers(review.getId());
+        if (pendingMembers.isEmpty()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "请先生成追加专家账号");
+        }
         List<ReviewItemSeed> seeds = expertReviewStore.listSeedTemplates(review.getId());
         if (seeds.isEmpty()) {
             throw new BizException(ErrorCode.CONFLICT, "专家评审待评项尚未生成，请刷新后重试");
         }
-        expertReviewStore.insertReviewItemsForMembers(
-                review.getId(), projectId, List.of(toMemberRow(result, projectId)), seeds);
+
+        int inserted = expertReviewStore.insertReviewItemsForMembers(
+                review.getId(), projectId, pendingMembers, seeds);
+        int expected = pendingMembers.size() * seeds.size();
+        if (inserted != expected) {
+            throw new BizException(ErrorCode.CONFLICT, "追加专家评审明细生成数量不一致，请刷新后重试");
+        }
+
+        List<Long> memberIds = new ArrayList<>();
+        for (MemberRow member : pendingMembers) {
+            memberIds.add(member.getId());
+        }
+        int activated = expertReviewStore.activatePendingAppendMembers(review.getId(), memberIds);
+        if (activated != pendingMembers.size()) {
+            throw new BizException(ErrorCode.CONFLICT, "追加专家状态已变化，请刷新后重试");
+        }
+
+        int memberCount = expertReviewStore.countConfirmedMembers(review.getId());
+        int updated = expertReviewStore.updateExpertCount(review.getId(), memberCount);
+        if (updated != 1) {
+            throw new BizException(ErrorCode.CONFLICT, "专家评审状态已变化，请刷新后重试");
+        }
+
+        AppendPushResult result = new AppendPushResult();
+        result.setReviewId(review.getId());
+        result.setProjectId(project.getId());
+        result.setStatus(review.getStatus());
+        result.setAppendedExpertCount(pendingMembers.size());
+        result.setExpertCount(memberCount);
+        result.setReviewItemCount(inserted);
         return result;
     }
 
@@ -212,7 +294,8 @@ public class ExpertReviewAppService {
 
         List<MemberRow> members = expertReviewStore.listMembers(review.getId());
         List<CompanyRow> companies = expertReviewStore.listCompanies(review.getId());
-        Map<Long, List<MemberScore>> memberScoresByPackage = collectSubmittedMemberScores(review.getId(), members);
+        Map<Long, List<ItemRow>> itemsByMemberId = loadItemsByMember(review.getId(), members);
+        Map<Long, List<MemberScore>> memberScoresByPackage = collectSubmittedMemberScores(members, itemsByMemberId);
         Map<Long, BigDecimal> averageScores = calculateAverageScores(memberScoresByPackage);
         Map<Long, Integer> ranks = calculateRanks(companies, averageScores, review.isHasAnyCompleteSubmission());
 
@@ -256,6 +339,7 @@ public class ExpertReviewAppService {
         snapshot.setScoreCompareItems(scoreCompareItems);
         snapshot.setAverageRanking(toAverageRanking(companyTabs));
         snapshot.setVetoPendingItems(vetoPendingItems);
+        snapshot.setItemReviewGroups(buildItemReviewGroups(companies, members, itemsByMemberId));
         return snapshot;
     }
 
@@ -289,9 +373,12 @@ public class ExpertReviewAppService {
         detail.setReadOnly(isReadOnly(review, member));
         detail.setSubmittedAt(member.getSubmittedAt());
         detail.setPushMessage(review.getPushMessage());
+        detail.setPusherName(review.getPusherName());
 
         List<ItemRow> items = expertReviewStore.listItemsForMember(review.getId(), member.getId());
-        Map<Long, List<TaskItem>> itemsByPackage = groupItemsByPackage(items);
+        Map<Long, EvidenceChunkRef> evidenceChunkRefs = loadEvidenceChunkRefs(items);
+        Map<Long, List<AttachmentRow>> attachmentsByItemId = loadAttachmentsByItemId(items);
+        Map<Long, List<TaskItem>> itemsByPackage = groupItemsByPackage(items, evidenceChunkRefs, attachmentsByItemId);
         List<CompanyRow> companies = expertReviewStore.listCompanies(review.getId());
         List<TaskCompany> companyResults = new ArrayList<>();
         for (CompanyRow company : companies) {
@@ -324,7 +411,93 @@ public class ExpertReviewAppService {
         if (updated != 1) {
             throw new BizException(ErrorCode.CONFLICT, "专家评审条目状态已变化，请刷新后重试");
         }
-        return toTaskItem(requireTaskItem(review.getId(), member.getId(), itemId));
+        ItemRow refreshed = requireTaskItem(review.getId(), member.getId(), itemId);
+        Map<Long, EvidenceChunkRef> evidenceChunkRefs = loadEvidenceChunkRefs(List.of(refreshed));
+        List<AttachmentRow> attachments = expertReviewStore.listAttachments(refreshed.getId());
+        return toTaskItem(refreshed, evidenceChunkRefs, attachments);
+    }
+
+    @Transactional
+    public AttachmentSummary uploadAttachment(long taskId, long itemId, MultipartFile file) {
+        CurrentUser expert = requireExpert();
+        MemberRow member = requireTaskMember(taskId, expert);
+        ReviewRow review = requireEditableReview(member);
+        ItemRow item = requireTaskItem(review.getId(), member.getId(), itemId);
+        AttachmentUpload upload = validateAttachmentFile(file);
+
+        int existing = expertReviewStore.countAttachments(item.getId());
+        if (existing >= maxAttachmentsPerItem) {
+            throw new BizException(ErrorCode.CONFLICT, "每个评审项最多上传 " + maxAttachmentsPerItem + " 个附件");
+        }
+
+        String objectKey = buildAttachmentObjectKey(expert.getOrgId(), review.getId(), item.getId(), upload.fileName);
+        try (InputStream in = file.getInputStream()) {
+            objectStoragePort.put(objectKey, in, upload.sizeBytes, upload.contentType);
+        } catch (IOException e) {
+            throw new BizException(ErrorCode.INTERNAL, "读取上传附件失败");
+        } catch (RuntimeException e) {
+            throw new BizException(ErrorCode.INTERNAL, "附件写入对象存储失败");
+        }
+
+        long attachmentId;
+        try {
+            attachmentId = expertReviewStore.insertAttachment(
+                    item.getId(),
+                    objectKey,
+                    upload.fileName,
+                    upload.contentType,
+                    existing + 1
+            );
+        } catch (RuntimeException e) {
+            objectStoragePort.delete(objectKey);
+            throw e;
+        }
+        return toAttachmentSummary(requireAttachment(item.getId(), attachmentId));
+    }
+
+    @Transactional(readOnly = true)
+    public List<AttachmentSummary> listAttachments(long taskId, long itemId) {
+        CurrentUser expert = requireExpert();
+        MemberRow member = requireTaskMember(taskId, expert);
+        ReviewRow review = requireViewableReview(member);
+        ItemRow item = requireTaskItem(review.getId(), member.getId(), itemId);
+        return toAttachmentSummaries(expertReviewStore.listAttachments(item.getId()));
+    }
+
+    @Transactional(readOnly = true)
+    public AttachmentContent openAttachmentForPreview(long taskId, long itemId, long attachmentId) {
+        CurrentUser expert = requireExpert();
+        MemberRow member = requireTaskMember(taskId, expert);
+        ReviewRow review = requireViewableReview(member);
+        ItemRow item = requireTaskItem(review.getId(), member.getId(), itemId);
+        AttachmentRow attachment = requireAttachment(item.getId(), attachmentId);
+
+        InputStream stream;
+        try {
+            stream = objectStoragePort.open(attachment.getObjectKey());
+        } catch (RuntimeException e) {
+            throw new BizException(ErrorCode.INTERNAL, "读取专家评审附件失败");
+        }
+
+        AttachmentContent content = new AttachmentContent();
+        content.setInputStream(stream);
+        content.setFileName(attachment.getFileName());
+        content.setContentType(attachment.getContentType());
+        return content;
+    }
+
+    @Transactional
+    public void deleteAttachment(long taskId, long itemId, long attachmentId) {
+        CurrentUser expert = requireExpert();
+        MemberRow member = requireTaskMember(taskId, expert);
+        ReviewRow review = requireEditableReview(member);
+        ItemRow item = requireTaskItem(review.getId(), member.getId(), itemId);
+        AttachmentRow attachment = requireAttachment(item.getId(), attachmentId);
+        int deleted = expertReviewStore.deleteAttachment(item.getId(), attachmentId);
+        if (deleted != 1) {
+            throw new BizException(ErrorCode.CONFLICT, "专家评审附件状态已变化，请刷新后重试");
+        }
+        objectStoragePort.delete(attachment.getObjectKey());
     }
 
     @Transactional
@@ -422,8 +595,11 @@ public class ExpertReviewAppService {
         return true;
     }
 
-    private MemberResult createMember(ReviewRow review, ProjectLookupPort.ProjectRef project,
-                                      String displayName, boolean appended) {
+    private MemberResult createMember(ReviewRow review,
+                                      ProjectLookupPort.ProjectRef project,
+                                      String displayName,
+                                      boolean appended,
+                                      String memberStatus) {
         String safeDisplayName = normalizeDisplayName(displayName);
         if (expertReviewStore.existsMemberDisplayName(review.getId(), safeDisplayName)) {
             throw new BizException(ErrorCode.CONFLICT, "该专家已添加");
@@ -437,10 +613,14 @@ public class ExpertReviewAppService {
                 account.getUserId(),
                 account.getUsername(),
                 account.getDisplayName(),
-                account.getPasswordHash()
+                account.getPasswordHash(),
+                memberStatus
         );
-        int memberCount = expertReviewStore.countMembers(review.getId());
-        expertReviewStore.updateExpertCount(review.getId(), memberCount);
+        int memberCount = expertReviewStore.countConfirmedMembers(review.getId());
+        int updated = expertReviewStore.updateExpertCount(review.getId(), memberCount);
+        if (updated != 1) {
+            throw new BizException(ErrorCode.CONFLICT, "专家评审状态已变化，请刷新后重试");
+        }
 
         MemberResult result = new MemberResult();
         result.setReviewId(review.getId());
@@ -464,19 +644,6 @@ public class ExpertReviewAppService {
             }
         }
         return result;
-    }
-
-    private MemberRow toMemberRow(MemberResult result, long projectId) {
-        MemberRow row = new MemberRow();
-        row.setId(result.getMemberId());
-        row.setReviewId(result.getReviewId());
-        row.setProjectId(projectId);
-        row.setUserId(result.getUserId());
-        row.setUsername(result.getUsername());
-        row.setDisplayName(result.getDisplayName());
-        row.setStatus(MEMBER_STATUS_ACTIVE);
-        row.setSubmitStatus(SUBMIT_STATUS_NOT_SUBMITTED);
-        return row;
     }
 
     private MemberRow requireTaskMember(long taskId, CurrentUser expert) {
@@ -541,6 +708,7 @@ public class ExpertReviewAppService {
     }
 
     private void cleanupCompletedReview(long reviewId) {
+        cleanupPendingAppendMembers(reviewId);
         List<MemberRow> members = expertReviewStore.listMembers(reviewId);
         if (members.isEmpty()) {
             throw new BizException(ErrorCode.CONFLICT, "专家评审成员缺失，不能清理");
@@ -558,6 +726,17 @@ public class ExpertReviewAppService {
         }
     }
 
+    private void cleanupPendingAppendMembers(long reviewId) {
+        List<MemberRow> pendingMembers = expertReviewStore.listPendingAppendMembers(reviewId);
+        for (MemberRow member : pendingMembers) {
+            int deleted = expertReviewStore.markMemberDeleted(reviewId, member.getId());
+            if (deleted != 1) {
+                throw new BizException(ErrorCode.CONFLICT, "待追加专家状态已变化，请刷新后重试");
+            }
+            expertAccountPort.deleteTemporaryExpert(member.getUserId());
+        }
+    }
+
     private ReviewRow requireEditableReview(MemberRow member) {
         ReviewRow review = expertReviewStore.findById(member.getReviewId());
         if (review == null) {
@@ -567,12 +746,37 @@ public class ExpertReviewAppService {
         return review;
     }
 
+    private ReviewRow requireViewableReview(MemberRow member) {
+        ReviewRow review = expertReviewStore.findById(member.getReviewId());
+        if (review == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "专家评审任务不存在");
+        }
+        if (!STATUS_RUNNING.equalsIgnoreCase(review.getStatus())
+                && !STATUS_SUCCESS.equalsIgnoreCase(review.getStatus())) {
+            throw new BizException(ErrorCode.CONFLICT, "专家评审任务不可查看");
+        }
+        if (!MEMBER_STATUS_ACTIVE.equalsIgnoreCase(member.getStatus())
+                && !MEMBER_STATUS_READ_ONLY.equalsIgnoreCase(member.getStatus())
+                && !MEMBER_STATUS_DISABLED.equalsIgnoreCase(member.getStatus())) {
+            throw new BizException(ErrorCode.CONFLICT, "专家评审任务不可查看");
+        }
+        return review;
+    }
+
     private ItemRow requireTaskItem(long reviewId, long memberId, long itemId) {
         ItemRow item = expertReviewStore.findItemByIdForMember(reviewId, memberId, itemId);
         if (item == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "专家评审条目不存在");
         }
         return item;
+    }
+
+    private AttachmentRow requireAttachment(long itemId, long attachmentId) {
+        AttachmentRow attachment = expertReviewStore.findAttachment(itemId, attachmentId);
+        if (attachment == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "专家评审附件不存在");
+        }
+        return attachment;
     }
 
     private VetoDecisionResult decideCompanyVeto(long projectId,
@@ -708,6 +912,9 @@ public class ExpertReviewAppService {
         if (items.isEmpty()) {
             throw new BizException(ErrorCode.CONFLICT, "专家评审待评项不存在");
         }
+        if (hasValidVetoBeforeSubmit(items)) {
+            return;
+        }
         for (ItemRow item : items) {
             if (ReviewPort.MAIN_QUALIFICATION.equals(item.getItemType())) {
                 validateQualificationBeforeSubmit(item);
@@ -717,6 +924,24 @@ public class ExpertReviewAppService {
                 throw new BizException(ErrorCode.CONFLICT, "不支持的专家评审条目类型");
             }
         }
+    }
+
+    private boolean hasValidVetoBeforeSubmit(List<ItemRow> items) {
+        for (ItemRow item : items) {
+            if (!item.isVeto()) {
+                continue;
+            }
+            if (!ReviewPort.MAIN_QUALIFICATION.equals(item.getItemType())) {
+                continue;
+            }
+            if (!ReviewPort.VERDICT_FAIL.equals(item.getResult())) {
+                continue;
+            }
+            if (normalizeText(item.getVetoReason()) != null) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void validateQualificationBeforeSubmit(ItemRow item) {
@@ -833,7 +1058,19 @@ public class ExpertReviewAppService {
         return (seconds + 86_399L) / 86_400L;
     }
 
-    private Map<Long, List<MemberScore>> collectSubmittedMemberScores(long reviewId, List<MemberRow> members) {
+    private Map<Long, List<ItemRow>> loadItemsByMember(long reviewId, List<MemberRow> members) {
+        Map<Long, List<ItemRow>> result = new LinkedHashMap<>();
+        if (members == null || members.isEmpty()) {
+            return result;
+        }
+        for (MemberRow member : members) {
+            result.put(member.getId(), expertReviewStore.listItemsForMember(reviewId, member.getId()));
+        }
+        return result;
+    }
+
+    private Map<Long, List<MemberScore>> collectSubmittedMemberScores(List<MemberRow> members,
+                                                                      Map<Long, List<ItemRow>> itemsByMemberId) {
         Map<Long, List<MemberScore>> result = new LinkedHashMap<>();
         if (members == null || members.isEmpty()) {
             return result;
@@ -842,10 +1079,9 @@ public class ExpertReviewAppService {
             if (!isCompletedSubmitStatus(member.getSubmitStatus())) {
                 continue;
             }
-            boolean overdueSubmitted = SUBMIT_STATUS_OVERDUE_SUBMITTED.equalsIgnoreCase(member.getSubmitStatus());
             Map<Long, BigDecimal> totalsByPackage = new HashMap<>();
             List<Long> incompletePackages = new ArrayList<>();
-            List<ItemRow> items = expertReviewStore.listItemsForMember(reviewId, member.getId());
+            List<ItemRow> items = requireMemberItems(itemsByMemberId, member);
             for (ItemRow item : items) {
                 if (!ReviewPort.MAIN_SCORING.equals(item.getItemType())) {
                     continue;
@@ -853,13 +1089,10 @@ public class ExpertReviewAppService {
                 if (item.getSubmittedAt() == null) {
                     throw new BizException(ErrorCode.CONFLICT, "已提交评分项状态缺失");
                 }
-                if (item.getScoreValue() == null && overdueSubmitted) {
+                if (item.getScoreValue() == null) {
                     incompletePackages.add(item.getBidPackageId());
                     totalsByPackage.remove(item.getBidPackageId());
                     continue;
-                }
-                if (item.getScoreValue() == null) {
-                    throw new BizException(ErrorCode.CONFLICT, "已提交评分项分值缺失");
                 }
                 if (incompletePackages.contains(item.getBidPackageId())) {
                     continue;
@@ -877,6 +1110,151 @@ public class ExpertReviewAppService {
             }
         }
         return result;
+    }
+
+    private List<ItemReviewGroup> buildItemReviewGroups(List<CompanyRow> companies,
+                                                        List<MemberRow> members,
+                                                        Map<Long, List<ItemRow>> itemsByMemberId) {
+        Map<Long, CompanyRow> companiesByPackageId = new LinkedHashMap<>();
+        Map<Long, Integer> companyOrders = new LinkedHashMap<>();
+        for (int i = 0; i < companies.size(); i++) {
+            CompanyRow company = companies.get(i);
+            companiesByPackageId.put(company.getBidPackageId(), company);
+            companyOrders.put(company.getBidPackageId(), i);
+        }
+
+        Map<ItemGroupKey, ItemReviewGroup> groups = new LinkedHashMap<>();
+        List<Long> itemIds = new ArrayList<>();
+        for (MemberRow member : members) {
+            List<ItemRow> items = requireMemberItems(itemsByMemberId, member);
+            for (ItemRow item : items) {
+                if (!itemIds.contains(item.getId())) {
+                    itemIds.add(item.getId());
+                }
+                ItemGroupKey key = new ItemGroupKey(item.getBidPackageId(), item.getRequirementItemId());
+                ItemReviewGroup group = groups.get(key);
+                if (group == null) {
+                    CompanyRow company = companiesByPackageId.get(item.getBidPackageId());
+                    if (company == null) {
+                        throw new BizException(ErrorCode.CONFLICT, "专家评审公司快照缺失");
+                    }
+                    group = toItemReviewGroup(company, item);
+                    groups.put(key, group);
+                }
+            }
+        }
+
+        Map<Long, List<AttachmentRow>> attachmentsByItemId = itemIds.isEmpty()
+                ? new LinkedHashMap<>()
+                : expertReviewStore.listAttachmentsByItemIds(itemIds);
+        for (ItemReviewGroup group : groups.values()) {
+            for (MemberRow member : members) {
+                ItemRow item = findGroupItem(requireMemberItems(itemsByMemberId, member), group);
+                if (item == null) {
+                    throw new BizException(ErrorCode.CONFLICT, "专家评审明细缺失");
+                }
+                group.getExpertReviews().add(toExpertItemReview(
+                        member,
+                        item,
+                        attachmentsByItemId.getOrDefault(item.getId(), List.of())
+                ));
+            }
+            group.setAverageScore(calculateItemAverageScore(group));
+        }
+
+        List<ItemReviewGroup> result = new ArrayList<>(groups.values());
+        result.sort(Comparator
+                .comparingInt((ItemReviewGroup group) -> companyOrder(companyOrders, group.getBidPackageId()))
+                .thenComparingInt(ItemReviewGroup::getSortOrder)
+                .thenComparingLong(ItemReviewGroup::getRequirementItemId));
+        return result;
+    }
+
+    private List<ItemRow> requireMemberItems(Map<Long, List<ItemRow>> itemsByMemberId, MemberRow member) {
+        List<ItemRow> items = itemsByMemberId.get(member.getId());
+        if (items == null) {
+            throw new BizException(ErrorCode.CONFLICT, "专家评审明细缺失");
+        }
+        return items;
+    }
+
+    private ItemRow findGroupItem(List<ItemRow> items, ItemReviewGroup group) {
+        for (ItemRow item : items) {
+            if (item.getBidPackageId() == group.getBidPackageId()
+                    && item.getRequirementItemId() == group.getRequirementItemId()) {
+                return item;
+            }
+        }
+        return null;
+    }
+
+    private int companyOrder(Map<Long, Integer> companyOrders, long bidPackageId) {
+        Integer order = companyOrders.get(bidPackageId);
+        if (order == null) {
+            throw new BizException(ErrorCode.CONFLICT, "专家评审公司快照缺失");
+        }
+        return order;
+    }
+
+    private ItemReviewGroup toItemReviewGroup(CompanyRow company, ItemRow item) {
+        ItemReviewGroup result = new ItemReviewGroup();
+        result.setCompanyId(company.getId());
+        result.setBidPackageId(company.getBidPackageId());
+        result.setSupplierName(company.getSupplierName());
+        result.setRequirementItemId(item.getRequirementItemId());
+        result.setSourceReviewItemId(item.getSourceReviewItemId());
+        result.setItemType(item.getItemType());
+        result.setRequirementCode(item.getRequirementCode());
+        result.setTitle(item.getTitle());
+        result.setContent(item.getContent());
+        result.setAiStatus(item.getAiStatus());
+        result.setAiVetoRisk(item.getAiVetoRisk());
+        result.setAiJudgement(item.getAiJudgement());
+        result.setAiSuggestedScore(item.getAiSuggestedScore());
+        result.setAiDeductionReason(item.getAiDeductionReason());
+        result.setFullScore(item.getFullScore());
+        result.setSortOrder(item.getSortOrder());
+        return result;
+    }
+
+    private ExpertItemReview toExpertItemReview(MemberRow member,
+                                                ItemRow item,
+                                                List<AttachmentRow> attachments) {
+        ExpertItemReview result = new ExpertItemReview();
+        result.setMemberId(member.getId());
+        result.setUserId(member.getUserId());
+        result.setUsername(member.getUsername());
+        result.setDisplayName(member.getDisplayName());
+        result.setMemberStatus(member.getStatus());
+        result.setSubmitStatus(member.getSubmitStatus());
+        result.setSubmitted(isCompletedSubmitStatus(member.getSubmitStatus()));
+        result.setItemId(item.getId());
+        result.setResult(item.getResult());
+        result.setScoreValue(item.getScoreValue());
+        result.setComment(item.getComment());
+        result.setVeto(item.isVeto());
+        result.setVetoReason(item.getVetoReason());
+        result.setSubmittedAt(item.getSubmittedAt());
+        result.setAttachments(toAttachmentSummaries(attachments));
+        return result;
+    }
+
+    private BigDecimal calculateItemAverageScore(ItemReviewGroup group) {
+        if (!ReviewPort.MAIN_SCORING.equals(group.getItemType())) {
+            return null;
+        }
+        BigDecimal total = BigDecimal.ZERO;
+        int count = 0;
+        for (ExpertItemReview review : group.getExpertReviews()) {
+            if (isCompletedSubmitStatus(review.getSubmitStatus()) && review.getScoreValue() != null) {
+                total = total.add(review.getScoreValue());
+                count++;
+            }
+        }
+        if (count == 0) {
+            return null;
+        }
+        return total.divide(BigDecimal.valueOf(count), 2, RoundingMode.HALF_UP);
     }
 
     private Map<Long, BigDecimal> calculateAverageScores(Map<Long, List<MemberScore>> memberScoresByPackage) {
@@ -938,14 +1316,21 @@ public class ExpertReviewAppService {
                 && DISPLAY_MODE_PENDING_CONFIRMATION.equalsIgnoreCase(company.getDisplayMode());
     }
 
-    private Map<Long, List<TaskItem>> groupItemsByPackage(List<ItemRow> rows) {
+    private Map<Long, List<TaskItem>> groupItemsByPackage(
+            List<ItemRow> rows,
+            Map<Long, EvidenceChunkRef> evidenceChunkRefs,
+            Map<Long, List<AttachmentRow>> attachmentsByItemId) {
         Map<Long, List<TaskItem>> result = new LinkedHashMap<>();
         if (rows == null) {
             return result;
         }
         for (ItemRow row : rows) {
             result.computeIfAbsent(row.getBidPackageId(), ignored -> new ArrayList<>())
-                    .add(toTaskItem(row));
+                    .add(toTaskItem(
+                            row,
+                            evidenceChunkRefs,
+                            attachmentsByItemId.getOrDefault(row.getId(), List.of())
+                    ));
         }
         return result;
     }
@@ -1076,6 +1461,16 @@ public class ExpertReviewAppService {
     }
 
     private TaskItem toTaskItem(ItemRow row) {
+        return toTaskItem(row, new LinkedHashMap<>(), List.of());
+    }
+
+    private TaskItem toTaskItem(ItemRow row, Map<Long, EvidenceChunkRef> evidenceChunkRefs) {
+        return toTaskItem(row, evidenceChunkRefs, List.of());
+    }
+
+    private TaskItem toTaskItem(ItemRow row,
+                                Map<Long, EvidenceChunkRef> evidenceChunkRefs,
+                                List<AttachmentRow> attachments) {
         TaskItem result = new TaskItem();
         result.setItemId(row.getId());
         result.setSourceReviewItemId(row.getSourceReviewItemId());
@@ -1092,13 +1487,134 @@ public class ExpertReviewAppService {
         result.setAiDeductionReason(row.getAiDeductionReason());
         result.setFullScore(row.getFullScore());
         result.setEvidenceJson(row.getEvidenceJson());
+        result.setTenderEvidence(parseEvidence(row.getTenderEvidenceJson(), evidenceChunkRefs));
+        result.setBidEvidence(parseEvidence(row.getEvidenceJson(), evidenceChunkRefs));
         result.setResult(row.getResult());
         result.setScoreValue(row.getScoreValue());
         result.setComment(row.getComment());
         result.setVeto(row.isVeto());
         result.setVetoReason(row.getVetoReason());
         result.setSubmittedAt(row.getSubmittedAt());
+        result.setAttachments(toAttachmentSummaries(attachments));
         return result;
+    }
+
+    private Map<Long, List<AttachmentRow>> loadAttachmentsByItemId(List<ItemRow> items) {
+        List<Long> itemIds = new ArrayList<>();
+        if (items == null) {
+            return new LinkedHashMap<>();
+        }
+        for (ItemRow item : items) {
+            if (!itemIds.contains(item.getId())) {
+                itemIds.add(item.getId());
+            }
+        }
+        if (itemIds.isEmpty()) {
+            return new LinkedHashMap<>();
+        }
+        return expertReviewStore.listAttachmentsByItemIds(itemIds);
+    }
+
+    private List<AttachmentSummary> toAttachmentSummaries(List<AttachmentRow> rows) {
+        List<AttachmentSummary> result = new ArrayList<>();
+        if (rows == null) {
+            return result;
+        }
+        for (AttachmentRow row : rows) {
+            result.add(toAttachmentSummary(row));
+        }
+        return result;
+    }
+
+    private AttachmentSummary toAttachmentSummary(AttachmentRow row) {
+        AttachmentSummary result = new AttachmentSummary();
+        result.setAttachmentId(row.getId());
+        result.setItemId(row.getItemId());
+        result.setFileName(row.getFileName());
+        result.setContentType(row.getContentType());
+        result.setSortOrder(row.getSortOrder());
+        result.setCreatedAt(row.getCreatedAt());
+        return result;
+    }
+
+    private Map<Long, EvidenceChunkRef> loadEvidenceChunkRefs(List<ItemRow> items) {
+        List<Long> chunkIds = collectEvidenceChunkIds(items);
+        if (chunkIds.isEmpty()) {
+            return new LinkedHashMap<>();
+        }
+        Map<Long, EvidenceChunkRef> refs = expertReviewStore.findEvidenceChunkRefs(chunkIds);
+        return refs == null ? new LinkedHashMap<>() : refs;
+    }
+
+    private List<Long> collectEvidenceChunkIds(List<ItemRow> items) {
+        List<Long> result = new ArrayList<>();
+        if (items == null) {
+            return result;
+        }
+        for (ItemRow item : items) {
+            collectEvidenceChunkIds(item.getTenderEvidenceJson(), result);
+            collectEvidenceChunkIds(item.getEvidenceJson(), result);
+        }
+        return result;
+    }
+
+    private void collectEvidenceChunkIds(String json, List<Long> result) {
+        List<EvidenceItem> evidence = parseEvidence(json, new LinkedHashMap<>());
+        for (int i = 0; i < evidence.size(); i++) {
+            Long fragmentId = evidence.get(i).getFragmentId();
+            if (fragmentId != null && !result.contains(fragmentId)) {
+                result.add(fragmentId);
+            }
+        }
+    }
+
+    private List<EvidenceItem> parseEvidence(String json, Map<Long, EvidenceChunkRef> refs) {
+        List<EvidenceItem> result = new ArrayList<>();
+        if (json == null || json.isBlank()) {
+            return result;
+        }
+        try {
+            JsonNode arr = OBJECT_MAPPER.readTree(json);
+            if (arr == null || !arr.isArray()) {
+                return result;
+            }
+            for (int i = 0; i < arr.size(); i++) {
+                JsonNode node = arr.get(i);
+                if (node == null || !node.isObject()) {
+                    continue;
+                }
+                Long fragmentId = readLong(node, "fragmentId");
+                EvidenceItem item = new EvidenceItem();
+                item.setFragmentId(fragmentId);
+                item.setPage(readInt(node, "page"));
+                item.setQuote(readText(node, "quote"));
+                EvidenceChunkRef ref = fragmentId == null || refs == null ? null : refs.get(fragmentId);
+                if (ref != null) {
+                    item.setDocumentId(ref.getDocumentId());
+                    item.setFileName(ref.getFileName());
+                    item.setPackageId(ref.getPackageId());
+                }
+                result.add(item);
+            }
+        } catch (Exception ignored) {
+            return new ArrayList<>();
+        }
+        return result;
+    }
+
+    private static Long readLong(JsonNode node, String field) {
+        JsonNode value = node.get(field);
+        return value == null || value.isNull() ? null : value.asLong();
+    }
+
+    private static Integer readInt(JsonNode node, String field) {
+        JsonNode value = node.get(field);
+        return value == null || value.isNull() ? null : value.asInt();
+    }
+
+    private static String readText(JsonNode node, String field) {
+        JsonNode value = node.get(field);
+        return value == null || value.isNull() ? null : value.asText();
     }
 
     private String normalizeDisplayName(String displayName) {
@@ -1134,6 +1650,80 @@ public class ExpertReviewAppService {
         }
         String trimmed = text.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private AttachmentUpload validateAttachmentFile(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "请选择要上传的附件");
+        }
+        long size = file.getSize();
+        if (size <= 0) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "附件不能为空");
+        }
+        if (size > maxAttachmentBytes) {
+            throw new BizException(ErrorCode.BAD_REQUEST,
+                    "单个附件不能超过 " + (maxAttachmentBytes / (1024 * 1024)) + "MB");
+        }
+
+        String originalName = file.getOriginalFilename();
+        if (originalName == null || originalName.trim().isEmpty()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "附件文件名无效");
+        }
+        String safeName = sanitizeFileName(originalName.trim());
+        String ext = extractExt(safeName);
+        if (!IMAGE_EXTENSIONS.contains(ext)) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "仅支持 JPG / PNG / WEBP 图片");
+        }
+        String contentType = normalizeImageContentType(file.getContentType(), ext);
+        return new AttachmentUpload(safeName, contentType, size);
+    }
+
+    private String normalizeImageContentType(String rawContentType, String ext) {
+        if (rawContentType != null && !rawContentType.isBlank()) {
+            String normalized = rawContentType.trim().toLowerCase(Locale.ROOT);
+            if (!IMAGE_CONTENT_TYPES.contains(normalized)) {
+                throw new BizException(ErrorCode.BAD_REQUEST, "仅支持 JPG / PNG / WEBP 图片");
+            }
+            return normalized;
+        }
+        if ("png".equals(ext)) {
+            return "image/png";
+        }
+        if ("webp".equals(ext)) {
+            return "image/webp";
+        }
+        return "image/jpeg";
+    }
+
+    private String sanitizeFileName(String name) {
+        String base = name;
+        int slash = Math.max(base.lastIndexOf('/'), base.lastIndexOf('\\'));
+        if (slash >= 0 && slash < base.length() - 1) {
+            base = base.substring(slash + 1);
+        }
+        if (base.isEmpty() || base.length() > 256) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "附件文件名无效或过长");
+        }
+        for (int i = 0; i < base.length(); i++) {
+            if (Character.isISOControl(base.charAt(i))) {
+                throw new BizException(ErrorCode.BAD_REQUEST, "附件文件名包含非法字符");
+            }
+        }
+        return base;
+    }
+
+    private String extractExt(String fileName) {
+        int dot = fileName.lastIndexOf('.');
+        if (dot < 0 || dot == fileName.length() - 1) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "附件缺少扩展名");
+        }
+        return fileName.substring(dot + 1).toLowerCase(Locale.ROOT);
+    }
+
+    private String buildAttachmentObjectKey(long orgId, long reviewId, long itemId, String fileName) {
+        return "org/" + orgId + "/expert-review/" + reviewId + "/item/" + itemId + "/"
+                + UUID.randomUUID().toString().replace("-", "")
+                + "_" + fileName;
     }
 
     private MemberResult toMemberResult(long reviewId, MemberRow member, boolean appended) {
@@ -1205,6 +1795,35 @@ public class ExpertReviewAppService {
         }
     }
 
+    private static class ItemGroupKey {
+        private final long bidPackageId;
+        private final long requirementItemId;
+
+        private ItemGroupKey(long bidPackageId, long requirementItemId) {
+            this.bidPackageId = bidPackageId;
+            this.requirementItemId = requirementItemId;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+            if (!(other instanceof ItemGroupKey that)) {
+                return false;
+            }
+            return bidPackageId == that.bidPackageId
+                    && requirementItemId == that.requirementItemId;
+        }
+
+        @Override
+        public int hashCode() {
+            int result = Long.hashCode(bidPackageId);
+            result = 31 * result + Long.hashCode(requirementItemId);
+            return result;
+        }
+    }
+
     public static class SaveItemCommand {
         private String result;
         private BigDecimal scoreValue;
@@ -1250,6 +1869,105 @@ public class ExpertReviewAppService {
 
         public void setVetoReason(String vetoReason) {
             this.vetoReason = vetoReason;
+        }
+    }
+
+    public static class AttachmentContent {
+        private InputStream inputStream;
+        private String fileName;
+        private String contentType;
+
+        public InputStream getInputStream() {
+            return inputStream;
+        }
+
+        public void setInputStream(InputStream inputStream) {
+            this.inputStream = inputStream;
+        }
+
+        public String getFileName() {
+            return fileName;
+        }
+
+        public void setFileName(String fileName) {
+            this.fileName = fileName;
+        }
+
+        public String getContentType() {
+            return contentType;
+        }
+
+        public void setContentType(String contentType) {
+            this.contentType = contentType;
+        }
+    }
+
+    public static class AttachmentSummary {
+        private long attachmentId;
+        private long itemId;
+        private String fileName;
+        private String contentType;
+        private int sortOrder;
+        private Instant createdAt;
+
+        public long getAttachmentId() {
+            return attachmentId;
+        }
+
+        public void setAttachmentId(long attachmentId) {
+            this.attachmentId = attachmentId;
+        }
+
+        public long getItemId() {
+            return itemId;
+        }
+
+        public void setItemId(long itemId) {
+            this.itemId = itemId;
+        }
+
+        public String getFileName() {
+            return fileName;
+        }
+
+        public void setFileName(String fileName) {
+            this.fileName = fileName;
+        }
+
+        public String getContentType() {
+            return contentType;
+        }
+
+        public void setContentType(String contentType) {
+            this.contentType = contentType;
+        }
+
+        public int getSortOrder() {
+            return sortOrder;
+        }
+
+        public void setSortOrder(int sortOrder) {
+            this.sortOrder = sortOrder;
+        }
+
+        public Instant getCreatedAt() {
+            return createdAt;
+        }
+
+        public void setCreatedAt(Instant createdAt) {
+            this.createdAt = createdAt;
+        }
+    }
+
+    private static class AttachmentUpload {
+        private final String fileName;
+        private final String contentType;
+        private final long sizeBytes;
+
+        AttachmentUpload(String fileName, String contentType, long sizeBytes) {
+            this.fileName = fileName;
+            this.contentType = contentType;
+            this.sizeBytes = sizeBytes;
         }
     }
 
@@ -1598,6 +2316,63 @@ public class ExpertReviewAppService {
         }
     }
 
+    public static class AppendPushResult {
+        private long reviewId;
+        private long projectId;
+        private String status;
+        private int appendedExpertCount;
+        private int expertCount;
+        private int reviewItemCount;
+
+        public long getReviewId() {
+            return reviewId;
+        }
+
+        public void setReviewId(long reviewId) {
+            this.reviewId = reviewId;
+        }
+
+        public long getProjectId() {
+            return projectId;
+        }
+
+        public void setProjectId(long projectId) {
+            this.projectId = projectId;
+        }
+
+        public String getStatus() {
+            return status;
+        }
+
+        public void setStatus(String status) {
+            this.status = status;
+        }
+
+        public int getAppendedExpertCount() {
+            return appendedExpertCount;
+        }
+
+        public void setAppendedExpertCount(int appendedExpertCount) {
+            this.appendedExpertCount = appendedExpertCount;
+        }
+
+        public int getExpertCount() {
+            return expertCount;
+        }
+
+        public void setExpertCount(int expertCount) {
+            this.expertCount = expertCount;
+        }
+
+        public int getReviewItemCount() {
+            return reviewItemCount;
+        }
+
+        public void setReviewItemCount(int reviewItemCount) {
+            this.reviewItemCount = reviewItemCount;
+        }
+    }
+
     public static class PushResult {
         private long reviewId;
         private long projectId;
@@ -1691,6 +2466,7 @@ public class ExpertReviewAppService {
         private List<ScoreCompareItem> scoreCompareItems = new ArrayList<>();
         private List<AverageRankingItem> averageRanking = new ArrayList<>();
         private List<VetoPendingItem> vetoPendingItems = new ArrayList<>();
+        private List<ItemReviewGroup> itemReviewGroups = new ArrayList<>();
 
         public long getReviewId() {
             return reviewId;
@@ -1826,6 +2602,14 @@ public class ExpertReviewAppService {
 
         public void setVetoPendingItems(List<VetoPendingItem> vetoPendingItems) {
             this.vetoPendingItems = vetoPendingItems == null ? new ArrayList<>() : vetoPendingItems;
+        }
+
+        public List<ItemReviewGroup> getItemReviewGroups() {
+            return itemReviewGroups;
+        }
+
+        public void setItemReviewGroups(List<ItemReviewGroup> itemReviewGroups) {
+            this.itemReviewGroups = itemReviewGroups == null ? new ArrayList<>() : itemReviewGroups;
         }
     }
 
@@ -2021,6 +2805,309 @@ public class ExpertReviewAppService {
 
         public void setConfirmedAt(Instant confirmedAt) {
             this.confirmedAt = confirmedAt;
+        }
+    }
+
+    public static class ItemReviewGroup {
+        private long companyId;
+        private long bidPackageId;
+        private String supplierName;
+        private long requirementItemId;
+        private long sourceReviewItemId;
+        private String itemType;
+        private String requirementCode;
+        private String title;
+        private String content;
+        private String aiStatus;
+        private Boolean aiVetoRisk;
+        private String aiJudgement;
+        private BigDecimal aiSuggestedScore;
+        private String aiDeductionReason;
+        private BigDecimal fullScore;
+        private BigDecimal averageScore;
+        private int sortOrder;
+        private List<ExpertItemReview> expertReviews = new ArrayList<>();
+
+        public long getCompanyId() {
+            return companyId;
+        }
+
+        public void setCompanyId(long companyId) {
+            this.companyId = companyId;
+        }
+
+        public long getBidPackageId() {
+            return bidPackageId;
+        }
+
+        public void setBidPackageId(long bidPackageId) {
+            this.bidPackageId = bidPackageId;
+        }
+
+        public String getSupplierName() {
+            return supplierName;
+        }
+
+        public void setSupplierName(String supplierName) {
+            this.supplierName = supplierName;
+        }
+
+        public long getRequirementItemId() {
+            return requirementItemId;
+        }
+
+        public void setRequirementItemId(long requirementItemId) {
+            this.requirementItemId = requirementItemId;
+        }
+
+        public long getSourceReviewItemId() {
+            return sourceReviewItemId;
+        }
+
+        public void setSourceReviewItemId(long sourceReviewItemId) {
+            this.sourceReviewItemId = sourceReviewItemId;
+        }
+
+        public String getItemType() {
+            return itemType;
+        }
+
+        public void setItemType(String itemType) {
+            this.itemType = itemType;
+        }
+
+        public String getRequirementCode() {
+            return requirementCode;
+        }
+
+        public void setRequirementCode(String requirementCode) {
+            this.requirementCode = requirementCode;
+        }
+
+        public String getTitle() {
+            return title;
+        }
+
+        public void setTitle(String title) {
+            this.title = title;
+        }
+
+        public String getContent() {
+            return content;
+        }
+
+        public void setContent(String content) {
+            this.content = content;
+        }
+
+        public String getAiStatus() {
+            return aiStatus;
+        }
+
+        public void setAiStatus(String aiStatus) {
+            this.aiStatus = aiStatus;
+        }
+
+        public Boolean getAiVetoRisk() {
+            return aiVetoRisk;
+        }
+
+        public void setAiVetoRisk(Boolean aiVetoRisk) {
+            this.aiVetoRisk = aiVetoRisk;
+        }
+
+        public String getAiJudgement() {
+            return aiJudgement;
+        }
+
+        public void setAiJudgement(String aiJudgement) {
+            this.aiJudgement = aiJudgement;
+        }
+
+        public BigDecimal getAiSuggestedScore() {
+            return aiSuggestedScore;
+        }
+
+        public void setAiSuggestedScore(BigDecimal aiSuggestedScore) {
+            this.aiSuggestedScore = aiSuggestedScore;
+        }
+
+        public String getAiDeductionReason() {
+            return aiDeductionReason;
+        }
+
+        public void setAiDeductionReason(String aiDeductionReason) {
+            this.aiDeductionReason = aiDeductionReason;
+        }
+
+        public BigDecimal getFullScore() {
+            return fullScore;
+        }
+
+        public void setFullScore(BigDecimal fullScore) {
+            this.fullScore = fullScore;
+        }
+
+        public BigDecimal getAverageScore() {
+            return averageScore;
+        }
+
+        public void setAverageScore(BigDecimal averageScore) {
+            this.averageScore = averageScore;
+        }
+
+        public int getSortOrder() {
+            return sortOrder;
+        }
+
+        public void setSortOrder(int sortOrder) {
+            this.sortOrder = sortOrder;
+        }
+
+        public List<ExpertItemReview> getExpertReviews() {
+            return expertReviews;
+        }
+
+        public void setExpertReviews(List<ExpertItemReview> expertReviews) {
+            this.expertReviews = expertReviews == null ? new ArrayList<>() : expertReviews;
+        }
+    }
+
+    public static class ExpertItemReview {
+        private long memberId;
+        private long userId;
+        private String username;
+        private String displayName;
+        private String memberStatus;
+        private String submitStatus;
+        private boolean submitted;
+        private long itemId;
+        private String result;
+        private BigDecimal scoreValue;
+        private String comment;
+        private boolean veto;
+        private String vetoReason;
+        private Instant submittedAt;
+        private List<AttachmentSummary> attachments = new ArrayList<>();
+
+        public long getMemberId() {
+            return memberId;
+        }
+
+        public void setMemberId(long memberId) {
+            this.memberId = memberId;
+        }
+
+        public long getUserId() {
+            return userId;
+        }
+
+        public void setUserId(long userId) {
+            this.userId = userId;
+        }
+
+        public String getUsername() {
+            return username;
+        }
+
+        public void setUsername(String username) {
+            this.username = username;
+        }
+
+        public String getDisplayName() {
+            return displayName;
+        }
+
+        public void setDisplayName(String displayName) {
+            this.displayName = displayName;
+        }
+
+        public String getMemberStatus() {
+            return memberStatus;
+        }
+
+        public void setMemberStatus(String memberStatus) {
+            this.memberStatus = memberStatus;
+        }
+
+        public String getSubmitStatus() {
+            return submitStatus;
+        }
+
+        public void setSubmitStatus(String submitStatus) {
+            this.submitStatus = submitStatus;
+        }
+
+        public boolean isSubmitted() {
+            return submitted;
+        }
+
+        public void setSubmitted(boolean submitted) {
+            this.submitted = submitted;
+        }
+
+        public long getItemId() {
+            return itemId;
+        }
+
+        public void setItemId(long itemId) {
+            this.itemId = itemId;
+        }
+
+        public String getResult() {
+            return result;
+        }
+
+        public void setResult(String result) {
+            this.result = result;
+        }
+
+        public BigDecimal getScoreValue() {
+            return scoreValue;
+        }
+
+        public void setScoreValue(BigDecimal scoreValue) {
+            this.scoreValue = scoreValue;
+        }
+
+        public String getComment() {
+            return comment;
+        }
+
+        public void setComment(String comment) {
+            this.comment = comment;
+        }
+
+        public boolean isVeto() {
+            return veto;
+        }
+
+        public void setVeto(boolean veto) {
+            this.veto = veto;
+        }
+
+        public String getVetoReason() {
+            return vetoReason;
+        }
+
+        public void setVetoReason(String vetoReason) {
+            this.vetoReason = vetoReason;
+        }
+
+        public Instant getSubmittedAt() {
+            return submittedAt;
+        }
+
+        public void setSubmittedAt(Instant submittedAt) {
+            this.submittedAt = submittedAt;
+        }
+
+        public List<AttachmentSummary> getAttachments() {
+            return attachments;
+        }
+
+        public void setAttachments(List<AttachmentSummary> attachments) {
+            this.attachments = attachments == null ? new ArrayList<>() : attachments;
         }
     }
 
@@ -2275,6 +3362,7 @@ public class ExpertReviewAppService {
         private boolean readOnly;
         private Instant submittedAt;
         private String pushMessage;
+        private String pusherName;
         private List<TaskCompany> companies = new ArrayList<>();
 
         public long getTaskId() {
@@ -2381,6 +3469,14 @@ public class ExpertReviewAppService {
             this.pushMessage = pushMessage;
         }
 
+        public String getPusherName() {
+            return pusherName;
+        }
+
+        public void setPusherName(String pusherName) {
+            this.pusherName = pusherName;
+        }
+
         public List<TaskCompany> getCompanies() {
             return companies;
         }
@@ -2481,12 +3577,15 @@ public class ExpertReviewAppService {
         private String aiDeductionReason;
         private BigDecimal fullScore;
         private String evidenceJson;
+        private List<EvidenceItem> tenderEvidence = new ArrayList<>();
+        private List<EvidenceItem> bidEvidence = new ArrayList<>();
         private String result;
         private BigDecimal scoreValue;
         private String comment;
         private boolean veto;
         private String vetoReason;
         private Instant submittedAt;
+        private List<AttachmentSummary> attachments = new ArrayList<>();
 
         public long getItemId() {
             return itemId;
@@ -2608,6 +3707,22 @@ public class ExpertReviewAppService {
             this.evidenceJson = evidenceJson;
         }
 
+        public List<EvidenceItem> getTenderEvidence() {
+            return tenderEvidence;
+        }
+
+        public void setTenderEvidence(List<EvidenceItem> tenderEvidence) {
+            this.tenderEvidence = tenderEvidence == null ? new ArrayList<>() : tenderEvidence;
+        }
+
+        public List<EvidenceItem> getBidEvidence() {
+            return bidEvidence;
+        }
+
+        public void setBidEvidence(List<EvidenceItem> bidEvidence) {
+            this.bidEvidence = bidEvidence == null ? new ArrayList<>() : bidEvidence;
+        }
+
         public String getResult() {
             return result;
         }
@@ -2654,6 +3769,71 @@ public class ExpertReviewAppService {
 
         public void setSubmittedAt(Instant submittedAt) {
             this.submittedAt = submittedAt;
+        }
+
+        public List<AttachmentSummary> getAttachments() {
+            return attachments;
+        }
+
+        public void setAttachments(List<AttachmentSummary> attachments) {
+            this.attachments = attachments == null ? new ArrayList<>() : attachments;
+        }
+    }
+
+    public static class EvidenceItem {
+        private Long fragmentId;
+        private Integer page;
+        private String quote;
+        private Long documentId;
+        private String fileName;
+        private Long packageId;
+
+        public Long getFragmentId() {
+            return fragmentId;
+        }
+
+        public void setFragmentId(Long fragmentId) {
+            this.fragmentId = fragmentId;
+        }
+
+        public Integer getPage() {
+            return page;
+        }
+
+        public void setPage(Integer page) {
+            this.page = page;
+        }
+
+        public String getQuote() {
+            return quote;
+        }
+
+        public void setQuote(String quote) {
+            this.quote = quote;
+        }
+
+        public Long getDocumentId() {
+            return documentId;
+        }
+
+        public void setDocumentId(Long documentId) {
+            this.documentId = documentId;
+        }
+
+        public String getFileName() {
+            return fileName;
+        }
+
+        public void setFileName(String fileName) {
+            this.fileName = fileName;
+        }
+
+        public Long getPackageId() {
+            return packageId;
+        }
+
+        public void setPackageId(Long packageId) {
+            this.packageId = packageId;
         }
     }
 }

@@ -6,7 +6,7 @@
 > 文件 / 标包见：[文件与标包](./API-文件与标包.md)  
 > AI 审查见：[检索 / 重排 / LLM](./API-检索重排与LLM.md) · [总索引](./API.md)  
 > Base URL（本地）：`http://localhost:8080`  
-> 更新：2026-08-19
+> 更新：2026-08-20
 
 ## 通用约定（摘要）
 
@@ -15,7 +15,7 @@
 - 项目端专家评审接口角色：仅 `TENDERER` 可访问。
 - 专家侧任务接口角色：仅 `EXPERT` 可访问。
 - 跨组织资源一律 **40400**（不暴露是否存在）。
-- 本册当前已实现：添加专家、推送前移除专家、推送专家评审、追加专家、重置临时专家密码、项目专家评测聚合、专家当前任务详情、保存单条评审、提交专家评审、截止时间自动提交、评审完成后的临时专家账号禁用、项目删除联动清理、导出专家评审报告、管理端确认废标、管理端继续展示。
+- 本册当前已实现：添加专家、推送前移除专家、推送专家评审、两步式追加专家、重置临时专家密码、项目专家评测聚合、专家当前任务详情、保存单条评审、专家评审附件上传 / 列表 / 预览 / 删除、提交专家评审、截止时间自动提交、评审完成后的临时专家账号禁用、项目删除联动清理、导出专家评审报告、管理端确认废标、管理端继续展示。
 
 ---
 
@@ -27,10 +27,11 @@
 | 推送前移除专家 | 尚未推送的 `BUILDING` 专家成员可移除，同时删除对应临时账号 |
 | 推送评审 | 项目已有专家后，填写截止时间和备注，正式进入 `RUNNING` |
 | 冻结待评项 | 推送时从最新成功 AI 审查中生成专家评审明细 |
-| 追加专家 | 已推送后追加专家，复用首次推送冻结出的待评项 |
+| 追加专家 | 已推送后先生成待追加专家账号，确认追加时复用首次推送冻结出的待评项 |
 | 专家当前任务 | 专家登录后直接取当前唯一 `RUNNING` 任务，不展示任务列表 |
 | 按公司查看 | 当前任务详情按投标包 / 投标单位分组返回待评条目 |
 | 保存评审 | 专家保存单条资格项或评分项 |
+| 图片附件 | 专家在单条评审项下上传、浏览和删除图片附件 |
 | 提交评审 | 专家提交整份任务；提交后进入只读 |
 | 自动提交 | 到达截止时间后，后台自动收口未提交专家任务 |
 | 只读态 | 服务端返回 `readOnly`，前端据此禁用保存 / 提交入口 |
@@ -54,11 +55,19 @@
 | `FAILED` | 专家评审失败，后续实现 |
 | `OBSOLETE` | 已作废，不作为当前评审 |
 
+项目列表 / 详情的 `workflowStatus` 会把已推送专家评审映射为：
+
+| workflowStatus | 前端文案 | 来源 |
+|----------------|----------|------|
+| `EXPERT_REVIEWING` | 专家评审中 | 最新已推送专家评审 `status=RUNNING` |
+| `EXPERT_REVIEW_SUCCESS` | 专家评审完成 | 最新已推送专家评审 `status=SUCCESS` |
+
 ### 2.2 专家成员状态
 
 | status | 说明 |
 |--------|------|
 | `ACTIVE` | 可评审 |
+| `PENDING_APPEND` | 已生成追加专家账号，但尚未确认追加；不进入专家任务、统计和项目专家列表 |
 | `READ_ONLY` | 只读；专家提交后使用 |
 | `DISABLED` | 已禁用；所有专家提交完成后自动进入，专家账号不可再登录 |
 | `DELETED` | 已删除 |
@@ -159,7 +168,12 @@
 
 `DELETE /api/projects/{projectId}/expert-reviews/members/{memberId}`
 
-招标方在正式推送前移除已添加专家。仅 `BUILDING` 状态允许移除；后端会将专家成员标记为 `DELETED`，删除对应临时 `EXPERT` 账号，并刷新专家人数。后续再推送时，只会纳入未删除专家。
+招标方移除尚未正式纳入评审的专家。支持两种场景：
+
+- `BUILDING` 状态移除推送前添加的 `ACTIVE` 专家。
+- `RUNNING` 状态移除追加弹窗中已生成账号、但尚未确认追加的 `PENDING_APPEND` 专家。
+
+后端会将专家成员标记为 `DELETED`，删除对应临时 `EXPERT` 账号，并刷新正式专家人数。后续推送 / 确认追加时，只会纳入未删除专家。
 
 **请求体**
 
@@ -182,7 +196,7 @@
 | 40100 | 未登录或 token 失效 |
 | 40300 | 当前用户不是招标方 |
 | 40400 | 项目不存在或不属于当前组织 / 专家评审不存在 / 专家成员不存在 |
-| 40900 | 专家评审已推送，不能移除专家 / 专家成员项目不匹配 / 专家成员状态不支持移除 / 状态已变化 |
+| 40900 | 当前专家评审状态不能移除专家 / 追加专家已确认，不能移除 / 专家成员项目不匹配 / 专家成员状态不支持移除 / 状态已变化 |
 
 ---
 
@@ -252,11 +266,11 @@
 
 ---
 
-### 3.3 追加专家
+### 3.3 生成追加专家账号
 
 `POST /api/projects/{projectId}/expert-reviews/append`
 
-项目已进入专家评审后追加专家。追加专家只传姓名，截止时间和备注沿用首次推送；后端会复用首次推送冻结出的待评项，为新专家生成一份明细。
+项目已进入专家评审后，先按专家姓名创建临时专家账号。该账号状态为 `PENDING_APPEND`，不会进入专家任务、项目专家统计和项目专家列表；只有确认追加后才会正式进入评审。
 
 **请求体**
 
@@ -294,7 +308,52 @@
 | 40100 | 未登录或 token 失效 |
 | 40300 | 当前用户不是招标方 |
 | 40400 | 项目不存在或不属于当前组织 |
-| 40900 | 当前项目未处于专家评审中 / 该专家已添加 / 专家评审待评项尚未生成 |
+| 40900 | 当前项目未处于专家评审中 / 该专家已添加 |
+
+---
+
+### 3.3.1 确认追加专家
+
+`POST /api/projects/{projectId}/expert-reviews/append/push`
+
+确认追加弹窗中已经生成账号的专家。后端会读取当前评审下全部 `PENDING_APPEND` 专家，复用首次推送冻结出的待评项，为这些专家生成评审明细，并将成员状态改为 `ACTIVE`。
+
+**请求体**
+
+无。
+
+**成功响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "reviewId": 501,
+    "projectId": 100,
+    "status": "RUNNING",
+    "appendedExpertCount": 2,
+    "expertCount": 4,
+    "reviewItemCount": 20
+  }
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| `appendedExpertCount` | 本次确认追加的专家数量 |
+| `expertCount` | 确认追加后的正式专家总数，不包含未确认追加账号 |
+| `reviewItemCount` | 本次为追加专家生成的评审明细数量 |
+
+**常见错误**
+
+| code | 场景 |
+|------|------|
+| 40000 | 请先推送专家评审 / 项目尚未完成 AI 审查 / 请先生成追加专家账号 |
+| 40100 | 未登录或 token 失效 |
+| 40300 | 当前用户不是招标方 |
+| 40400 | 项目不存在或不属于当前组织 |
+| 40900 | 当前项目未处于专家评审中 / 专家评审待评项尚未生成 / 追加专家评审明细生成数量不一致 / 追加专家状态已变化 / 专家评审状态已变化 |
 
 ---
 
@@ -420,6 +479,46 @@
         ]
       }
     ],
+    "itemReviewGroups": [
+      {
+        "companyId": 301,
+        "bidPackageId": 81,
+        "supplierName": "投标单位A",
+        "requirementItemId": 9002,
+        "sourceReviewItemId": 701,
+        "itemType": "SCORING",
+        "requirementCode": "S1",
+        "title": "技术方案评分",
+        "content": "根据技术方案完整性进行评分",
+        "aiStatus": "DONE",
+        "aiVetoRisk": false,
+        "aiJudgement": "方案完整性较好",
+        "aiSuggestedScore": 9.5,
+        "aiDeductionReason": "部分实施细节不够充分",
+        "fullScore": 10,
+        "averageScore": 8.75,
+        "sortOrder": 20,
+        "expertReviews": [
+          {
+            "memberId": 88,
+            "userId": 77,
+            "username": "expert_77",
+            "displayName": "张三",
+            "memberStatus": "READ_ONLY",
+            "submitStatus": "SUBMITTED",
+            "submitted": true,
+            "itemId": 801,
+            "result": "SCORE",
+            "scoreValue": 9.5,
+            "comment": "方案较完整，实施细节略少",
+            "veto": false,
+            "vetoReason": null,
+            "submittedAt": "2026-08-18T02:00:00Z",
+            "attachments": []
+          }
+        ]
+      }
+    ],
     "averageRanking": [
       {
         "rank": 1,
@@ -451,14 +550,61 @@
 | `expertMembers` | 专家提交情况；包含姓名、账号、成员状态、提交状态、提交时间 |
 | `companyTabs` | 投标单位标签页状态；包含正常、待确认废标、已废标、继续展示 |
 | `scoreCompareItems` | 评分对比数据；按投标单位展示已提交专家总分 |
+| `itemReviewGroups` | 逐项专家评审明细；按投标单位 + 资格 / 评分项分块，块内返回每位专家的结论、分值、建议和附件 |
 | `averageRanking` | 平均分排行；已确认废标公司不进入排行 |
 | `vetoPendingItems` | 待确认废标列表；只包含 `PENDING_VETO / PENDING_CONFIRMATION` 公司 |
 
 **统计规则**
 
 - 平均分 = 每位已提交专家对同一投标单位的所有 `SCORING` 分值求和，再对专家总分求平均，保留 2 位小数。
+- `itemReviewGroups[].averageScore` = 同一评分项下已提交专家的 `scoreValue` 平均值，资格项为 `null`。
 - 已确认废标公司保留在 `companyTabs` / `scoreCompareItems` 中，但 `averageScore`、`rank` 为空，且 `expertScores` 为空。
 - 未提交专家不参与平均分、评分对比和排行。
+- 已提交专家若因资格项废标或逾期提交导致部分评分项为空，明细中 `result` / `scoreValue` 保持 `null`，该专家不参与对应投标单位平均分、评分对比和排行。
+- `itemReviewGroups[].expertReviews` 会返回每位专家一行；未提交专家保留行数据，`submitStatus=NOT_SUBMITTED`，评审结果字段按数据库当前值返回。
+
+**itemReviewGroups[] 字段**
+
+| 字段 | 说明 |
+|------|------|
+| `companyId` | 专家评审公司快照 ID |
+| `bidPackageId` | 投标包 ID |
+| `supplierName` | 投标单位名称 |
+| `requirementItemId` | 招标要求条目 ID |
+| `sourceReviewItemId` | 来源 AI 审查条目 ID |
+| `itemType` | `QUALIFICATION` / `SCORING` |
+| `requirementCode` | 条目标识 |
+| `title` | 条目标题 |
+| `content` | 条目正文 |
+| `aiStatus` | AI 审查原始状态 |
+| `aiVetoRisk` | AI 是否提示废标风险 |
+| `aiJudgement` | AI 判断说明 |
+| `aiSuggestedScore` | AI 建议分，仅供参考 |
+| `aiDeductionReason` | AI 扣分原因，仅供参考 |
+| `fullScore` | 满分；资格项可为 `null` |
+| `averageScore` | 本评分项专家平均分；资格项为 `null` |
+| `sortOrder` | 条目排序 |
+| `expertReviews` | 该条目下每位专家的评审结果 |
+
+**expertReviews[] 字段**
+
+| 字段 | 说明 |
+|------|------|
+| `memberId` | 专家成员 ID |
+| `userId` | 专家账号 ID |
+| `username` | 专家账号 |
+| `displayName` | 专家姓名 |
+| `memberStatus` | 专家成员状态 |
+| `submitStatus` | 专家提交状态 |
+| `submitted` | 是否已提交或逾期自动提交 |
+| `itemId` | 当前专家自己的评审明细 ID |
+| `result` | 资格项为 `PASS` / `FAIL`，评分项为 `SCORE`；未填为 `null` |
+| `scoreValue` | 专家评分；资格项或未填为 `null` |
+| `comment` | 专家建议 |
+| `veto` | 是否建议废标 |
+| `vetoReason` | 废标原因 |
+| `submittedAt` | 条目提交时间 |
+| `attachments` | 当前专家在该评审项下上传的图片附件 |
 
 **常见错误**
 
@@ -592,6 +738,7 @@
     "readOnly": false,
     "submittedAt": null,
     "pushMessage": "请按要求完成专家评审",
+    "pusherName": "陈明",
     "companies": [
       {
         "companyId": 301,
@@ -617,13 +764,43 @@
             "aiSuggestedScore": 9.5,
             "aiDeductionReason": "部分实施细节不够充分",
             "fullScore": 10,
-            "evidenceJson": "[]",
+            "evidenceJson": "[{\"fragmentId\":30012,\"page\":18,\"quote\":\"投标技术方案包含总体架构、实施计划...\"}]",
+            "tenderEvidence": [
+              {
+                "fragmentId": 27833,
+                "page": 44,
+                "quote": "技术方案的先进性、可行性、完整性 | 15分",
+                "documentId": 551,
+                "fileName": "招标文件.docx",
+                "packageId": 424
+              }
+            ],
+            "bidEvidence": [
+              {
+                "fragmentId": 30012,
+                "page": 18,
+                "quote": "投标技术方案包含总体架构、实施计划...",
+                "documentId": 660,
+                "fileName": "投标文件.docx",
+                "packageId": 81
+              }
+            ],
             "result": null,
             "scoreValue": null,
             "comment": null,
             "veto": false,
             "vetoReason": null,
-            "submittedAt": null
+            "submittedAt": null,
+            "attachments": [
+              {
+                "attachmentId": 901,
+                "itemId": 801,
+                "fileName": "现场照片.png",
+                "contentType": "image/png",
+                "sortOrder": 1,
+                "createdAt": "2026-08-18T03:00:00Z"
+              }
+            ]
           }
         ]
       }
@@ -649,6 +826,7 @@
 | `readOnly` | 是否只读；前端保存 / 提交按钮以此为准 |
 | `submittedAt` | 当前专家提交时间，未提交为 `null` |
 | `pushMessage` | 招标方推送备注 |
+| `pusherName` | 推送人姓名；取推送操作人的 `displayName` |
 | `companies` | 投标单位 / 投标包列表 |
 
 **companies[] 字段**
@@ -682,13 +860,38 @@
 | `aiSuggestedScore` | AI 建议分，仅供参考 |
 | `aiDeductionReason` | AI 扣分原因，仅供参考 |
 | `fullScore` | 满分；资格项可为 `null` |
-| `evidenceJson` | 原文证据 JSON 字符串，当前不解析成数组 |
+| `evidenceJson` | 投标原文证据 JSON 字符串，保留给旧前端；新页面优先使用 `bidEvidence` |
+| `tenderEvidence` | 招标原文证据数组，用于“查看招标原文” |
+| `bidEvidence` | 投标原文证据数组，用于“查看投标原文” |
 | `result` | 专家评审结果；未保存为 `null` |
 | `scoreValue` | 专家评分；评分项初始为 `null` |
 | `comment` | 专家建议；未保存为 `null` |
 | `veto` | 专家是否建议废标 |
 | `vetoReason` | 专家废标原因 |
 | `submittedAt` | 当前条目提交时间 |
+| `attachments` | 专家上传的图片附件数组 |
+
+**attachments[] 字段**
+
+| 字段 | 说明 |
+|------|------|
+| `attachmentId` | 附件 ID |
+| `itemId` | 所属专家评审明细 ID |
+| `fileName` | 原始文件名 |
+| `contentType` | 图片 MIME 类型：`image/jpeg` / `image/png` / `image/webp` |
+| `sortOrder` | 当前条目下的附件排序 |
+| `createdAt` | 上传时间 |
+
+**evidence 数组元素**
+
+| 字段 | 说明 |
+|------|------|
+| `fragmentId` | 来源 chunk ID，可用于定位片段 |
+| `page` | 页码 |
+| `quote` | 原文摘录 |
+| `documentId` | 文件 ID，可配合预览接口打开原文 |
+| `fileName` | 文件名 |
+| `packageId` | 标包 ID；投标原文为当前投标包，招标原文为招标包 |
 
 **readOnly 判定**
 
@@ -766,13 +969,34 @@
     "aiSuggestedScore": 9.5,
     "aiDeductionReason": "部分实施细节不够充分",
     "fullScore": 10,
-    "evidenceJson": "[]",
+    "evidenceJson": "[{\"fragmentId\":30012,\"page\":18,\"quote\":\"投标技术方案包含总体架构、实施计划...\"}]",
+    "tenderEvidence": [
+      {
+        "fragmentId": 27833,
+        "page": 44,
+        "quote": "技术方案的先进性、可行性、完整性 | 15分",
+        "documentId": 551,
+        "fileName": "招标文件.docx",
+        "packageId": 424
+      }
+    ],
+    "bidEvidence": [
+      {
+        "fragmentId": 30012,
+        "page": 18,
+        "quote": "投标技术方案包含总体架构、实施计划...",
+        "documentId": 660,
+        "fileName": "投标文件.docx",
+        "packageId": 81
+      }
+    ],
     "result": "SCORE",
     "scoreValue": 9.5,
     "comment": "方案较完整，实施细节略少",
     "veto": false,
     "vetoReason": null,
-    "submittedAt": null
+    "submittedAt": null,
+    "attachments": []
   }
 }
 ```
@@ -789,11 +1013,92 @@
 
 ---
 
-### 4.3 提交专家评审
+### 4.3 专家评审附件
+
+附件挂在单条专家评审明细下。只能操作当前登录专家自己的任务项；上传 / 删除要求任务仍可编辑，提交后或截止后只允许查看。
+
+#### 4.3.1 上传附件
+
+`POST /api/expert-review-tasks/{taskId}/items/{itemId}/attachments`
+
+`Content-Type: multipart/form-data`
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `file` | file | 是 | 图片附件，仅支持 `jpg` / `jpeg` / `png` / `webp`；默认单个最大 10MB；每个评审项默认最多 5 个 |
+
+**成功响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "attachmentId": 901,
+    "itemId": 801,
+    "fileName": "现场照片.png",
+    "contentType": "image/png",
+    "sortOrder": 1,
+    "createdAt": "2026-08-18T03:00:00Z"
+  }
+}
+```
+
+**常见错误**
+
+| code | 场景 |
+|------|------|
+| 40000 | 未上传文件 / 附件为空 / 附件超出大小 / 文件名无效 / 非图片格式 |
+| 40100 | 未登录或 token 失效 |
+| 40300 | 当前用户不是专家 |
+| 40400 | 专家评审任务不存在 / 专家评审条目不存在 |
+| 40900 | 每项附件数已达上限 / 任务已只读 / 已提交 / 已截止 |
+
+#### 4.3.2 附件列表
+
+`GET /api/expert-review-tasks/{taskId}/items/{itemId}/attachments`
+
+返回当前评审项下附件数组；字段同上文 `attachments[]` 字段说明。提交后只读态仍可查看。
+
+#### 4.3.3 预览附件
+
+`GET /api/expert-review-tasks/{taskId}/items/{itemId}/attachments/{attachmentId}/preview`
+
+返回图片二进制，响应不是统一 JSON：
+
+```http
+HTTP/1.1 200 OK
+Content-Type: image/png
+Content-Disposition: inline; filename*=UTF-8''%E7%8E%B0%E5%9C%BA%E7%85%A7%E7%89%87.png
+```
+
+#### 4.3.4 删除附件
+
+`DELETE /api/expert-review-tasks/{taskId}/items/{itemId}/attachments/{attachmentId}`
+
+仅任务可编辑时允许删除。
+
+**成功响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": null
+}
+```
+
+---
+
+### 4.4 提交专家评审
 
 `POST /api/expert-review-tasks/{taskId}/submit`
 
-提交当前专家整份评审。提交前后端会校验全部待评项已完成；截止时间自动提交由后台任务处理，不调用本接口：
+提交当前专家整份评审。截止时间自动提交由后台任务处理，不调用本接口。
+
+若当前专家已在任意资格项保存有效废标建议（`FAIL` + `veto=true` + `vetoReason`），则该专家可直接提交整份项目评审，剩余资格项和评分项允许未填写。
+
+若当前专家没有有效废标建议，提交前后端会校验全部待评项已完成：
 
 - 资格项必须保存 `PASS` 或 `FAIL`。
 - 评分项必须保存 `SCORE` 和 `scoreValue`。
@@ -850,7 +1155,7 @@
 
 | code | 场景 |
 |------|------|
-| 40000 | 存在未完成资格项 / 未完成评分项 / 分值越界 / 废标原因缺失 |
+| 40000 | 无有效废标建议时存在未完成资格项 / 未完成评分项 / 分值越界 / 废标原因缺失 |
 | 40100 | 未登录或 token 失效 |
 | 40300 | 当前用户不是专家 |
 | 40400 | 专家评审任务不存在 |
@@ -895,16 +1200,20 @@ Content-Disposition: attachment; filename*=UTF-8''%E9%A1%B9%E7%9B%AE%E5%90%8D-%E
 ## 6. 隐藏逻辑（本册必读）
 
 - 专家评审只能在项目最新 AI 审查状态为 `SUCCESS` 后发起。
-- 添加专家会创建临时 `EXPERT` 账号，`temporaryPassword` 只在添加 / 追加 / 重置密码接口返回一次。
+- 添加专家会创建临时 `EXPERT` 账号，`temporaryPassword` 只在添加 / 生成追加账号 / 重置密码接口返回一次。
 - 重置密码会生成新临时密码、更新密码 hash 并提升 `token_version`，使旧 token 失效。
-- 推送前移除专家只允许处理 `BUILDING` 评审中的 `ACTIVE` 成员；移除后成员标记为 `DELETED`，临时专家账号从 `sys_user` 物理删除，后续推送不会带上该成员。
+- 移除专家只允许处理 `BUILDING` 评审中的 `ACTIVE` 成员，或 `RUNNING` 评审中尚未确认追加的 `PENDING_APPEND` 成员；移除后成员标记为 `DELETED`，临时专家账号从 `sys_user` 物理删除，后续推送 / 确认追加不会带上该成员。
+- 生成追加账号只写入 `PENDING_APPEND` 成员，不生成专家评审明细；确认追加成功后才将成员改为 `ACTIVE` 并生成评审明细。
+- `PENDING_APPEND` 成员不返回给项目专家列表、专家当前任务和提交统计；若专家评审完成时仍存在未确认追加账号，会清理对应临时账号。
 - 推送前必须至少添加一名专家。
 - 推送时 `reviewItemCount` 是单个专家的待评条目模板数，不是总插入行数。
 - 待评项来源于最新成功 AI 审查：资格项只取 `无法判断`，评分项全部进入。
 - 专家侧评分项 `scoreValue` 初始为空；`aiSuggestedScore` 和 `aiDeductionReason` 仅为参考。
 - 评分项保存后 `result` 固定为 `SCORE`；资格项仅允许 `PASS` / `FAIL`。
+- 专家评审附件挂在单条评审明细下，仅支持 `jpg` / `jpeg` / `png` / `webp` 图片；上传 / 删除只允许可编辑任务，提交后只读态仍可浏览。
 - 提交后专家成员状态先进入 `READ_ONLY`，提交状态为 `SUBMITTED`，再次进入当前任务详情时 `readOnly=true`。
 - 提交后会按已提交 `isVeto=true` 的资格项刷新公司废标汇总。
+- 当前专家任意资格项保存有效废标建议后，可直接提交本项目评审，未评资格项和评分项不再阻塞提交。
 - 公司未选择继续展示且存在废标建议时，进入 `PENDING_VETO / PENDING_CONFIRMATION`。
 - 确认废标只处理 `PENDING_VETO / PENDING_CONFIRMATION`，成功后进入 `VETOED / NORMAL`。
 - 继续展示只处理 `PENDING_VETO / PENDING_CONFIRMATION`，成功后进入 `NORMAL / CONTINUE_DISPLAY`，后续同公司新废标建议不再弹确认。
@@ -913,9 +1222,11 @@ Content-Disposition: attachment; filename*=UTF-8''%E9%A1%B9%E7%9B%AE%E5%90%8D-%E
 - `SUBMITTED` 和 `OVERDUE_SUBMITTED` 都会计入专家提交人数；逾期提交中未填完整的投标单位不使用该专家的部分分值参与平均分和专家分数对比。
 - 项目专家评测聚合接口的平均分实时按已提交专家评分明细计算，不依赖公司表 `average_score` 冗余字段。
 - `hasAnyCompleteSubmission=false` 时前端不展示评分对比、统计表格和综合排行。
+- 项目专家评测聚合接口新增 `itemReviewGroups`，用于按“投标单位 + 资格 / 评分项”展示每位专家的单项结论、评分、建议、废标原因和附件。
 - 已确认废标公司不展示平均分，不进入 `averageRanking`。
 - 导出专家评审报告复用项目专家评测聚合结果，返回 xlsx 二进制附件。
 - 专家当前任务只返回一个最新 `RUNNING` 或 `SUCCESS` 任务；没有任务列表接口。
+- 专家当前任务返回 `pusherName`，取正式推送专家评审时的操作人姓名。
 - 删除项目时会同步清理专家评审：`biz_expert_review.status` 和 `biz_expert_review_member.status` 标为 `DELETED`，临时专家账号从 `sys_user` 物理删除；公司、条目、附件明细保留在已删除评审下作为历史数据。
 
 ---
@@ -924,6 +1235,10 @@ Content-Disposition: attachment; filename*=UTF-8''%E9%A1%B9%E7%9B%AE%E5%90%8D-%E
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-20 | 调整专家提交规则：任意资格项有效废标后，该专家可直接提交项目评审 |
+| 2026-08-20 | 追加专家改为两步式：先生成 `PENDING_APPEND` 账号，再确认追加生成评审明细 |
+| 2026-08-19 | 项目专家评测聚合接口新增 `itemReviewGroups`，支持逐项展示每位专家的结论、评分、建议和附件 |
+| 2026-08-19 | 新增专家侧评审附件上传、列表、图片预览和删除接口，并在当前任务详情 / 保存响应中返回 `attachments` |
 | 2026-08-19 | 新增推送前移除专家接口，移除后同步删除临时专家账号并刷新专家人数 |
 | 2026-08-18 | 新增保存单条评审、提交专家评审、截止时间自动提交、项目专家评测聚合、导出专家评审报告、管理端确认废标、继续展示、重置临时专家密码接口，以及评审完成后的临时专家账号禁用和项目删除联动清理 |
 | 2026-08-17 | 初版：添加专家、推送、追加专家、专家当前任务详情 |

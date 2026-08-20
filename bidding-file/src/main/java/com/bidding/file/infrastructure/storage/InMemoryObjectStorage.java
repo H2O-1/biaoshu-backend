@@ -16,7 +16,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @Component
 @ConditionalOnProperty(name = "bidding.storage.type", havingValue = "memory", matchIfMissing = true)
-public class InMemoryObjectStorage implements ObjectStoragePort {
+public class InMemoryObjectStorage implements ObjectStoragePort, com.bidding.common.port.BinaryObjectStoragePort {
 
     private final Map<String, byte[]> store = new ConcurrentHashMap<>();
 

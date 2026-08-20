@@ -70,7 +70,7 @@ class TenderAnalysisJobExecutorTest {
 
         assertEquals(true, executor.claimAndRunOnce("w1"));
 
-        verify(jobPort).markRunningProgress(101L, 25, "文件解析中 success=1 waiting=1");
+        verify(jobPort).markRunningProgress(101L, 25, "文件解析中");
         verify(llmPort, never()).extractTenderBasicInfo(anyString());
         verify(tenderAnalysisPort, never()).markSuccess(anyLong(), any(), anyString());
     }
@@ -88,8 +88,8 @@ class TenderAnalysisJobExecutorTest {
 
         assertEquals(true, executor.claimAndRunOnce("w1"));
 
-        verify(tenderAnalysisPort).markFailed(eq(55L), anyString());
-        verify(jobPort).markFailed(eq(101L), anyString());
+        verify(tenderAnalysisPort).markFailed(55L, "文件解析失败：失败文件.pdf");
+        verify(jobPort).markFailed(101L, "文件解析失败：失败文件.pdf");
         verify(llmPort, never()).extractTenderBasicInfo(anyString());
     }
 

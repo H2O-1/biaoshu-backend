@@ -26,7 +26,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * 建清单管线：按管理员维度多 query 召回并合并 → 综合重排一次 →
+ * 建清单管线：按管理员维度多 query 召回并合并 → 资格/评分分别重排 →
  * 按产物拆分：资格条目 A ∥ 评分条目 B → 编号 → bidSearch C ∥ evidence D → 合并落库草稿。
  * 召回：向量余弦 ∥ BM25，RRF 融合后再重排（可用 hybrid-enabled 关闭 BM25）。
  */
@@ -119,9 +119,14 @@ public class ChecklistBuildPipeline {
         if (progress != null) {
             progress.onProgress(45, "重排中");
         }
-        String rerankQuery = buildAllDimensionsRerankQuery(dimensions);
+        String qualificationRerankQuery = buildQualificationRerankQuery(dimensions);
+        String scoringRerankQuery = buildScoringRerankQuery(dimensions);
         t0 = System.currentTimeMillis();
-        List<VectorRecallPort.RecallHit> ranked = rerankHits(rerankQuery, merged, safeRerankTopN);
+        List<VectorRecallPort.RecallHit> qualificationRanked =
+                rerankHits(qualificationRerankQuery, merged, safeRerankTopN);
+        List<VectorRecallPort.RecallHit> scoringRanked =
+                rerankHits(scoringRerankQuery, merged, safeRerankTopN);
+        List<VectorRecallPort.RecallHit> ranked = mergeRankedHits(qualificationRanked, scoringRanked);
         long rerankMs = System.currentTimeMillis() - t0;
         if (ranked.isEmpty()) {
             log.warn("建清单重排结果为空 projectId={} recallMs={} rerankMs={}",
@@ -132,9 +137,10 @@ public class ChecklistBuildPipeline {
         if (progress != null) {
             progress.onProgress(60, "LLM拆分归纳中(资格∥评分)");
         }
-        String chunksText = formatChunks(ranked);
+        String qualificationChunksText = formatChunks(qualificationRanked);
+        String scoringChunksText = formatChunks(scoringRanked);
         t0 = System.currentTimeMillis();
-        LlmExtractBundle bundle = extractWithLlm(chunksText);
+        LlmExtractBundle bundle = extractWithLlm(qualificationChunksText, scoringChunksText);
         long llmMs = System.currentTimeMillis() - t0;
         List<LlmPort.ExtractedRequirement> extracted = bundle.items;
         String llmRaw = bundle.rawJson;
@@ -166,7 +172,7 @@ public class ChecklistBuildPipeline {
         long cdWallMs = 0L;
         if (!deduped.isEmpty()) {
             if (progress != null) {
-                progress.onProgress(75, "生成bidSearch∥evidence中 count=" + deduped.size());
+                progress.onProgress(75, "生成条目检索词和原文证据中");
             }
             long[] bidMsHolder = new long[1];
             long[] evMsHolder = new long[1];
@@ -215,15 +221,15 @@ public class ChecklistBuildPipeline {
                     bidSearchMs, evidenceMs, cdWallMs);
         }
 
-        log.info("建清单完成 projectId={} recallHits={} rerankTop={} extracted={} "
+        log.info("建清单完成 projectId={} recallHits={} qualRerankTop={} scoringRerankTop={} extracted={} "
                         + "recallMs={} rerankMs={} llmMs={} bidSearchMs={} evidenceMs={} cdWallMs={} totalMs={}",
-                projectId, merged.size(), ranked.size(),
+                projectId, merged.size(), qualificationRanked.size(), scoringRanked.size(),
                 deduped.size(),
                 recallMs, rerankMs, llmMs, bidSearchMs, evidenceMs, cdWallMs,
                 System.currentTimeMillis() - tAll);
 
         if (progress != null) {
-            progress.onProgress(85, "条目去重完成 count=" + deduped.size());
+            progress.onProgress(85, "条目整理完成");
         }
         PipelineResult result = new PipelineResult();
         result.setItems(deduped);
@@ -246,7 +252,7 @@ public class ChecklistBuildPipeline {
         }
         String chunksText = formatChunks(ranked);
         long t0 = System.currentTimeMillis();
-        LlmExtractBundle bundle = extractWithLlm(chunksText);
+        LlmExtractBundle bundle = extractWithLlm(chunksText, chunksText);
         long llmMs = System.currentTimeMillis() - t0;
 
         Map<Long, Boolean> allowedChunk = new LinkedHashMap<>();
@@ -277,7 +283,7 @@ public class ChecklistBuildPipeline {
         long evidenceMs = 0L;
         if (!deduped.isEmpty()) {
             if (progress != null) {
-                progress.onProgress(80, "生成条目检索词和原文证据中 count=" + deduped.size());
+                progress.onProgress(80, "生成条目检索词和原文证据中");
             }
             long t1 = System.currentTimeMillis();
             String bidSearchRaw = attachBidSearch(deduped);
@@ -322,7 +328,7 @@ public class ChecklistBuildPipeline {
     }
 
     /**
-     * 调试：执行建清单阶段的多维召回和综合重排，返回正式喂给建清单 LLM 前的 topN 片段。
+     * 调试：执行建清单阶段的多维召回和资格/评分双路重排，返回正式喂给建清单 LLM 前的 topN 片段。
      */
     public RerankDebugResult debugRerank(
             long orgId,
@@ -337,34 +343,41 @@ public class ChecklistBuildPipeline {
         List<String> queryTexts = collectAllQueryTexts(dimensions);
         List<VectorRecallPort.RecallHit> recalled = recallAllDimensions(
                 orgId, projectId, dimensions, tenderPackageIds, documentIds, safeRecallTopK);
-        String rerankQuery = buildAllDimensionsRerankQuery(dimensions);
+        String qualificationRerankQuery = buildQualificationRerankQuery(dimensions);
+        String scoringRerankQuery = buildScoringRerankQuery(dimensions);
 
-        List<RerankHitView> hits = new ArrayList<>();
+        List<RerankHitView> qualificationHits = new ArrayList<>();
+        List<RerankHitView> scoringHits = new ArrayList<>();
         if (!recalled.isEmpty()) {
             List<String> docs = new ArrayList<>();
             for (int i = 0; i < recalled.size(); i++) {
                 String content = recalled.get(i).getContent();
                 docs.add(content == null ? "" : content);
             }
-            List<RerankPort.RerankHit> ranked =
-                    rerankPort.rerank(rerankQuery, docs, safeRerankTopN, tenderInstruct);
-            hits = toRerankDebugHits(recalled, ranked);
+            qualificationHits = rerankDebugHits(
+                    qualificationRerankQuery, recalled, docs, safeRerankTopN);
+            scoringHits = rerankDebugHits(
+                    scoringRerankQuery, recalled, docs, safeRerankTopN);
         }
 
         RerankDebugResult result = new RerankDebugResult();
         result.setRecallTopK(safeRecallTopK);
         result.setRerankTopN(safeRerankTopN);
         result.setQueryTexts(queryTexts);
-        result.setRerankQuery(rerankQuery);
+        result.setRerankQuery(qualificationRerankQuery);
+        result.setQualificationRerankQuery(qualificationRerankQuery);
+        result.setScoringRerankQuery(scoringRerankQuery);
         result.setRecallHitCount(recalled.size());
-        result.setHits(hits);
+        result.setQualificationHits(qualificationHits);
+        result.setScoringHits(scoringHits);
+        result.setHits(qualificationHits);
         return result;
     }
 
     /**
      * 资格∥评分并行；任一侧失败则整单失败（抛出异常）。
      */
-    private LlmExtractBundle extractWithLlm(String chunksText) {
+    private LlmExtractBundle extractWithLlm(String qualificationChunksText, String scoringChunksText) {
         ExecutorService pool = Executors.newFixedThreadPool(2);
         long[] qualMs = new long[1];
         long[] scoreMs = new long[1];
@@ -373,7 +386,7 @@ public class ChecklistBuildPipeline {
             CompletableFuture<LlmPort.ExtractChecklistResult> qualFuture = CompletableFuture.supplyAsync(() -> {
                 long t0 = System.currentTimeMillis();
                 try {
-                    return llmPort.extractQualificationChecklist(chunksText);
+                    return llmPort.extractQualificationChecklist(qualificationChunksText);
                 } finally {
                     qualMs[0] = System.currentTimeMillis() - t0;
                 }
@@ -381,7 +394,7 @@ public class ChecklistBuildPipeline {
             CompletableFuture<LlmPort.ExtractChecklistResult> scoreFuture = CompletableFuture.supplyAsync(() -> {
                 long t0 = System.currentTimeMillis();
                 try {
-                    return llmPort.extractScoringChecklist(chunksText);
+                    return llmPort.extractScoringChecklist(scoringChunksText);
                 } finally {
                     scoreMs[0] = System.currentTimeMillis() - t0;
                 }
@@ -405,6 +418,20 @@ public class ChecklistBuildPipeline {
         } finally {
             pool.shutdownNow();
         }
+    }
+
+    private List<RerankHitView> rerankDebugHits(
+            String rerankQuery,
+            List<VectorRecallPort.RecallHit> recalled,
+            List<String> docs,
+            int topN) {
+        if (rerankQuery == null || rerankQuery.isEmpty()) {
+            log.warn("建清单调试重排跳过：无可用 query");
+            return new ArrayList<>();
+        }
+        List<RerankPort.RerankHit> ranked =
+                rerankPort.rerank(rerankQuery, docs, topN, tenderInstruct);
+        return toRerankDebugHits(recalled, ranked);
     }
 
     /**
@@ -1035,6 +1062,29 @@ public class ChecklistBuildPipeline {
         return result;
     }
 
+    private static List<VectorRecallPort.RecallHit> mergeRankedHits(
+            List<VectorRecallPort.RecallHit> qualificationRanked,
+            List<VectorRecallPort.RecallHit> scoringRanked) {
+        Map<Long, VectorRecallPort.RecallHit> byChunk = new LinkedHashMap<>();
+        addRankedHits(byChunk, qualificationRanked);
+        addRankedHits(byChunk, scoringRanked);
+        return new ArrayList<>(byChunk.values());
+    }
+
+    private static void addRankedHits(
+            Map<Long, VectorRecallPort.RecallHit> byChunk,
+            List<VectorRecallPort.RecallHit> hits) {
+        if (hits == null) {
+            return;
+        }
+        for (int i = 0; i < hits.size(); i++) {
+            VectorRecallPort.RecallHit hit = hits.get(i);
+            if (hit != null && !byChunk.containsKey(hit.getChunkId())) {
+                byChunk.put(hit.getChunkId(), hit);
+            }
+        }
+    }
+
     /**
      * 多维综合重排 query：各维「名：侧面」用句号拼接。
      */
@@ -1057,6 +1107,48 @@ public class ChecklistBuildPipeline {
             return "招标资格条件与评分要求";
         }
         return sb.toString();
+    }
+
+    /**
+     * 资格侧重排 query：使用除 SCORING 外的启用维度。
+     */
+    static String buildQualificationRerankQuery(List<ReviewDimensionPort.Dimension> dimensions) {
+        return buildFilteredDimensionsRerankQuery(dimensions, false);
+    }
+
+    /**
+     * 评分侧重排 query：只使用 SCORING 维度，确保评分明细进入评分 LLM 上下文。
+     */
+    static String buildScoringRerankQuery(List<ReviewDimensionPort.Dimension> dimensions) {
+        return buildFilteredDimensionsRerankQuery(dimensions, true);
+    }
+
+    private static String buildFilteredDimensionsRerankQuery(
+            List<ReviewDimensionPort.Dimension> dimensions,
+            boolean scoringOnly) {
+        if (dimensions == null || dimensions.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < dimensions.size(); i++) {
+            ReviewDimensionPort.Dimension dim = dimensions.get(i);
+            if (isScoringDimension(dim) != scoringOnly) {
+                continue;
+            }
+            String part = buildCompositeRerankQuery(dim);
+            if (part == null || part.isEmpty()) {
+                continue;
+            }
+            if (sb.length() > 0) {
+                sb.append('。');
+            }
+            sb.append(part);
+        }
+        return sb.toString();
+    }
+
+    static boolean isScoringDimension(ReviewDimensionPort.Dimension dim) {
+        return dim != null && MAIN_SCORING.equals(dim.getCode());
     }
 
     /**
@@ -1307,8 +1399,12 @@ public class ChecklistBuildPipeline {
         private int rerankTopN;
         private List<String> queryTexts = new ArrayList<>();
         private String rerankQuery;
+        private String qualificationRerankQuery;
+        private String scoringRerankQuery;
         private int recallHitCount;
         private List<RerankHitView> hits = new ArrayList<>();
+        private List<RerankHitView> qualificationHits = new ArrayList<>();
+        private List<RerankHitView> scoringHits = new ArrayList<>();
 
         public int getRecallTopK() {
             return recallTopK;
@@ -1346,6 +1442,22 @@ public class ChecklistBuildPipeline {
             this.rerankQuery = rerankQuery;
         }
 
+        public String getQualificationRerankQuery() {
+            return qualificationRerankQuery;
+        }
+
+        public void setQualificationRerankQuery(String qualificationRerankQuery) {
+            this.qualificationRerankQuery = qualificationRerankQuery;
+        }
+
+        public String getScoringRerankQuery() {
+            return scoringRerankQuery;
+        }
+
+        public void setScoringRerankQuery(String scoringRerankQuery) {
+            this.scoringRerankQuery = scoringRerankQuery;
+        }
+
         public int getRecallHitCount() {
             return recallHitCount;
         }
@@ -1364,6 +1476,30 @@ public class ChecklistBuildPipeline {
 
         public int getRerankHitCount() {
             return hits.size();
+        }
+
+        public List<RerankHitView> getQualificationHits() {
+            return qualificationHits;
+        }
+
+        public void setQualificationHits(List<RerankHitView> qualificationHits) {
+            this.qualificationHits = qualificationHits == null ? new ArrayList<>() : qualificationHits;
+        }
+
+        public int getQualificationHitCount() {
+            return qualificationHits.size();
+        }
+
+        public List<RerankHitView> getScoringHits() {
+            return scoringHits;
+        }
+
+        public void setScoringHits(List<RerankHitView> scoringHits) {
+            this.scoringHits = scoringHits == null ? new ArrayList<>() : scoringHits;
+        }
+
+        public int getScoringHitCount() {
+            return scoringHits.size();
         }
     }
 

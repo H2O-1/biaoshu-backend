@@ -987,7 +987,9 @@ Authorization: Bearer <accessToken>
 | `NEED_BID_FILES` | 待补充投标文件 | 招标已齐；投标文件数=0（0 不算齐），或存在投标文件 `indexStatus`≠`SUCCESS` |
 | `READY_FOR_AI_REVIEW` | 待AI审查 | 两侧文件均已解析成功，且无进行中审查、最新审查非 SUCCESS/FAILED（含无审查、或已 `OBSOLETE`） |
 | `AI_REVIEWING` | AI审查中 | 存在 REVIEW 任务 `PENDING`/`RUNNING`，或审查行 `BUILDING` |
-| `AI_REVIEW_SUCCESS` | AI审查完成 | 最新 `biz_review.status=SUCCESS` |
+| `EXPERT_REVIEWING` | 专家评审中 | 最新 AI 审查为 `SUCCESS`，且最新已推送专家评审为 `RUNNING` |
+| `EXPERT_REVIEW_SUCCESS` | 专家评审完成 | 最新 AI 审查为 `SUCCESS`，且最新已推送专家评审为 `SUCCESS` |
+| `AI_REVIEW_SUCCESS` | AI审查完成 | 最新 `biz_review.status=SUCCESS`，且未推送专家评审 |
 | `AI_REVIEW_FAILED` | AI审查失败 | 最新 `biz_review.status=FAILED` |
 
 > 不做单独的「待AI重新审查」状态码：项目下**上传 / 复制 / 删除**任一招标或投标文件时，若建清单/审查/一键审查进行中 → `40900`；否则将相关产物标为 `OBSOLETE`（**招标**：清单+审查；**仅投标**：只作废审查，清单可复用）。`OBSOLETE` 记录保留，详情仍可按 id 查看。文件解析齐后 `workflowStatus` 回到 `READY_FOR_AI_REVIEW`（或待补文件）；重新发起仍用一键审查。删投标包时，仅包内有文件才同理作废审查；空投标包删除不影响审查状态。
@@ -1011,6 +1013,11 @@ Authorization: Bearer <accessToken>
         "status": "ACTIVE",
         "workflowStatus": "READY_FOR_AI_REVIEW",
         "workflowMessage": "待AI审查",
+        "aiReviewJobId": null,
+        "expertReviewId": null,
+        "expertReviewStatus": null,
+        "expertCount": null,
+        "submittedExpertCount": null,
         "createdBy": 10,
         "createdAt": "2026-07-21T08:00:00Z",
         "updatedAt": "2026-07-21T08:00:00Z",
@@ -1037,6 +1044,10 @@ Authorization: Bearer <accessToken>
 | workflowStatus | 派生业务进度（见上表） |
 | workflowMessage | 面向页面展示的进度文案；招标文件解析失败时为 `{招标单位名称}招标文件解析失败` |
 | aiReviewJobId | 最新一键 AI 审查总任务 id；无则为 null；可 `GET /api/jobs/{aiReviewJobId}` 续查 |
+| expertReviewId | 最新已推送专家评审 id；未推送为 `null` |
+| expertReviewStatus | 最新已推送专家评审状态：`RUNNING` / `SUCCESS`；未推送为 `null` |
+| expertCount | 专家总人数；未推送为 `null` |
+| submittedExpertCount | 已提交专家人数；未推送为 `null` |
 | tenderPackageId | 已绑招标包 ID；无则为 null |
 | tenderPackageCount | 已绑招标包数量（通常 0/1） |
 | tenderFileCount | 招标包下未删除文件数（「N 个文件」） |
@@ -1303,4 +1314,4 @@ Authorization: Bearer <accessToken>
 - 停用项目仍可改基本信息；已删项目不可查。
 - `agency` / `projectType` / `leaderName` 创建与更新均可空；空白存 `null`；更新时传空白会清空。
 - 列表/详情派生：`mainTenderFileName`（`fileType=招标文件`）、`bidPackageCount` / `bidPackageUploadedCount` / `bidFileCount`。
-- `workflowStatus` 为派生字段（不落库）：待补充招标/投标（含解析中、解析失败）、待AI审查、AI审查中/完成/失败；与 `status` 启停分离。项目下上传/复制/删除招标或投标文件会作废相关审查（改招标另作废清单）；删除有文件的投标包同理作废审查，删除空投标包不影响审查状态；`OBSOLETE` 详情仍可查看；解析齐后回到待审查或待补文件。
+- `workflowStatus` 为派生字段（不落库）：待补充招标/投标（含解析中、解析失败）、待AI审查、AI审查中/完成/失败、专家评审中/完成；与 `status` 启停分离。项目下上传/复制/删除招标或投标文件会作废相关审查（改招标另作废清单）；删除有文件的投标包同理作废审查，删除空投标包不影响审查状态；`OBSOLETE` 详情仍可查看；解析齐后回到待审查或待补文件。

@@ -4,7 +4,7 @@
 > 文件上传与标包 CRUD 见：[文件与标包](./API-文件与标包.md)  
 > 账号 / 组织 / 项目见：[账号组织项目](./API-账号组织项目.md) · [总索引](./API.md)  
 > Base URL（本地）：`http://localhost:8080`  
-> 更新：2026-08-07
+> 更新：2026-08-19
 
 ## 通用约定（摘要）
 
@@ -25,7 +25,7 @@
 | 真索引 | 百炼 `text-embedding-v4`；PDF/docx 抽文本；章节切块 |
 | 召回 / 重排列表 | **不入库**；开发期可用 debug 接口 |
 | 审查维度 | 全局表；招标文件 RAG 13 维全选（V26/V27）；建清单不提供前端勾选 |
-| 建清单 | `BUILD_CHECKLIST`：招标侧多维召回→综合 query 重排→LLM→落库 |
+| 建清单 | `BUILD_CHECKLIST`：招标侧多维召回→资格/评分双路重排→LLM→落库 |
 | 智能审查 | `REVIEW`：按包×条目；召回**仅** `bidSearch`（无则跳过召回）；重排/对照用 `text` |
 
 角色：仅 `TENDERER`（维度管理除外）；跨组织资源一律 `40400`。  
@@ -238,7 +238,7 @@
 仅当 `bidding.rerank.debug-enabled=true`（环境变量 `RERANK_DEBUG`）时注册；关闭后接口不存在（404）。  
 仅 `TENDERER`；项目须属本组织。结果**不入库**。
 
-用途：按正式建清单链路自动查看“招标侧多维召回 → 综合重排”后的 topN 片段。调用方不传 query，后端会自动使用数据库里全部启用审查维度的检索词，并使用正式建清单的综合重排 query。
+用途：按正式建清单链路自动查看“招标侧多维召回 → 资格/评分双路重排”后的 topN 片段。调用方不传 query，后端会自动使用数据库里全部启用审查维度的检索词；资格侧使用非 `SCORING` 维度拼 query，评分侧只使用 `SCORING` 维度拼 query。
 
 **请求体**
 
@@ -251,8 +251,8 @@
 | 项目 | 路径参数 `projectId` |
 | 招标包 / 招标文件 | 同 `checklist-recall-debug`，使用项目 `TENDER` 标包下所有 `indexStatus=SUCCESS` 文档 |
 | 召回 query | 自动使用全部启用审查维度的非空 query |
-| 重排 query | 自动拼接维度名与检索词：`维度名：query1；query2。维度名：query1` |
-| 输出顺序 | 与正式建清单一致：先跨文件合并召回候选，再由 `qwen3-rerank` 重排输出 topN |
+| 重排 query | `qualificationRerankQuery` 自动拼接非 `SCORING` 维度；`scoringRerankQuery` 只拼接 `SCORING` 维度 |
+| 输出顺序 | 与正式建清单一致：先跨文件合并召回候选，再由 `qwen3-rerank` 分别重排资格 topN 与评分 topN |
 | 多文件输出 | 多个招标文件的片段会跨文件统一排序；每条 hit 通过 `documentId` / `fileName` / `pageNo` 区分来源 |
 
 **成功 `data` 示例**
@@ -276,11 +276,15 @@
     "找出所有关于信息安全服务资质的规定",
     "CCRC信息安全服务资质要求"
   ],
-  "rerankQuery": "安全资质与认证体系：找出所有关于信息安全服务资质的规定；CCRC信息安全服务资质要求",
+  "rerankQuery": "资格要求类：投标人资格条件是什么",
+  "qualificationRerankQuery": "资格要求类：投标人资格条件是什么",
+  "scoringRerankQuery": "评分评审类：评分标准和打分办法是什么；评标办法",
   "recallTopK": 40,
   "recallHitCount": 40,
   "rerankTopN": 15,
   "rerankHitCount": 15,
+  "qualificationHitCount": 15,
+  "scoringHitCount": 15,
   "hits": [
     {
       "rank": 1,
@@ -295,6 +299,38 @@
       "packageName": "招标文件",
       "recallScore": 0.0327,
       "rerankScore": 0.91
+    }
+  ],
+  "qualificationHits": [
+    {
+      "rank": 1,
+      "chunkId": 9001,
+      "chunkIndex": 12,
+      "pageNo": 8,
+      "content": "供应商须具备信息安全服务资质...",
+      "documentId": 101,
+      "fileName": "招标文件.pdf",
+      "packageId": 50,
+      "packageType": "TENDER",
+      "packageName": "招标文件",
+      "recallScore": 0.0327,
+      "rerankScore": 0.91
+    }
+  ],
+  "scoringHits": [
+    {
+      "rank": 1,
+      "chunkId": 9015,
+      "chunkIndex": 31,
+      "pageNo": 22,
+      "content": "评分标准：技术方案满分15分...",
+      "documentId": 101,
+      "fileName": "招标文件.pdf",
+      "packageId": 50,
+      "packageType": "TENDER",
+      "packageName": "招标文件",
+      "recallScore": 0.0281,
+      "rerankScore": 0.89
     }
   ]
 }
@@ -312,7 +348,7 @@
 
 #### 8.0.6 建清单（BUILD_CHECKLIST）
 
-异步：按勾选审查维度，在**招标包**已 INDEX 成功的文档上多 query 召回并合并 → **综合 query 重排一次** → **按产物拆分 LLM**（资格条目 A ∥ 评分条目 B → 程序编号 Q/S → bidSearch C → evidence D；版本记 `extract-artifact-v1`）→ 落库新版本清单。  
+异步：按勾选审查维度，在**招标包**已 INDEX 成功的文档上多 query 召回并合并 → **资格/评分双路重排**（资格侧用非 `SCORING` 维度，评分侧只用 `SCORING` 维度）→ **按产物拆分 LLM**（资格条目 A ∥ 评分条目 B → 程序编号 Q/S → bidSearch C → evidence D；版本记 `extract-artifact-v1`）→ 落库新版本清单。
 **A/B/C/D 任一步 LLM 调用失败 → 整单建清单 FAILED**（job + checklist 均 FAILED）。编号后 **C∥D 并行**（墙钟 ≈ max(C,D)）。无 `chunkIds` 的条目跳过 D、`evidenceJson=[]`。首条 evidence 的 quote 写入 `sourceExcerpt`（审查 `tenderQuote`）。  
 不做人工确认；`SUCCESS` 即可被后续 REVIEW 引用。条目 `mainType`=`QUALIFICATION`/`SCORING`；`dimensionCode` 写入主类。
 
@@ -421,7 +457,7 @@
 ### 重排（Rerank）
 - 典型链路：向量召回 topK → 百炼 `qwen3-rerank` → 截断 topN；**结果不入库**。
 - 重排 API 路径为业务空间 `compatible-api/v1/reranks`（与 embedding 的 `compatible-mode` 不同）。
-- 建清单重排调试固定复用真实建清单综合 `rerankQuery`，不再支持手动传 query。
+- 建清单重排调试固定复用真实建清单双路 query，返回 `qualificationHits` 与 `scoringHits`；`hits` 保留为资格侧结果。
 - `checklist-rerank-debug` 仅 `RERANK_DEBUG=true` 时可用。
 
 ### 审查维度
@@ -431,7 +467,7 @@
 
 ### 建清单（BUILD_CHECKLIST）
 - 只在**招标包**已 INDEX 成功文档上跑。
-- 仍用管理员配置的审查维度 queries 做多路召回；合并后综合重排一次；**LLM 按产物拆分**（A 资格 ∥ B 评分 → 编号 → C bidSearch → D evidence，`extract-artifact-v1`）。
+- 仍用管理员配置的审查维度 queries 做多路召回；合并后资格/评分双路重排；**LLM 按产物拆分**（A 资格 ∥ B 评分 → 编号 → C bidSearch → D evidence，`extract-artifact-v1`）。
 - 条目含：`title`、`mainType`、`subType`、`text`(content)、`bidSearchJson`、`evidenceJson`、`sourceExcerpt`、评分字段；保留 `chunkIds`；`dimension_code` 写主类。
 - 成功时主表写入 `llm_raw_json`（含 A/B/C/D 原文拼接）；详情 API 返回 `llmRawJson`。
 - 状态 `BUILDING` → `SUCCESS`/`FAILED`；成功后即可被 REVIEW 引用，无人工确认步。

@@ -87,6 +87,12 @@ public class ExpertReviewController {
                 expertReviewAppService.append(projectId, request.getDisplayName())));
     }
 
+    @PostMapping("/append/push")
+    public ApiResponse<ExpertReviewAppService.AppendPushResult> pushAppend(
+            @PathVariable("projectId") long projectId) {
+        return ApiResponse.ok(expertReviewAppService.pushAppend(projectId));
+    }
+
     @PostMapping("/members/{memberId}/reset-password")
     public ApiResponse<ExpertReviewAppService.MemberPasswordResetResult> resetMemberPassword(
             @PathVariable("projectId") long projectId,
