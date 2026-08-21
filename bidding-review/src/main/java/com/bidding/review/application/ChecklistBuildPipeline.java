@@ -741,6 +741,7 @@ public class ChecklistBuildPipeline {
                 if (row.getFragmentId() == null || !hitById.containsKey(row.getFragmentId())) {
                     continue;
                 }
+                row.setPage(hitById.get(row.getFragmentId()).getPageNo());
                 String code = row.getId().trim();
                 List<LlmPort.EvidenceRow> list = byCode.get(code);
                 if (list == null) {

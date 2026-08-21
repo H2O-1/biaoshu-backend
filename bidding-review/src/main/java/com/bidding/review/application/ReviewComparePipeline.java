@@ -549,7 +549,7 @@ public class ReviewComparePipeline {
             String canonical = canonicalQuoteFromContent(content, quote);
             LlmPort.BidEvidence copy = new LlmPort.BidEvidence();
             copy.setFragmentId(matched.getChunkId());
-            copy.setPage(ev.getPage() != null ? ev.getPage() : matched.getPageNo());
+            copy.setPage(matched.getPageNo());
             copy.setQuote(canonical);
             result.add(copy);
         }

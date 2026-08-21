@@ -4,6 +4,7 @@ import com.bidding.common.api.PageResult;
 import com.bidding.common.error.BizException;
 import com.bidding.common.error.ErrorCode;
 import com.bidding.common.port.BidPackageReviewSummaryPort;
+import com.bidding.common.port.DocumentCascadePort;
 import com.bidding.common.port.DocumentCountPort;
 import com.bidding.common.port.DocumentProjectBindPort;
 import com.bidding.common.port.OrgLookupPort;
@@ -54,6 +55,9 @@ class ProjectAppServiceTest {
 
     @Mock
     private PackageRepository packageRepository;
+
+    @Mock
+    private DocumentCascadePort documentCascadePort;
 
     @Mock
     private DocumentCountPort documentCountPort;
@@ -250,12 +254,22 @@ class ProjectAppServiceTest {
                 project(100L, 2L, "市政道路改造", "ACTIVE")));
         when(projectArtifactInvalidationPort.deleteExpertReviewsByProjectId(2L, 100L))
                 .thenReturn(1);
+        when(packageRepository.listByProjectIdAndType(100L, "BID")).thenReturn(List.of(
+                boundBid(60L, 2L, 100L, "华建集团"),
+                boundBid(61L, 2L, 100L, "中建集团")
+        ));
 
         projectAppService.delete(100L);
 
-        InOrder inOrder = inOrder(projectRepository, projectArtifactInvalidationPort);
+        InOrder inOrder = inOrder(projectRepository, projectArtifactInvalidationPort,
+                packageRepository, documentCascadePort);
         inOrder.verify(projectRepository).findById(100L);
         inOrder.verify(projectArtifactInvalidationPort).deleteExpertReviewsByProjectId(2L, 100L);
+        inOrder.verify(packageRepository).listByProjectIdAndType(100L, "BID");
+        inOrder.verify(documentCascadePort).softDeleteAllActiveByPackageId(60L);
+        inOrder.verify(packageRepository).updateStatus(60L, "DELETED");
+        inOrder.verify(documentCascadePort).softDeleteAllActiveByPackageId(61L);
+        inOrder.verify(packageRepository).updateStatus(61L, "DELETED");
         inOrder.verify(projectRepository).updateStatus(100L, "DELETED");
     }
 

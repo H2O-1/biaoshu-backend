@@ -6,6 +6,8 @@ import com.bidding.review.application.ExpertReviewExportService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import org.springframework.core.io.InputStreamResource;
+import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -57,6 +59,15 @@ public class ExpertReviewController {
                 .header(HttpHeaders.CONTENT_DISPOSITION,
                         "attachment; filename*=UTF-8''" + encodedFileName)
                 .body(file.getContent());
+    }
+
+    @GetMapping("/items/{itemId}/attachments/{attachmentId}/preview")
+    public ResponseEntity<InputStreamResource> previewAttachment(
+            @PathVariable("projectId") long projectId,
+            @PathVariable("itemId") long itemId,
+            @PathVariable("attachmentId") long attachmentId) {
+        return toAttachmentResponse(
+                expertReviewAppService.openProjectAttachmentForPreview(projectId, itemId, attachmentId));
     }
 
     @PostMapping("/members")
@@ -137,6 +148,17 @@ public class ExpertReviewController {
         response.setExpertCount(result.getExpertCount());
         response.setReviewItemCount(result.getReviewItemCount());
         return response;
+    }
+
+    private ResponseEntity<InputStreamResource> toAttachmentResponse(ExpertReviewAppService.AttachmentContent content) {
+        ContentDisposition disposition = ContentDisposition.inline()
+                .filename(content.getFileName(), StandardCharsets.UTF_8)
+                .build();
+
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                .contentType(MediaType.parseMediaType(content.getContentType()))
+                .body(new InputStreamResource(content.getInputStream()));
     }
 
     public static class DisplayNameRequest {

@@ -423,6 +423,30 @@ public class JdbcExpertReviewStore {
     }
 
     @Transactional(readOnly = true)
+    public ItemRow findItemById(long reviewId, long itemId) {
+        List<ItemRow> rows = jdbcTemplate.query(
+                "SELECT i.id, i.review_id, i.member_id, i.source_review_item_id, "
+                        + "i.project_id, i.bid_package_id, i.requirement_item_id, "
+                        + "i.item_type, i.requirement_code, i.title, i.content, "
+                        + "i.result, i.score_value, i.full_score, i.comment, i.is_veto, "
+                        + "i.veto_reason, i.evidence_json, req.evidence_json AS tender_evidence_json, "
+                        + "i.sort_order, i.submitted_at, "
+                        + "i.updated_at, i.created_at, src.status AS ai_status, "
+                        + "src.veto_risk AS ai_veto_risk, src.judgement AS ai_judgement, "
+                        + "src.suggested_score AS ai_suggested_score, "
+                        + "src.deduction_reason AS ai_deduction_reason "
+                        + "FROM biz_expert_review_item i "
+                        + "LEFT JOIN biz_review_item src ON src.id = i.source_review_item_id "
+                        + "LEFT JOIN biz_requirement_item req ON req.id = i.requirement_item_id "
+                        + "WHERE i.review_id = ? AND i.id = ?",
+                (rs, rowNum) -> mapItem(rs),
+                reviewId,
+                itemId
+        );
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    @Transactional(readOnly = true)
     public int countAttachments(long itemId) {
         Integer count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(1) FROM biz_expert_review_attachment WHERE item_id = ?",

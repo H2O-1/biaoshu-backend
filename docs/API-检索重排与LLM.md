@@ -469,6 +469,7 @@
 - 只在**招标包**已 INDEX 成功文档上跑。
 - 仍用管理员配置的审查维度 queries 做多路召回；合并后资格/评分双路重排；**LLM 按产物拆分**（A 资格 ∥ B 评分 → 编号 → C bidSearch → D evidence，`extract-artifact-v1`）。
 - 条目含：`title`、`mainType`、`subType`、`text`(content)、`bidSearchJson`、`evidenceJson`、`sourceExcerpt`、评分字段；保留 `chunkIds`；`dimension_code` 写主类。
+- `evidenceJson` 的页码由后端根据 `fragmentId/chunkId` 从召回命中或文档切块表回填，不使用 LLM 返回的 `page/pageNo`。
 - 成功时主表写入 `llm_raw_json`（含 A/B/C/D 原文拼接）；详情 API 返回 `llmRawJson`。
 - 状态 `BUILDING` → `SUCCESS`/`FAILED`；成功后即可被 REVIEW 引用，无人工确认步。
 - LLM 默认模型 `qwen3.7-plus`（`LLM_MODEL`），复用 `DASHSCOPE_API_KEY`。
@@ -477,7 +478,7 @@
 - 基于某版 **SUCCESS** 清单；对每个有文件的投标包单独做召回→重排→LLM 对照（N×P），空投标包不参与。
 - **召回**：仅用条目 `bidSearchJson`（多词各自召回后按 chunk 合并）；**无 bidSearch 不召回、不调对照 LLM**（走无证据规则）。
 - **重排 / 对照**：query 与招标要求正文均用条目 **`text`**（对照 LLM 为 **review-v2** 产品输出）。
-- `bidEvidence` 落库前清洗：占位文案或不在候选原文中 → 丢弃；资格无证据 → `无法判断`；评分无证据 → 建议分 0。
+- `bidEvidence` 落库前清洗：占位文案或不在候选原文中 → 丢弃；页码按匹配到的召回 chunk 回填；资格无证据 → `无法判断`；评分无证据 → 建议分 0。
 - 详情 API 按包嵌套返回 `qualificationResponses` / `scoringResponses`；`overall_verdict` 置空。
 - 有对照的条目写入 `llm_raw_json`；详情 `items[].llmRawJson` 返回；无召回未调 LLM 则为空。
 - 无召回 / 无可用证据 → 该条 `FAIL`。

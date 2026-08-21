@@ -679,6 +679,25 @@ class ExpertReviewAppServiceTest {
     }
 
     @Test
+    void openProjectAttachmentForPreviewAllowsTenderer() throws Exception {
+        ReviewRow review = runningReview(Instant.now().plusSeconds(86_400L));
+
+        when(projectLookupPort.findActiveById(100L)).thenReturn(project());
+        when(expertReviewStore.findLatestByProject(2L, 100L)).thenReturn(review);
+        when(expertReviewStore.findItemById(501L, 801L)).thenReturn(item());
+        when(expertReviewStore.findAttachment(801L, 901L))
+                .thenReturn(attachment(901L, 801L, "现场照片.png", "image/png", "object-key"));
+        when(objectStoragePort.open("object-key")).thenReturn(new ByteArrayInputStream(new byte[] {5, 6}));
+
+        ExpertReviewAppService.AttachmentContent result =
+                service.openProjectAttachmentForPreview(100L, 801L, 901L);
+
+        assertEquals("现场照片.png", result.getFileName());
+        assertEquals("image/png", result.getContentType());
+        Assertions.assertArrayEquals(new byte[] {5, 6}, result.getInputStream().readAllBytes());
+    }
+
+    @Test
     void deleteAttachmentRejectsSubmittedTask() {
         UserContext.set(new CurrentUser(77L, 2L, "expert_x", Set.of("EXPERT"), 0, false));
         ReviewRow review = runningReview(Instant.now().plusSeconds(86_400L));
@@ -781,7 +800,7 @@ class ExpertReviewAppServiceTest {
     }
 
     @Test
-    void submitAllowsRemainingItemsBlankWhenAnyQualificationVetoed() {
+    void submitAllowsSamePackageRemainingItemsBlankWhenQualificationVetoed() {
         UserContext.set(new CurrentUser(77L, 2L, "expert_x", Set.of("EXPERT"), 0, false));
         ReviewRow review = runningReview(Instant.now().plusSeconds(86_400L));
         ReviewRow stillRunning = runningReview(review.getDeadlineAt());
@@ -791,8 +810,8 @@ class ExpertReviewAppServiceTest {
         vetoedQualification.setResult("FAIL");
         vetoedQualification.setVeto(true);
         vetoedQualification.setVetoReason("核心资格证明缺失");
-        ItemRow blankQualification = qualificationItem(802L, 88L, 82L, 9003L, 702L);
-        ItemRow blankScoring = pendingScoringItem(803L, 88L, 82L);
+        ItemRow blankQualification = qualificationItem(802L, 88L, 81L, 9003L, 702L);
+        ItemRow blankScoring = pendingScoringItem(803L, 88L, 81L);
 
         when(expertReviewStore.findMemberByIdAndUserId(88L, 77L)).thenReturn(member);
         when(expertReviewStore.findById(501L)).thenReturn(review, stillRunning);
@@ -810,6 +829,31 @@ class ExpertReviewAppServiceTest {
         assertFalse(result.isReviewCompleted());
         verify(expertReviewStore).markItemsSubmitted(eq(501L), eq(88L), any(Instant.class));
         verify(expertReviewStore).refreshCompanyVetoStats(501L);
+    }
+
+    @Test
+    void submitRejectsOtherPackageBlankWhenDifferentPackageVetoed() {
+        UserContext.set(new CurrentUser(77L, 2L, "expert_x", Set.of("EXPERT"), 0, false));
+        ReviewRow review = runningReview(Instant.now().plusSeconds(86_400L));
+        MemberRow member = member(88L, 77L);
+        ItemRow vetoedQualification = qualificationItem();
+        vetoedQualification.setResult("FAIL");
+        vetoedQualification.setVeto(true);
+        vetoedQualification.setVetoReason("核心资格证明缺失");
+        ItemRow otherPackageBlankQualification = qualificationItem(802L, 88L, 82L, 9003L, 702L);
+        ItemRow otherPackageBlankScoring = pendingScoringItem(803L, 88L, 82L);
+
+        when(expertReviewStore.findMemberByIdAndUserId(88L, 77L)).thenReturn(member);
+        when(expertReviewStore.findById(501L)).thenReturn(review);
+        when(expertReviewStore.listItemsForMember(501L, 88L))
+                .thenReturn(List.of(vetoedQualification, otherPackageBlankQualification, otherPackageBlankScoring));
+
+        BizException ex = assertThrows(BizException.class, () -> service.submit(88L));
+
+        assertEquals(ErrorCode.BAD_REQUEST, ex.errorCode());
+        assertEquals("资格项尚未完成", ex.getMessage());
+        verify(expertReviewStore, never()).markItemsSubmitted(eq(501L), eq(88L), any(Instant.class));
+        verify(expertReviewStore, never()).markMemberSubmitted(eq(88L), eq(77L), any(Instant.class));
     }
 
     @Test

@@ -122,6 +122,8 @@ class TenderAnalysisJobExecutorTest {
         assertEquals("2026年8月15日17:00", basic.getBidDeadlineText());
         assertEquals(Instant.parse("2026-08-15T09:00:00Z"), basic.getBidDeadlineAt());
         assertTrue(basic.getEvidenceJson().contains("\"field\":\"tenderer\""));
+        assertTrue(basic.getEvidenceJson().contains("\"pageNo\":11"));
+        assertTrue(basic.getEvidenceJson().contains("\"pageNo\":12"));
         assertTrue(basic.getRawJson().contains("raw"));
 
         @SuppressWarnings("unchecked")
@@ -180,29 +182,29 @@ class TenderAnalysisJobExecutorTest {
         chunk.setDocumentId(documentId);
         chunk.setFileName("文件" + documentId + ".pdf");
         chunk.setChunkIndex(0);
-        chunk.setPageNo(1);
+        chunk.setPageNo(documentId == 7L ? 11 : 12);
         chunk.setContent(content);
         return chunk;
     }
 
     private static LlmPort.TenderBasicInfoResult basicInfoResult() {
         LlmPort.TenderBasicInfo info = new LlmPort.TenderBasicInfo();
-        LlmPort.FieldEvidence tenderer = field("采购人A", "招标人：采购人A", 9001L, 1);
-        LlmPort.FieldEvidence agency = field("代理B", "代理机构：代理B", 9001L, 1);
-        LlmPort.FieldEvidence budget = field("预算金额100万元", "预算金额100万元", 9001L, 1);
+        LlmPort.FieldEvidence tenderer = field("采购人A", "招标人：采购人A", 9001L, 9001);
+        LlmPort.FieldEvidence agency = field("代理B", "代理机构：代理B", 9002L, 9002);
+        LlmPort.FieldEvidence budget = field("预算金额100万元", "预算金额100万元", 9001L, 9001);
         LlmPort.DeadlineEvidence deadline = new LlmPort.DeadlineEvidence();
         deadline.setText("2026年8月15日17:00");
         deadline.setIso("2026-08-15T09:00:00Z");
         deadline.setQuote("截止时间：2026年8月15日17:00");
         deadline.setChunkId(9001L);
-        deadline.setPageNo(1);
+        deadline.setPageNo(9001);
         info.setTenderer(tenderer);
         info.setAgency(agency);
         info.setBudgetAmount(budget);
         info.setBidDeadline(deadline);
-        info.setProjectIntro(field("简介", "项目简介", 9001L, 1));
-        info.setProjectBackground(field("背景", "项目背景", 9001L, 1));
-        info.setProjectOverview(field("概况", "项目概况", 9001L, 1));
+        info.setProjectIntro(field("简介", "项目简介", 9001L, 9001));
+        info.setProjectBackground(field("背景", "项目背景", 9002L, 9002));
+        info.setProjectOverview(field("概况", "项目概况", 9002L, 9002));
 
         LlmPort.TenderBasicInfoResult result = new LlmPort.TenderBasicInfoResult();
         result.setInfo(info);

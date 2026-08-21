@@ -471,7 +471,29 @@ public class ExpertReviewAppService {
         ReviewRow review = requireViewableReview(member);
         ItemRow item = requireTaskItem(review.getId(), member.getId(), itemId);
         AttachmentRow attachment = requireAttachment(item.getId(), attachmentId);
+        return openAttachmentContent(attachment);
+    }
 
+    @Transactional(readOnly = true)
+    public AttachmentContent openProjectAttachmentForPreview(long projectId, long itemId, long attachmentId) {
+        CurrentUser operator = TendererAuth.requireTenderer("仅招标方可查看专家评审附件");
+        ProjectLookupPort.ProjectRef project = requireProject(projectId, operator.getOrgId());
+        ReviewRow review = expertReviewStore.findLatestByProject(project.getOrgId(), project.getId());
+        if (review == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "专家评审不存在");
+        }
+        ItemRow item = expertReviewStore.findItemById(review.getId(), itemId);
+        if (item == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "专家评审条目不存在");
+        }
+        if (item.getProjectId() != project.getId()) {
+            throw new BizException(ErrorCode.CONFLICT, "专家评审条目项目不匹配");
+        }
+        AttachmentRow attachment = requireAttachment(item.getId(), attachmentId);
+        return openAttachmentContent(attachment);
+    }
+
+    private AttachmentContent openAttachmentContent(AttachmentRow attachment) {
         InputStream stream;
         try {
             stream = objectStoragePort.open(attachment.getObjectKey());
@@ -912,10 +934,11 @@ public class ExpertReviewAppService {
         if (items.isEmpty()) {
             throw new BizException(ErrorCode.CONFLICT, "专家评审待评项不存在");
         }
-        if (hasValidVetoBeforeSubmit(items)) {
-            return;
-        }
+        List<Long> vetoedPackageIds = collectValidVetoPackageIds(items);
         for (ItemRow item : items) {
+            if (vetoedPackageIds.contains(item.getBidPackageId())) {
+                continue;
+            }
             if (ReviewPort.MAIN_QUALIFICATION.equals(item.getItemType())) {
                 validateQualificationBeforeSubmit(item);
             } else if (ReviewPort.MAIN_SCORING.equals(item.getItemType())) {
@@ -926,7 +949,8 @@ public class ExpertReviewAppService {
         }
     }
 
-    private boolean hasValidVetoBeforeSubmit(List<ItemRow> items) {
+    private List<Long> collectValidVetoPackageIds(List<ItemRow> items) {
+        List<Long> result = new ArrayList<>();
         for (ItemRow item : items) {
             if (!item.isVeto()) {
                 continue;
@@ -937,11 +961,15 @@ public class ExpertReviewAppService {
             if (!ReviewPort.VERDICT_FAIL.equals(item.getResult())) {
                 continue;
             }
-            if (normalizeText(item.getVetoReason()) != null) {
-                return true;
+            if (normalizeText(item.getVetoReason()) == null) {
+                continue;
+            }
+            long bidPackageId = item.getBidPackageId();
+            if (!result.contains(bidPackageId)) {
+                result.add(bidPackageId);
             }
         }
-        return false;
+        return result;
     }
 
     private void validateQualificationBeforeSubmit(ItemRow item) {

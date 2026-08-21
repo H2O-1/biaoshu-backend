@@ -106,12 +106,12 @@ class ChecklistBuildPipelineTest {
         LlmPort.EvidenceRow evQ = new LlmPort.EvidenceRow();
         evQ.setId("Q1");
         evQ.setFragmentId(1L);
-        evQ.setPage(3);
+        evQ.setPage(101);
         evQ.setQuote("要求具备二级资质");
         LlmPort.EvidenceRow evS = new LlmPort.EvidenceRow();
         evS.setId("S1");
         evS.setFragmentId(2L);
-        evS.setPage(4);
+        evS.setPage(102);
         evS.setQuote("技术方案满分15分");
         LlmPort.EvidenceResult evidenceResult = new LlmPort.EvidenceResult();
         List<LlmPort.EvidenceRow> evRows = new ArrayList<>();
@@ -135,8 +135,9 @@ class ChecklistBuildPipelineTest {
         assertEquals("Q1", items.get(0).getRequirementCode());
         assertEquals("[\"资质证书\",\"资质扫描件\"]", items.get(0).getBidSearchJson());
         assertTrue(items.get(0).getEvidenceJson().contains("\"fragmentId\":1"));
+        assertTrue(items.get(0).getEvidenceJson().contains("\"page\":7"));
         assertEquals("要求具备二级资质", items.get(0).getSourceExcerpt());
-        assertEquals(Integer.valueOf(3), items.get(0).getPageNo());
+        assertEquals(Integer.valueOf(7), items.get(0).getPageNo());
         assertEquals("SCORING", items.get(1).getMainType());
         assertEquals("S1", items.get(1).getRequirementCode());
         assertEquals("[\"技术方案\"]", items.get(1).getBidSearchJson());
@@ -443,6 +444,7 @@ class ChecklistBuildPipelineTest {
     private static VectorRecallPort.RecallHit hit(long chunkId, String content) {
         VectorRecallPort.RecallHit h = new VectorRecallPort.RecallHit();
         h.setChunkId(chunkId);
+        h.setPageNo(chunkId == 1L ? 7 : 8);
         h.setContent(content);
         h.setDocumentId(1L);
         h.setFileName("a.pdf");

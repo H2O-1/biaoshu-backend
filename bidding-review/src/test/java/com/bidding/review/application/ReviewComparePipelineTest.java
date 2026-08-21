@@ -103,7 +103,7 @@ class ReviewComparePipelineTest {
         compared.setJudgement("已响应");
         LlmPort.BidEvidence ev = new LlmPort.BidEvidence();
         ev.setFragmentId(800L);
-        ev.setPage(2);
+        ev.setPage(800);
         ev.setQuote("具备二级资质");
         List<LlmPort.BidEvidence> evidences = new ArrayList<>();
         evidences.add(ev);
@@ -120,6 +120,9 @@ class ReviewComparePipelineTest {
         assertEquals(1, result.getItems().size());
         assertEquals(ReviewPort.STATUS_MATCH, result.getItems().get(0).getStatus());
         assertEquals("具备二级资质", result.getItems().get(0).getBidExcerpt());
+        assertEquals(Integer.valueOf(2), result.getItems().get(0).getPageNo());
+        assertEquals("[{\"fragmentId\":800,\"page\":2,\"quote\":\"具备二级资质\"}]",
+                result.getItems().get(0).getBidEvidenceJson());
         verify(vectorRecallPort, times(2)).recall(any());
         verify(llmPort).compareRequirement(any(LlmPort.CompareRequest.class));
     }

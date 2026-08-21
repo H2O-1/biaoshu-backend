@@ -544,5 +544,12 @@ Content-Disposition: attachment; filename*=UTF-8''...xlsx
 - 评分项必须逐项返回 `suggestedScore` / `fullScore`。
 - 逻辑问题和错别字识别只针对投标文件，不扫描招标文件。
 - 逻辑问题和错别字识别不使用数据库检索词，沿用全文 chunk 分批扫描方案。
+- evidence 中的 `pageNo` 由后端根据 `chunkId` 从文档切块表回填，不使用 LLM 返回的页码；PDF 为真实 PDF 页序号，DOCX 无真实分页时可为 `null`。
 - 本期不做法律风险识别，不接入法律库。
 - 导出审核结果复用详情聚合数据与内部包文件列表，只允许 `SUCCESS` 记录导出。
+
+## 更新记录
+
+| 日期 | 说明 |
+|------|------|
+| 2026-08-21 | evidence 页码统一由后端根据 `chunkId` 从文档切块回填，避免 LLM 将 chunkId 误写为 pageNo |

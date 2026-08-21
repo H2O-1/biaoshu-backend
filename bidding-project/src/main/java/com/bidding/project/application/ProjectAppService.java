@@ -4,6 +4,7 @@ import com.bidding.common.api.PageResult;
 import com.bidding.common.error.BizException;
 import com.bidding.common.error.ErrorCode;
 import com.bidding.common.port.BidPackageReviewSummaryPort;
+import com.bidding.common.port.DocumentCascadePort;
 import com.bidding.common.port.DocumentCountPort;
 import com.bidding.common.port.DocumentProjectBindPort;
 import com.bidding.common.port.OrgLookupPort;
@@ -79,6 +80,7 @@ public class ProjectAppService {
 
     private final ProjectRepository projectRepository;
     private final PackageRepository packageRepository;
+    private final DocumentCascadePort documentCascadePort;
     private final DocumentCountPort documentCountPort;
     private final DocumentProjectBindPort documentProjectBindPort;
     private final OrgLookupPort orgLookupPort;
@@ -89,6 +91,7 @@ public class ProjectAppService {
 
     public ProjectAppService(ProjectRepository projectRepository,
                              PackageRepository packageRepository,
+                             DocumentCascadePort documentCascadePort,
                              DocumentCountPort documentCountPort,
                              DocumentProjectBindPort documentProjectBindPort,
                              OrgLookupPort orgLookupPort,
@@ -98,6 +101,7 @@ public class ProjectAppService {
                              ProjectArtifactInvalidationPort projectArtifactInvalidationPort) {
         this.projectRepository = projectRepository;
         this.packageRepository = packageRepository;
+        this.documentCascadePort = documentCascadePort;
         this.documentCountPort = documentCountPort;
         this.documentProjectBindPort = documentProjectBindPort;
         this.orgLookupPort = orgLookupPort;
@@ -291,7 +295,7 @@ public class ProjectAppService {
     /**
      * 逻辑删除项目。
      * 已绑定的招标包仍占着（不可再绑、不可删），释放规则以后再定。
-     * 已绑定的投标包仍挂着 project_id；删投标包本身可直接删。
+     * 已绑定的投标包随项目软删，释放投标公司名称占用。
      */
     @Transactional
     public void delete(long projectId) {
@@ -301,7 +305,18 @@ public class ProjectAppService {
             return;
         }
         projectArtifactInvalidationPort.deleteExpertReviewsByProjectId(project.getOrgId(), projectId);
+        softDeleteBidPackages(projectId);
         projectRepository.updateStatus(projectId, STATUS_DELETED);
+    }
+
+    private void softDeleteBidPackages(long projectId) {
+        List<BizPackage> bidPackages = packageRepository.listByProjectIdAndType(
+                projectId, PackageAppService.TYPE_BID);
+        for (int i = 0; i < bidPackages.size(); i++) {
+            BizPackage bidPackage = bidPackages.get(i);
+            documentCascadePort.softDeleteAllActiveByPackageId(bidPackage.getId());
+            packageRepository.updateStatus(bidPackage.getId(), STATUS_DELETED);
+        }
     }
 
     /**

@@ -1408,18 +1408,18 @@ public class HttpLlmPort implements LlmPort {
     }
 
     /**
-     * evidence 默认提示词（产物 D）：条目 + 相关候选原文 → 扁平 fragmentId/page/quote。
+     * evidence 默认提示词（产物 D）：条目 + 相关候选原文 → 扁平 fragmentId/quote。
      */
     private static String defaultEvidencePromptTemplate() {
         return "【任务】为每条已编号清单条目，从相关候选原文中摘录支撑该条的证据。\n"
                 + "【规则】fragmentId 必须等于输入中出现的 chunkId；quote 须是原文连续摘录（≤200字）；"
-                + "page 用候选段 pageNo，未知则 null；一条可多条证据；无对应原文则该 id 不输出；"
+                + "页码由系统根据 fragmentId 回填，不要输出 page/pageNo；一条可多条证据；无对应原文则该 id 不输出；"
                 + "不得编造、不得跨条目混用证据；id 必须与输入一致。\n"
                 + "【约束】只输出 JSON；输入为空则 {\"rows\":[]}。\n"
                 + "【清单条目】\n{{checklist_items}}\n"
                 + "【相关原文】\n{{related_chunks}}\n"
                 + "【输出外形】\n"
-                + "{\"rows\":[{\"id\":\"Q1\",\"fragmentId\":101,\"page\":12,\"quote\":\"...\"}]}";
+                + "{\"rows\":[{\"id\":\"Q1\",\"fragmentId\":101,\"quote\":\"...\"}]}";
     }
 
     private static String defaultTenderBasicPromptTemplate() {
@@ -1428,17 +1428,17 @@ public class HttpLlmPort implements LlmPort {
                 + "投标截止时间 bidDeadline；项目简介 projectIntro；项目背景 projectBackground；项目概况 projectOverview。\n"
                 + "【规则】预算金额不拆分，按原文整体填 value；投标截止时间 text 填原文，"
                 + "iso 填 ISO-8601 UTC 时间（示例 2026-08-15T09:00:00Z），无法确定完整年月日时分则 iso=null；"
-                + "quote 必须是候选原文连续摘录；chunkId/pageNo 必须来自候选标签；字段未明确填 null。\n"
+                + "quote 必须是候选原文连续摘录；chunkId 必须来自候选标签；页码由系统根据 chunkId 回填，不要输出 pageNo；字段未明确填 null。\n"
                 + "【约束】只输出 JSON；不得编造；不要输出多余字段；不要用未知/无等占位文字。\n"
                 + "【候选原文】\n{{recalled_chunks}}\n"
                 + "【输出外形】\n"
-                + "{\"tenderer\":{\"value\":null,\"quote\":null,\"chunkId\":null,\"pageNo\":null},"
-                + "\"agency\":{\"value\":null,\"quote\":null,\"chunkId\":null,\"pageNo\":null},"
-                + "\"budgetAmount\":{\"value\":null,\"quote\":null,\"chunkId\":null,\"pageNo\":null},"
-                + "\"bidDeadline\":{\"text\":null,\"iso\":null,\"quote\":null,\"chunkId\":null,\"pageNo\":null},"
-                + "\"projectIntro\":{\"value\":null,\"quote\":null,\"chunkId\":null,\"pageNo\":null},"
-                + "\"projectBackground\":{\"value\":null,\"quote\":null,\"chunkId\":null,\"pageNo\":null},"
-                + "\"projectOverview\":{\"value\":null,\"quote\":null,\"chunkId\":null,\"pageNo\":null}}";
+                + "{\"tenderer\":{\"value\":null,\"quote\":null,\"chunkId\":null},"
+                + "\"agency\":{\"value\":null,\"quote\":null,\"chunkId\":null},"
+                + "\"budgetAmount\":{\"value\":null,\"quote\":null,\"chunkId\":null},"
+                + "\"bidDeadline\":{\"text\":null,\"iso\":null,\"quote\":null,\"chunkId\":null},"
+                + "\"projectIntro\":{\"value\":null,\"quote\":null,\"chunkId\":null},"
+                + "\"projectBackground\":{\"value\":null,\"quote\":null,\"chunkId\":null},"
+                + "\"projectOverview\":{\"value\":null,\"quote\":null,\"chunkId\":null}}";
     }
 
     private static String defaultTenderIssueScanPromptTemplate() {
@@ -1446,7 +1446,7 @@ public class HttpLlmPort implements LlmPort {
                 + "重要规则：\n"
                 + "1. 只根据输入片段判断，不引用外部法律法规，不输出法律风险。\n"
                 + "2. 没有明确原文证据的问题不要输出。\n"
-                + "3. 不要编造页码、chunkId、原文摘录；evidence 必须来自输入片段。\n"
+                + "3. 不要编造 chunkId、原文摘录；页码由系统根据 chunkId 回填，evidence 不要输出 pageNo。\n"
                 + "4. 不要把公司名称、项目名称、人名、地名、证书名称、产品名称等专有名词轻易判为错别字。\n"
                 + "5. 不要把 OCR 断行、页眉页脚、空格、编号格式差异当作错别字。\n"
                 + "6. 没发现问题时返回空数组。\n"
@@ -1468,11 +1468,11 @@ public class HttpLlmPort implements LlmPort {
                 + "\"issueType\":\"AMOUNT_INCONSISTENCY|TIME_CONFLICT|SCORE_SUM_MISMATCH|TERM_INCONSISTENCY|THRESHOLD_INCONSISTENCY|OTHER\","
                 + "\"problem\":\"说明问题是什么，只描述输入片段能支持的内容\","
                 + "\"suggestion\":\"修改建议；不确定时写空字符串\","
-                + "\"evidence\":[{\"chunkId\":123,\"pageNo\":5,\"quote\":\"必须逐字摘录输入片段中的关键原文\"}]}],"
+                + "\"evidence\":[{\"chunkId\":123,\"quote\":\"必须逐字摘录输入片段中的关键原文\"}]}],"
                 + "\"typos\":[{\"wrongText\":\"疑似错误文字\",\"suggestedText\":\"建议文字\","
                 + "\"context\":\"包含错误文字的短上下文\",\"confidence\":\"HIGH|MEDIUM|LOW\","
                 + "\"suggestion\":\"修改建议；不确定时写空字符串\","
-                + "\"evidence\":[{\"chunkId\":123,\"pageNo\":5,\"quote\":\"必须逐字摘录输入片段中的关键原文\"}]}]}\n"
+                + "\"evidence\":[{\"chunkId\":123,\"quote\":\"必须逐字摘录输入片段中的关键原文\"}]}]}\n"
                 + "现在请扫描以下招标文件片段：\n{{chunksText}}";
     }
 
@@ -1500,10 +1500,11 @@ public class HttpLlmPort implements LlmPort {
                 + "资格无证据→status=无法判断；评分不设 status；"
                 + "评分无响应→suggestedScore=0 且 judgement 含「未检索到响应，按未响应计 0 分」；"
                 + "bidEvidence.quote 必须从【投标候选原文】逐字连续摘录，禁止改写、概括或补字；"
+                + "页码由系统根据 fragmentId 回填，bidEvidence 不要输出 page/pageNo；"
                 + "做不到则 status=无法判断，judgement 不得写「符合」；"
                 + "多处证据全部保留；不同条目证据不得混用；未明确字段填 null。\n"
                 + "【输出字段】requirementId,title,reviewType(响应性审查|废标风险|评分建议),"
-                + "status(仅资格),vetoRisk,judgement,bidEvidence([{fragmentId,page,quote}]),note,"
+                + "status(仅资格),vetoRisk,judgement,bidEvidence([{fragmentId,quote}]),note,"
                 + "suggestedScore,fullScore,deductionReason(仅评分且 fullScore 非 null)。\n"
                 + "【约束】只输出 JSON 本体；不编造；除无法判断外须有 bidEvidence。";
     }

@@ -177,6 +177,8 @@ class BidSimulationAuditJobExecutorTest {
         assertEquals("预算金额100万元", basicCaptor.getValue().getBudgetAmountText());
         assertEquals("2026年8月15日17:00", basicCaptor.getValue().getBidDeadlineText());
         assertEquals("2026-08-15T09:00:00Z", basicCaptor.getValue().getBidDeadlineAt().toString());
+        assertEquals("[{\"field\":\"tenderer\",\"value\":\"采购人A\",\"quote\":\"招标人：采购人A\",\"chunkId\":9001,\"pageNo\":21},{\"field\":\"agency\",\"value\":\"代理B\",\"quote\":\"代理机构：代理B\",\"chunkId\":9001,\"pageNo\":21},{\"field\":\"budgetAmount\",\"value\":\"预算金额100万元\",\"quote\":\"预算金额100万元\",\"chunkId\":9001,\"pageNo\":21},{\"field\":\"bidDeadline\",\"value\":\"2026年8月15日17:00\",\"quote\":\"截止时间：2026年8月15日17:00\",\"chunkId\":9001,\"pageNo\":21}]",
+                basicCaptor.getValue().getEvidenceJson());
         assertEquals("{\"basicInfo\":true}", basicCaptor.getValue().getRawJson());
         verify(jobPort).markSuccess(101L, "投标模拟审核完成");
     }
@@ -218,7 +220,7 @@ class BidSimulationAuditJobExecutorTest {
         chunk.setDocumentId(documentId);
         chunk.setFileName("文件" + documentId + ".pdf");
         chunk.setChunkIndex(0);
-        chunk.setPageNo(1);
+        chunk.setPageNo(documentId == 7L ? 21 : 22);
         chunk.setContent(content);
         return chunk;
     }
@@ -293,15 +295,15 @@ class BidSimulationAuditJobExecutorTest {
 
     private static LlmPort.TenderBasicInfoResult basicInfoResult() {
         LlmPort.TenderBasicInfo info = new LlmPort.TenderBasicInfo();
-        info.setTenderer(field("采购人A", "招标人：采购人A", 9001L, 1));
-        info.setAgency(field("代理B", "代理机构：代理B", 9001L, 1));
-        info.setBudgetAmount(field("预算金额100万元", "预算金额100万元", 9001L, 1));
+        info.setTenderer(field("采购人A", "招标人：采购人A", 9001L, 9001));
+        info.setAgency(field("代理B", "代理机构：代理B", 9001L, 9001));
+        info.setBudgetAmount(field("预算金额100万元", "预算金额100万元", 9001L, 9001));
         LlmPort.DeadlineEvidence deadline = new LlmPort.DeadlineEvidence();
         deadline.setText("2026年8月15日17:00");
         deadline.setIso("2026-08-15T09:00:00Z");
         deadline.setQuote("截止时间：2026年8月15日17:00");
         deadline.setChunkId(9001L);
-        deadline.setPageNo(1);
+        deadline.setPageNo(9001);
         info.setBidDeadline(deadline);
 
         LlmPort.TenderBasicInfoResult result = new LlmPort.TenderBasicInfoResult();

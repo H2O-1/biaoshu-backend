@@ -508,9 +508,16 @@ Content-Disposition: attachment; filename*=UTF-8''...xlsx
 - 资格要求和评分标准沿用现有 `Q1` / `S1` 编号规则。
 - 逻辑问题沿用 `逻辑问题-1` / `逻辑问题-2` 编号规则。
 - 错别字识别沿用 `错别字-1` / `错别字-2` 编号规则。
-- 前端“查看原文片段”依赖 evidence 中的 chunk / page / quote 信息。
+- 前端“查看原文片段”依赖 evidence 中的 chunk / page / quote 信息；`pageNo` 由后端根据 `chunkId` 从文档切块表回填，不使用 LLM 返回的页码。
+- PDF 切块页码为真实 PDF 页序号；DOCX 无法稳定取得 Word 自动分页，`pageNo` 只能代表后端抽取到的逻辑页，要求精确页码时建议上传 PDF。
 - 资格要求 / 评分标准复用建清单拆分链路：资格和评分分开抽取，再生成条目检索词与招标侧原文 evidence；本接口不发起投标文件审查。
 - 逻辑问题 / 错别字识别不复用建清单召回链路；文件 INDEX 成功后读取本次文档 chunk，按批次交给 LLM 扫描候选问题，再由后端合并去重后返回。
 - 本期不做法律风险识别，不接入法律库。
 - 导出解析结果复用详情聚合数据与内部包文件列表，只允许 `SUCCESS` 记录导出。
 - 重试解析不会改旧记录 `createdAt`；旧记录标记为 `OBSOLETE`，新记录使用新的 `createdAt`，并通过 `sourceAnalysisId` / `originalCreatedAt` 关联首次创建信息。
+
+## 更新记录
+
+| 日期 | 说明 |
+|------|------|
+| 2026-08-21 | evidence 页码统一由后端根据 `chunkId` 从文档切块回填，避免 LLM 将 chunkId 误写为 pageNo |

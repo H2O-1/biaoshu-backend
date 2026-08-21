@@ -41,7 +41,7 @@ class TenderIssueScanPipelineTest {
         TenderIssueScanPipeline pipeline = newPipeline();
         when(llmPort.scanTenderIssues(anyString())).thenReturn(scanResult());
 
-        List<TenderAnalysisPort.ItemDraft> result = pipeline.scan(chunks(2));
+        List<TenderAnalysisPort.ItemDraft> result = pipeline.scan(chunks(3));
 
         assertEquals(2, result.size());
         TenderAnalysisPort.ItemDraft logic = result.get(0);
@@ -51,6 +51,7 @@ class TenderIssueScanPipelineTest {
         assertEquals("THRESHOLD_INCONSISTENCY", logic.getSubType());
         assertEquals(1, logic.getPageNo());
         assertEquals("[9001,9002]", logic.getChunkIdsJson());
+        assertTrue(logic.getEvidenceJson().contains("\"pageNo\":2"));
         assertTrue(logic.getEvidenceJson().contains("\"severity\":\"MEDIUM\""));
 
         TenderAnalysisPort.ItemDraft typo = result.get(1);
@@ -58,6 +59,7 @@ class TenderIssueScanPipelineTest {
         assertEquals("错别字-1", typo.getRequirementCode());
         assertEquals("疑似错别字：解折", typo.getTitle());
         assertEquals("解折失败，请重新解析", typo.getSourceExcerpt());
+        assertTrue(typo.getEvidenceJson().contains("\"pageNo\":3"));
         assertTrue(typo.getEvidenceJson().contains("\"wrongText\":\"解折\""));
     }
 
@@ -107,7 +109,7 @@ class TenderIssueScanPipelineTest {
         logic.setSuggestion("调整为与项目规模相称的合理区间。");
         List<LlmPort.IssueEvidence> logicEvidence = new ArrayList<>();
         logicEvidence.add(evidence(9001L, 1, "预算金额为人民币 1280 万元"));
-        logicEvidence.add(evidence(9002L, 5, "近三年需具有 5000 万元以上类似项目业绩"));
+        logicEvidence.add(evidence(9002L, 902, "近三年需具有 5000 万元以上类似项目业绩"));
         logic.setEvidence(logicEvidence);
 
         LlmPort.TypoCandidate typo = new LlmPort.TypoCandidate();
@@ -117,7 +119,7 @@ class TenderIssueScanPipelineTest {
         typo.setConfidence("HIGH");
         typo.setSuggestion("建议改为“解析”。");
         List<LlmPort.IssueEvidence> typoEvidence = new ArrayList<>();
-        typoEvidence.add(evidence(9003L, 6, "解折失败，请重新解析"));
+        typoEvidence.add(evidence(9003L, 903, "解折失败，请重新解析"));
         typo.setEvidence(typoEvidence);
 
         LlmPort.TenderIssueScanResult result = new LlmPort.TenderIssueScanResult();

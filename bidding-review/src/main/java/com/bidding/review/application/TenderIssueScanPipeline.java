@@ -41,6 +41,7 @@ public class TenderIssueScanPipeline {
         if (chunks == null || chunks.isEmpty()) {
             return result;
         }
+        Map<Long, Integer> pageNoByChunkId = pageNoByChunkId(chunks);
 
         List<String> batchTexts = new ArrayList<>();
         for (int from = 0; from < chunks.size(); from += BATCH_CHUNK_SIZE) {
@@ -56,6 +57,7 @@ public class TenderIssueScanPipeline {
             if (batchResult == null) {
                 continue;
             }
+            normalizePageNo(batchResult, pageNoByChunkId);
             collectLogicIssues(logicByKey, batchResult.getLogicIssues());
             collectTypos(typoByKey, batchResult.getTypos());
         }
@@ -81,6 +83,54 @@ public class TenderIssueScanPipeline {
             sortOrder++;
         }
         return result;
+    }
+
+    private Map<Long, Integer> pageNoByChunkId(List<DocumentIndexStorePort.ChunkView> chunks) {
+        Map<Long, Integer> result = new LinkedHashMap<>();
+        for (int i = 0; i < chunks.size(); i++) {
+            DocumentIndexStorePort.ChunkView chunk = chunks.get(i);
+            if (chunk != null) {
+                result.put(chunk.getChunkId(), chunk.getPageNo());
+            }
+        }
+        return result;
+    }
+
+    private void normalizePageNo(LlmPort.TenderIssueScanResult result, Map<Long, Integer> pageNoByChunkId) {
+        if (result == null) {
+            return;
+        }
+        List<LlmPort.LogicIssueCandidate> logicIssues = result.getLogicIssues();
+        if (logicIssues != null) {
+            for (int i = 0; i < logicIssues.size(); i++) {
+                normalizeIssueEvidence(logicIssues.get(i) == null ? null : logicIssues.get(i).getEvidence(),
+                        pageNoByChunkId);
+            }
+        }
+        List<LlmPort.TypoCandidate> typos = result.getTypos();
+        if (typos != null) {
+            for (int i = 0; i < typos.size(); i++) {
+                normalizeIssueEvidence(typos.get(i) == null ? null : typos.get(i).getEvidence(),
+                        pageNoByChunkId);
+            }
+        }
+    }
+
+    private void normalizeIssueEvidence(List<LlmPort.IssueEvidence> evidence,
+                                        Map<Long, Integer> pageNoByChunkId) {
+        if (evidence == null) {
+            return;
+        }
+        for (int i = 0; i < evidence.size(); i++) {
+            LlmPort.IssueEvidence item = evidence.get(i);
+            if (item == null || item.getChunkId() == null) {
+                if (item != null) {
+                    item.setPageNo(null);
+                }
+                continue;
+            }
+            item.setPageNo(pageNoByChunkId.get(item.getChunkId()));
+        }
     }
 
     private List<LlmPort.TenderIssueScanResult> scanBatches(List<String> batchTexts) {

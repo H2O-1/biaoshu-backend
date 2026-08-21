@@ -616,6 +616,31 @@
 
 ---
 
+### 3.5.1 项目端预览专家附件
+
+`GET /api/projects/{projectId}/expert-reviews/items/{itemId}/attachments/{attachmentId}/preview`
+
+招标方在项目详情“专家评测”标签页预览专家上传的图片附件。`itemId` 和 `attachmentId` 取自 `itemReviewGroups[].expertReviews[].attachments[]`。
+
+返回图片二进制，响应不是统一 JSON：
+
+```http
+HTTP/1.1 200 OK
+Content-Type: image/png
+Content-Disposition: inline; filename*=UTF-8''%E7%8E%B0%E5%9C%BA%E7%85%A7%E7%89%87.png
+```
+
+**常见错误**
+
+| code | 场景 |
+|------|------|
+| 40100 | 未登录或 token 失效 |
+| 40300 | 当前用户不是招标方 |
+| 40400 | 项目不存在或不属于当前组织 / 专家评审不存在 / 专家评审条目不存在 / 专家评审附件不存在 |
+| 40900 | 专家评审条目项目不匹配 |
+
+---
+
 ### 3.6 管理端确认废标
 
 `POST /api/projects/{projectId}/expert-reviews/companies/{companyId}/veto/confirm`
@@ -1064,6 +1089,8 @@
 
 `GET /api/expert-review-tasks/{taskId}/items/{itemId}/attachments/{attachmentId}/preview`
 
+专家侧预览当前登录专家自己任务下的附件。招标方项目端预览使用 `GET /api/projects/{projectId}/expert-reviews/items/{itemId}/attachments/{attachmentId}/preview`。
+
 返回图片二进制，响应不是统一 JSON：
 
 ```http
@@ -1096,9 +1123,9 @@ Content-Disposition: inline; filename*=UTF-8''%E7%8E%B0%E5%9C%BA%E7%85%A7%E7%89%
 
 提交当前专家整份评审。截止时间自动提交由后台任务处理，不调用本接口。
 
-若当前专家已在任意资格项保存有效废标建议（`FAIL` + `veto=true` + `vetoReason`），则该专家可直接提交整份项目评审，剩余资格项和评分项允许未填写。
+若当前专家已在某个投标单位的资格项保存有效废标建议（`FAIL` + `veto=true` + `vetoReason`），则该投标单位下剩余资格项和评分项允许未填写；其他投标单位仍必须评完。
 
-若当前专家没有有效废标建议，提交前后端会校验全部待评项已完成：
+提交前后端会校验未被有效废标建议豁免的待评项已完成：
 
 - 资格项必须保存 `PASS` 或 `FAIL`。
 - 评分项必须保存 `SCORE` 和 `scoreValue`。
@@ -1213,7 +1240,7 @@ Content-Disposition: attachment; filename*=UTF-8''%E9%A1%B9%E7%9B%AE%E5%90%8D-%E
 - 专家评审附件挂在单条评审明细下，仅支持 `jpg` / `jpeg` / `png` / `webp` 图片；上传 / 删除只允许可编辑任务，提交后只读态仍可浏览。
 - 提交后专家成员状态先进入 `READ_ONLY`，提交状态为 `SUBMITTED`，再次进入当前任务详情时 `readOnly=true`。
 - 提交后会按已提交 `isVeto=true` 的资格项刷新公司废标汇总。
-- 当前专家任意资格项保存有效废标建议后，可直接提交本项目评审，未评资格项和评分项不再阻塞提交。
+- 当前专家某个投标单位下任意资格项保存有效废标建议后，该投标单位剩余资格项和评分项不再阻塞提交；其他投标单位仍必须评完。
 - 公司未选择继续展示且存在废标建议时，进入 `PENDING_VETO / PENDING_CONFIRMATION`。
 - 确认废标只处理 `PENDING_VETO / PENDING_CONFIRMATION`，成功后进入 `VETOED / NORMAL`。
 - 继续展示只处理 `PENDING_VETO / PENDING_CONFIRMATION`，成功后进入 `NORMAL / CONTINUE_DISPLAY`，后续同公司新废标建议不再弹确认。
@@ -1235,7 +1262,9 @@ Content-Disposition: attachment; filename*=UTF-8''%E9%A1%B9%E7%9B%AE%E5%90%8D-%E
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-21 | 调整专家提交规则：有效废标建议只豁免同一投标单位，其他投标单位仍必须评完 |
 | 2026-08-20 | 调整专家提交规则：任意资格项有效废标后，该专家可直接提交项目评审 |
+| 2026-08-20 | 新增项目端专家附件预览接口 `GET /api/projects/{projectId}/expert-reviews/items/{itemId}/attachments/{attachmentId}/preview` |
 | 2026-08-20 | 追加专家改为两步式：先生成 `PENDING_APPEND` 账号，再确认追加生成评审明细 |
 | 2026-08-19 | 项目专家评测聚合接口新增 `itemReviewGroups`，支持逐项展示每位专家的结论、评分、建议和附件 |
 | 2026-08-19 | 新增专家侧评审附件上传、列表、图片预览和删除接口，并在当前任务详情 / 保存响应中返回 `attachments` |
