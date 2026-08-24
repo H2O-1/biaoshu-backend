@@ -130,11 +130,6 @@ bidding:
     # 瞬时错误（网络超时、限流等）：retry_count + 1 并指数退避，达到上限转 FAILED
     max-retries: ${AI_REVIEW_PIPELINE_MAX_RETRIES:3}
     retry-backoff-ms: ${AI_REVIEW_PIPELINE_RETRY_BACKOFF_MS:10000}
-  # 僵尸子任务回收：临时管理功能，API 与 Worker 一律默认关闭，仅人工显式开启；
-  # 普通子任务租约化之前不允许启动时自动全局回收（可能误杀长任务）
-  recovery:
-    enabled: ${STALE_RECOVERY_ENABLED:false}
-    stale-minutes: ${STALE_RECOVERY_STALE_MINUTES:30}
   # 抽取 / 对照 LLM（compatible-mode chat）
   llm:
     base-url: ${LLM_BASE_URL:${EMBEDDING_BASE_URL:https://ws-jbb2t4ahvyzwxo9b.cn-beijing.maas.aliyuncs.com/compatible-mode/v1}}

@@ -60,6 +60,5 @@ D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\re
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\worker\ExpertReviewDeadlinePoller.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\worker\IndexJobPoller.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\worker\ReviewJobPoller.java
-D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\worker\StaleAiWorkRecovery.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\infrastructure\worker\TenderAnalysisJobPoller.java
 D:\Work\bidding-architecture\backend\bidding-review\src\main\java\com\bidding\review\package-info.java

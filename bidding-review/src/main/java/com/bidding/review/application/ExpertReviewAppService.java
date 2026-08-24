@@ -295,6 +295,7 @@ public class ExpertReviewAppService {
         List<MemberRow> members = expertReviewStore.listMembers(review.getId());
         List<CompanyRow> companies = expertReviewStore.listCompanies(review.getId());
         Map<Long, List<ItemRow>> itemsByMemberId = loadItemsByMember(review.getId(), members);
+        Map<Long, Integer> reviewItemCountsByPackage = countReviewItemsByPackage(itemsByMemberId);
         Map<Long, List<MemberScore>> memberScoresByPackage = collectSubmittedMemberScores(members, itemsByMemberId);
         Map<Long, BigDecimal> averageScores = calculateAverageScores(memberScoresByPackage);
         Map<Long, Integer> ranks = calculateRanks(companies, averageScores, review.isHasAnyCompleteSubmission());
@@ -309,7 +310,7 @@ public class ExpertReviewAppService {
         snapshot.setPushMessage(review.getPushMessage());
         snapshot.setExpertCount(review.getExpertCount());
         snapshot.setSubmittedExpertCount(review.getSubmittedExpertCount());
-        snapshot.setSubmittedCompanyCount(review.getSubmittedCompanyCount());
+        snapshot.setSubmittedCompanyCount(review.isHasAnyCompleteSubmission() ? reviewItemCountsByPackage.size() : 0);
         snapshot.setHasAnyCompleteSubmission(review.isHasAnyCompleteSubmission());
         snapshot.setLocked(review.isLocked());
 
@@ -324,12 +325,14 @@ public class ExpertReviewAppService {
         List<VetoPendingItem> vetoPendingItems = new ArrayList<>();
         for (CompanyRow company : companies) {
             BigDecimal averageScore = visibleAverageScore(company, averageScores, review.isHasAnyCompleteSubmission());
-            companyTabs.add(toCompanyTab(company, averageScore, ranks.get(company.getBidPackageId())));
+            int reviewItemCount = reviewItemCountsByPackage.getOrDefault(company.getBidPackageId(), 0);
+            companyTabs.add(toCompanyTab(company, averageScore, ranks.get(company.getBidPackageId()), reviewItemCount));
             scoreCompareItems.add(toScoreCompareItem(
                     company,
                     averageScore,
                     ranks.get(company.getBidPackageId()),
-                    memberScoresByPackage.getOrDefault(company.getBidPackageId(), List.of())
+                    memberScoresByPackage.getOrDefault(company.getBidPackageId(), List.of()),
+                    reviewItemCount
             ));
             if (isPendingVeto(company)) {
                 vetoPendingItems.add(toVetoPendingItem(company));
@@ -382,8 +385,9 @@ public class ExpertReviewAppService {
         List<CompanyRow> companies = expertReviewStore.listCompanies(review.getId());
         List<TaskCompany> companyResults = new ArrayList<>();
         for (CompanyRow company : companies) {
-            TaskCompany taskCompany = toTaskCompany(company);
-            taskCompany.setItems(itemsByPackage.getOrDefault(company.getBidPackageId(), List.of()));
+            List<TaskItem> companyItems = itemsByPackage.getOrDefault(company.getBidPackageId(), List.of());
+            TaskCompany taskCompany = toTaskCompany(company, companyItems.size());
+            taskCompany.setItems(companyItems);
             companyResults.add(taskCompany);
         }
         detail.setCompanies(companyResults);
@@ -1140,6 +1144,24 @@ public class ExpertReviewAppService {
         return result;
     }
 
+    private Map<Long, Integer> countReviewItemsByPackage(Map<Long, List<ItemRow>> itemsByMemberId) {
+        Map<Long, List<ItemGroupKey>> keysByPackage = new LinkedHashMap<>();
+        for (List<ItemRow> items : itemsByMemberId.values()) {
+            for (ItemRow item : items) {
+                ItemGroupKey key = new ItemGroupKey(item.getBidPackageId(), item.getRequirementItemId());
+                List<ItemGroupKey> keys = keysByPackage.computeIfAbsent(item.getBidPackageId(), ignored -> new ArrayList<>());
+                if (!keys.contains(key)) {
+                    keys.add(key);
+                }
+            }
+        }
+        Map<Long, Integer> result = new LinkedHashMap<>();
+        for (Map.Entry<Long, List<ItemGroupKey>> entry : keysByPackage.entrySet()) {
+            result.put(entry.getKey(), entry.getValue().size());
+        }
+        return result;
+    }
+
     private List<ItemReviewGroup> buildItemReviewGroups(List<CompanyRow> companies,
                                                         List<MemberRow> members,
                                                         Map<Long, List<ItemRow>> itemsByMemberId) {
@@ -1363,7 +1385,7 @@ public class ExpertReviewAppService {
         return result;
     }
 
-    private TaskCompany toTaskCompany(CompanyRow row) {
+    private TaskCompany toTaskCompany(CompanyRow row, int reviewItemCount) {
         TaskCompany result = new TaskCompany();
         result.setCompanyId(row.getId());
         result.setBidPackageId(row.getBidPackageId());
@@ -1372,6 +1394,8 @@ public class ExpertReviewAppService {
         result.setDisplayMode(row.getDisplayMode());
         result.setVetoItemCount(row.getVetoItemCount());
         result.setAverageScore(row.getAverageScore());
+        result.setReviewItemCount(reviewItemCount);
+        result.setParticipated(reviewItemCount > 0);
         return result;
     }
 
@@ -1389,7 +1413,10 @@ public class ExpertReviewAppService {
         return result;
     }
 
-    private CompanyTab toCompanyTab(CompanyRow company, BigDecimal averageScore, Integer rank) {
+    private CompanyTab toCompanyTab(CompanyRow company,
+                                    BigDecimal averageScore,
+                                    Integer rank,
+                                    int reviewItemCount) {
         CompanyTab result = new CompanyTab();
         result.setCompanyId(company.getId());
         result.setBidPackageId(company.getBidPackageId());
@@ -1403,13 +1430,16 @@ public class ExpertReviewAppService {
         result.setRank(rank);
         result.setConfirmedBy(company.getConfirmedBy());
         result.setConfirmedAt(company.getConfirmedAt());
+        result.setReviewItemCount(reviewItemCount);
+        result.setParticipated(reviewItemCount > 0);
         return result;
     }
 
     private ScoreCompareItem toScoreCompareItem(CompanyRow company,
                                                 BigDecimal averageScore,
                                                 Integer rank,
-                                                List<MemberScore> memberScores) {
+                                                List<MemberScore> memberScores,
+                                                int reviewItemCount) {
         ScoreCompareItem result = new ScoreCompareItem();
         result.setCompanyId(company.getId());
         result.setBidPackageId(company.getBidPackageId());
@@ -1418,6 +1448,8 @@ public class ExpertReviewAppService {
         result.setDisplayMode(company.getDisplayMode());
         result.setAverageScore(averageScore);
         result.setRank(rank);
+        result.setReviewItemCount(reviewItemCount);
+        result.setParticipated(reviewItemCount > 0);
         if (!COMPANY_STATUS_VETOED.equalsIgnoreCase(company.getCompanyStatus())) {
             List<ExpertScore> expertScores = new ArrayList<>();
             for (MemberScore memberScore : memberScores) {
@@ -2738,6 +2770,8 @@ public class ExpertReviewAppService {
         private Integer rank;
         private Long confirmedBy;
         private Instant confirmedAt;
+        private int reviewItemCount;
+        private boolean participated;
 
         public long getCompanyId() {
             return companyId;
@@ -2833,6 +2867,22 @@ public class ExpertReviewAppService {
 
         public void setConfirmedAt(Instant confirmedAt) {
             this.confirmedAt = confirmedAt;
+        }
+
+        public int getReviewItemCount() {
+            return reviewItemCount;
+        }
+
+        public void setReviewItemCount(int reviewItemCount) {
+            this.reviewItemCount = reviewItemCount;
+        }
+
+        public boolean isParticipated() {
+            return participated;
+        }
+
+        public void setParticipated(boolean participated) {
+            this.participated = participated;
         }
     }
 
@@ -3147,6 +3197,8 @@ public class ExpertReviewAppService {
         private String displayMode;
         private BigDecimal averageScore;
         private Integer rank;
+        private int reviewItemCount;
+        private boolean participated;
         private List<ExpertScore> expertScores = new ArrayList<>();
 
         public long getCompanyId() {
@@ -3203,6 +3255,22 @@ public class ExpertReviewAppService {
 
         public void setRank(Integer rank) {
             this.rank = rank;
+        }
+
+        public int getReviewItemCount() {
+            return reviewItemCount;
+        }
+
+        public void setReviewItemCount(int reviewItemCount) {
+            this.reviewItemCount = reviewItemCount;
+        }
+
+        public boolean isParticipated() {
+            return participated;
+        }
+
+        public void setParticipated(boolean participated) {
+            this.participated = participated;
         }
 
         public List<ExpertScore> getExpertScores() {
@@ -3522,6 +3590,8 @@ public class ExpertReviewAppService {
         private String displayMode;
         private int vetoItemCount;
         private BigDecimal averageScore;
+        private int reviewItemCount;
+        private boolean participated;
         private List<TaskItem> items = new ArrayList<>();
 
         public long getCompanyId() {
@@ -3578,6 +3648,22 @@ public class ExpertReviewAppService {
 
         public void setAverageScore(BigDecimal averageScore) {
             this.averageScore = averageScore;
+        }
+
+        public int getReviewItemCount() {
+            return reviewItemCount;
+        }
+
+        public void setReviewItemCount(int reviewItemCount) {
+            this.reviewItemCount = reviewItemCount;
+        }
+
+        public boolean isParticipated() {
+            return participated;
+        }
+
+        public void setParticipated(boolean participated) {
+            this.participated = participated;
         }
 
         public List<TaskItem> getItems() {

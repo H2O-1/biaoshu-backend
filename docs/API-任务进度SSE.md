@@ -257,7 +257,7 @@ SSE 为长连接，反代注意：
 2. **服务端实现是读库 diff**，不是 MQ；进度粒度约等于 `poll-ms`，不是毫秒级总线推送。
 3. **多实例部署**：每台机器各自为已建立的 SSE 连接读库推送即可，不依赖本机内存事件总线。
 4. **原生 EventSource 不可用**（Bearer）；必须用可自定义 Header 的 HTTP 客户端。
-5. 任务被服务重启回收为 `FAILED` 时（见后端 `StaleAiWorkRecovery`），SSE 会推到 `failed` 或下次轮询看到失败。
+5. 普通任务与一键审查总任务都使用数据库租约；服务重启后，仍为 `RUNNING` 且租约过期的任务可被 Worker 接管继续推进。若任务最终失败，SSE 会推到 `failed` 或下次轮询看到失败。
 6. 本册**只覆盖 job 进度**，不包含「项目聚合状态」专用 SSE；项目级字段仍走项目查询接口。
 
 ---
@@ -268,3 +268,4 @@ SSE 为长连接，反代注意：
 |------|------|
 | 2026-08-04 | 初版：`GET /api/jobs/{jobId}/events`；保留 `GET /api/jobs/{jobId}` 短轮询 |
 | 2026-08-14 | 补充 `BID_SIMULATION_AUDIT` 任务类型；JobSummary 增加投标模拟审核 `auditId` |
+| 2026-08-24 | 普通任务增加轻量租约：租约过期的 `RUNNING` 可被 Worker 接管，进度更新自动续租 |

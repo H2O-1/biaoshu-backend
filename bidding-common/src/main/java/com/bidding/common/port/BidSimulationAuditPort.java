@@ -321,6 +321,7 @@ public interface BidSimulationAuditPort {
         private long bidPackageId;
         private String tenderDocumentIdsJson;
         private String bidDocumentIdsJson;
+        private String tenderNo;
         private String tenderer;
         private String agency;
         private String budgetAmountText;
@@ -403,6 +404,14 @@ public interface BidSimulationAuditPort {
 
         public void setBidDocumentIdsJson(String bidDocumentIdsJson) {
             this.bidDocumentIdsJson = bidDocumentIdsJson;
+        }
+
+        public String getTenderNo() {
+            return tenderNo;
+        }
+
+        public void setTenderNo(String tenderNo) {
+            this.tenderNo = tenderNo;
         }
 
         public String getTenderer() {

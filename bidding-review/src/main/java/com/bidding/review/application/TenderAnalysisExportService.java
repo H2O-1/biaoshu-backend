@@ -117,6 +117,7 @@ public class TenderAnalysisExportService {
         Sheet sheet = workbook.createSheet("基础信息");
         header(sheet, headerStyle, "字段", "值", "页码", "chunkId", "原文片段");
         int rowIndex = 1;
+        rowIndex = basicInfoRow(sheet, rowIndex, "招标编号", detail.getTenderNo(), detail.getEvidenceJson(), "tenderNo");
         rowIndex = basicInfoRow(sheet, rowIndex, "招标人", detail.getTenderer(), detail.getEvidenceJson(), "tenderer");
         rowIndex = basicInfoRow(sheet, rowIndex, "招标代理", detail.getAgency(), detail.getEvidenceJson(), "agency");
         rowIndex = basicInfoRow(sheet, rowIndex, "预算金额", detail.getBudgetAmountText(),

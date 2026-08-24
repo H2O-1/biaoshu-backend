@@ -52,7 +52,7 @@ class BidSimulationAuditJobExecutorTest {
     @Test
     void claimAndRunOnceReturnsFalseWhenNoJob() {
         BidSimulationAuditJobExecutor executor = newExecutor();
-        when(jobPort.claimNextPendingOrOwnedRunning(JobPort.TYPE_BID_SIMULATION_AUDIT, "w1"))
+        when(jobPort.claimNextRunnable(JobPort.TYPE_BID_SIMULATION_AUDIT, "w1"))
                 .thenReturn(Optional.empty());
 
         assertEquals(false, executor.claimAndRunOnce("w1"));
@@ -61,7 +61,7 @@ class BidSimulationAuditJobExecutorTest {
     @Test
     void waitingIndexKeepsJobRunning() {
         BidSimulationAuditJobExecutor executor = newExecutor();
-        when(jobPort.claimNextPendingOrOwnedRunning(JobPort.TYPE_BID_SIMULATION_AUDIT, "w1"))
+        when(jobPort.claimNextRunnable(JobPort.TYPE_BID_SIMULATION_AUDIT, "w1"))
                 .thenReturn(Optional.of(job()));
         when(documentAccessPort.findActiveById(7L)).thenReturn(doc(7L, DocumentAccessPort.INDEX_SUCCESS));
         when(documentAccessPort.findActiveById(8L)).thenReturn(doc(8L, "PROCESSING"));
@@ -76,7 +76,7 @@ class BidSimulationAuditJobExecutorTest {
     @Test
     void failedIndexMarksAuditAndJobFailed() {
         BidSimulationAuditJobExecutor executor = newExecutor();
-        when(jobPort.claimNextPendingOrOwnedRunning(JobPort.TYPE_BID_SIMULATION_AUDIT, "w1"))
+        when(jobPort.claimNextRunnable(JobPort.TYPE_BID_SIMULATION_AUDIT, "w1"))
                 .thenReturn(Optional.of(job()));
         when(documentAccessPort.findActiveById(7L)).thenReturn(doc(7L, DocumentAccessPort.INDEX_SUCCESS));
         DocumentAccessPort.DocumentRef failed = doc(8L, DocumentAccessPort.INDEX_FAILED);
@@ -95,7 +95,7 @@ class BidSimulationAuditJobExecutorTest {
         BidSimulationAuditJobExecutor executor = newExecutor();
         JobPort.JobRef job = job();
         job.setPayloadJson("{}");
-        when(jobPort.claimNextPendingOrOwnedRunning(JobPort.TYPE_BID_SIMULATION_AUDIT, "w1"))
+        when(jobPort.claimNextRunnable(JobPort.TYPE_BID_SIMULATION_AUDIT, "w1"))
                 .thenReturn(Optional.of(job));
 
         assertEquals(true, executor.claimAndRunOnce("w1"));
@@ -105,9 +105,27 @@ class BidSimulationAuditJobExecutorTest {
     }
 
     @Test
+    void llmFailureStoresUserFriendlyMessage() {
+        BidSimulationAuditJobExecutor executor = newExecutor();
+        when(jobPort.claimNextRunnable(JobPort.TYPE_BID_SIMULATION_AUDIT, "w1"))
+                .thenReturn(Optional.of(job()));
+        when(documentAccessPort.findActiveById(7L)).thenReturn(doc(7L, DocumentAccessPort.INDEX_SUCCESS));
+        when(documentAccessPort.findActiveById(8L)).thenReturn(doc(8L, DocumentAccessPort.INDEX_SUCCESS));
+        when(documentIndexStorePort.listChunksByDocumentIds(eq(2L), eq(List.of(7L))))
+                .thenReturn(List.of(chunk(9001L, 7L, "招标人：采购人A。")));
+        when(llmPort.extractTenderBasicInfo(anyString()))
+                .thenThrow(new RuntimeException("调用 LLM 失败: request timed out"));
+
+        assertEquals(true, executor.claimAndRunOnce("w1"));
+
+        verify(bidSimulationAuditPort).markFailed(55L, "审核失败，请稍后重试");
+        verify(jobPort).markFailed(101L, "审核失败，请稍后重试");
+    }
+
+    @Test
     void successExtractsTenderChecklistAndMarksSummary() {
         BidSimulationAuditJobExecutor executor = newExecutor();
-        when(jobPort.claimNextPendingOrOwnedRunning(JobPort.TYPE_BID_SIMULATION_AUDIT, "w1"))
+        when(jobPort.claimNextRunnable(JobPort.TYPE_BID_SIMULATION_AUDIT, "w1"))
                 .thenReturn(Optional.of(job()));
         when(documentAccessPort.findActiveById(7L)).thenReturn(doc(7L, DocumentAccessPort.INDEX_SUCCESS));
         when(documentAccessPort.findActiveById(8L)).thenReturn(doc(8L, DocumentAccessPort.INDEX_SUCCESS));
@@ -172,12 +190,13 @@ class BidSimulationAuditJobExecutorTest {
         assertEquals(new BigDecimal("10.00"), summaryCaptor.getValue().getScoreTotal());
         assertEquals(1, summaryCaptor.getValue().getLogicIssueCount());
         assertEquals(1, summaryCaptor.getValue().getTypoCount());
+        assertEquals("ZHCS-2024-001", basicCaptor.getValue().getTenderNo());
         assertEquals("采购人A", basicCaptor.getValue().getTenderer());
         assertEquals("代理B", basicCaptor.getValue().getAgency());
         assertEquals("预算金额100万元", basicCaptor.getValue().getBudgetAmountText());
         assertEquals("2026年8月15日17:00", basicCaptor.getValue().getBidDeadlineText());
         assertEquals("2026-08-15T09:00:00Z", basicCaptor.getValue().getBidDeadlineAt().toString());
-        assertEquals("[{\"field\":\"tenderer\",\"value\":\"采购人A\",\"quote\":\"招标人：采购人A\",\"chunkId\":9001,\"pageNo\":21},{\"field\":\"agency\",\"value\":\"代理B\",\"quote\":\"代理机构：代理B\",\"chunkId\":9001,\"pageNo\":21},{\"field\":\"budgetAmount\",\"value\":\"预算金额100万元\",\"quote\":\"预算金额100万元\",\"chunkId\":9001,\"pageNo\":21},{\"field\":\"bidDeadline\",\"value\":\"2026年8月15日17:00\",\"quote\":\"截止时间：2026年8月15日17:00\",\"chunkId\":9001,\"pageNo\":21}]",
+        assertEquals("[{\"field\":\"tenderNo\",\"value\":\"ZHCS-2024-001\",\"quote\":\"招标编号：ZHCS-2024-001\",\"chunkId\":9001,\"pageNo\":21},{\"field\":\"tenderer\",\"value\":\"采购人A\",\"quote\":\"招标人：采购人A\",\"chunkId\":9001,\"pageNo\":21},{\"field\":\"agency\",\"value\":\"代理B\",\"quote\":\"代理机构：代理B\",\"chunkId\":9001,\"pageNo\":21},{\"field\":\"budgetAmount\",\"value\":\"预算金额100万元\",\"quote\":\"预算金额100万元\",\"chunkId\":9001,\"pageNo\":21},{\"field\":\"bidDeadline\",\"value\":\"2026年8月15日17:00\",\"quote\":\"截止时间：2026年8月15日17:00\",\"chunkId\":9001,\"pageNo\":21}]",
                 basicCaptor.getValue().getEvidenceJson());
         assertEquals("{\"basicInfo\":true}", basicCaptor.getValue().getRawJson());
         verify(jobPort).markSuccess(101L, "投标模拟审核完成");
@@ -295,6 +314,7 @@ class BidSimulationAuditJobExecutorTest {
 
     private static LlmPort.TenderBasicInfoResult basicInfoResult() {
         LlmPort.TenderBasicInfo info = new LlmPort.TenderBasicInfo();
+        info.setTenderNo(field("ZHCS-2024-001", "招标编号：ZHCS-2024-001", 9001L, 9001));
         info.setTenderer(field("采购人A", "招标人：采购人A", 9001L, 9001));
         info.setAgency(field("代理B", "代理机构：代理B", 9001L, 9001));
         info.setBudgetAmount(field("预算金额100万元", "预算金额100万元", 9001L, 9001));

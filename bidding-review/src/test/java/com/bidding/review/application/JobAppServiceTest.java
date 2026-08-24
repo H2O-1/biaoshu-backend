@@ -161,7 +161,7 @@ class JobAppServiceTest {
         JobPort.JobRef running = new JobPort.JobRef();
         running.setId(55L);
         running.setStatus(JobPort.STATUS_RUNNING);
-        when(jobPort.claimNextPending(JobPort.TYPE_INDEX, "w1")).thenReturn(Optional.of(running));
+        when(jobPort.claimNextRunnable(JobPort.TYPE_INDEX, "w1")).thenReturn(Optional.of(running));
 
         Optional<JobPort.JobRef> claimed = jobAppService.claimNextIndex("w1");
         assertTrue(claimed.isPresent());

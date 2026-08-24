@@ -156,7 +156,7 @@ public class ChecklistAppService {
     }
 
     public Optional<JobPort.JobRef> claimNextBuildChecklist(String workerId) {
-        return jobPort.claimNextPending(JobPort.TYPE_BUILD_CHECKLIST, workerId);
+        return jobPort.claimNextRunnable(JobPort.TYPE_BUILD_CHECKLIST, workerId);
     }
 
     private List<Long> resolveTenderDocumentIds(long orgId,

@@ -35,6 +35,7 @@ import java.util.Optional;
 public class BidSimulationAuditJobExecutor {
 
     private static final Logger log = LoggerFactory.getLogger(BidSimulationAuditJobExecutor.class);
+    private static final String USER_FRIENDLY_FAILURE_MESSAGE = "审核失败，请稍后重试";
 
     private final JobPort jobPort;
     private final DocumentAccessPort documentAccessPort;
@@ -71,7 +72,7 @@ public class BidSimulationAuditJobExecutor {
      */
     public boolean claimAndRunOnce(String workerId) {
         Optional<JobPort.JobRef> optional =
-                jobPort.claimNextPendingOrOwnedRunning(JobPort.TYPE_BID_SIMULATION_AUDIT, workerId);
+                jobPort.claimNextRunnable(JobPort.TYPE_BID_SIMULATION_AUDIT, workerId);
         if (optional.isEmpty()) {
             return false;
         }
@@ -159,8 +160,7 @@ public class BidSimulationAuditJobExecutor {
                     tenderChunks.size(), items.size());
         } catch (Exception ex) {
             log.error("投标模拟审核任务执行失败 jobId={} auditId={}", jobId, payload.auditId, ex);
-            String message = ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage();
-            fail(jobId, payload.auditId, message);
+            fail(jobId, payload.auditId, USER_FRIENDLY_FAILURE_MESSAGE);
         }
     }
 
@@ -360,6 +360,7 @@ public class BidSimulationAuditJobExecutor {
         TenderAnalysisPort.BasicInfoDraft draft = new TenderAnalysisPort.BasicInfoDraft();
         Map<Long, Integer> pageNoByChunkId = pageNoByChunkId(chunks);
         if (info != null) {
+            draft.setTenderNo(valueOf(info.getTenderNo()));
             draft.setTenderer(valueOf(info.getTenderer()));
             draft.setAgency(valueOf(info.getAgency()));
             draft.setBudgetAmountText(valueOf(info.getBudgetAmount()));
@@ -389,6 +390,7 @@ public class BidSimulationAuditJobExecutor {
 
     private String buildBasicEvidenceJson(LlmPort.TenderBasicInfo info, Map<Long, Integer> pageNoByChunkId) {
         ArrayNode array = objectMapper.createArrayNode();
+        appendEvidence(array, "tenderNo", info.getTenderNo(), pageNoByChunkId);
         appendEvidence(array, "tenderer", info.getTenderer(), pageNoByChunkId);
         appendEvidence(array, "agency", info.getAgency(), pageNoByChunkId);
         appendEvidence(array, "budgetAmount", info.getBudgetAmount(), pageNoByChunkId);

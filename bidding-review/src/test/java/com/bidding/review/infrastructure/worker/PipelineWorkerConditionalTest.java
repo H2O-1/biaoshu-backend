@@ -16,10 +16,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
 /**
- * Poller / 僵尸回收的配置条件测试：
- * 默认（API 进程画像）五个 Poller 与 StaleAiWorkRecovery 全部不装配；
+ * Poller 配置条件测试：
+ * 默认（API 进程画像）五个 Poller 全部不装配；
  * 显式开启（Worker 进程画像）后全部装配。
- * 隔离完全由 bidding.*.worker-enabled / bidding.recovery.enabled 配置决定，与包扫描无关。
+ * 隔离完全由 bidding.*.worker-enabled 配置决定，与包扫描无关。
  */
 class PipelineWorkerConditionalTest {
 
@@ -31,8 +31,7 @@ class PipelineWorkerConditionalTest {
                     BuildChecklistJobPoller.class,
                     ReviewJobPoller.class,
                     AiReviewPipelineJobPoller.class,
-                    ExpertReviewDeadlinePoller.class,
-                    StaleAiWorkRecovery.class);
+                    ExpertReviewDeadlinePoller.class);
 
     @Test
     void apiProfileDoesNotStartAnyWorkerPoller() {
@@ -42,7 +41,6 @@ class PipelineWorkerConditionalTest {
             assertThat(context).doesNotHaveBean(ReviewJobPoller.class);
             assertThat(context).doesNotHaveBean(AiReviewPipelineJobPoller.class);
             assertThat(context).doesNotHaveBean(ExpertReviewDeadlinePoller.class);
-            assertThat(context).doesNotHaveBean(StaleAiWorkRecovery.class);
         });
     }
 
@@ -53,21 +51,18 @@ class PipelineWorkerConditionalTest {
                 "bidding.checklist.worker-enabled=false",
                 "bidding.review.worker-enabled=false",
                 "bidding.ai-review-pipeline.worker-enabled=false",
-                "bidding.expert-review.deadline-worker-enabled=false",
-                "bidding.recovery.enabled=false"
+                "bidding.expert-review.deadline-worker-enabled=false"
         ).run(context -> {
             assertThat(context).doesNotHaveBean(IndexJobPoller.class);
             assertThat(context).doesNotHaveBean(BuildChecklistJobPoller.class);
             assertThat(context).doesNotHaveBean(ReviewJobPoller.class);
             assertThat(context).doesNotHaveBean(AiReviewPipelineJobPoller.class);
             assertThat(context).doesNotHaveBean(ExpertReviewDeadlinePoller.class);
-            assertThat(context).doesNotHaveBean(StaleAiWorkRecovery.class);
         });
     }
 
     @Test
-    void workerProfileStartsAllPollersButNotRecovery() {
-        // Worker 进程画像：五个 Poller 开启；僵尸回收默认仍关闭（临时人工功能）
+    void workerProfileStartsAllPollers() {
         runner.withPropertyValues(
                 "bidding.index.worker-enabled=true",
                 "bidding.checklist.worker-enabled=true",
@@ -80,14 +75,7 @@ class PipelineWorkerConditionalTest {
             assertThat(context).hasSingleBean(ReviewJobPoller.class);
             assertThat(context).hasSingleBean(AiReviewPipelineJobPoller.class);
             assertThat(context).hasSingleBean(ExpertReviewDeadlinePoller.class);
-            assertThat(context).doesNotHaveBean(StaleAiWorkRecovery.class);
         });
-    }
-
-    @Test
-    void recoveryCreatedOnlyWhenExplicitlyEnabled() {
-        runner.withPropertyValues("bidding.recovery.enabled=true")
-                .run(context -> assertThat(context).hasSingleBean(StaleAiWorkRecovery.class));
     }
 
     /** 只提供 Poller 构造所需的执行器与 JdbcTemplate，不触发真实调度与数据库。 */

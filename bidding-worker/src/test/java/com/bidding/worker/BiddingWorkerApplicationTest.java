@@ -107,9 +107,8 @@ class BiddingWorkerApplicationTest {
     }
 
     @Test
-    void workerYmlKeepsRecoveryDisabledByDefault() {
+    void workerYmlKeepsBootstrapAdminDisabledByDefault() {
         Map<String, Object> bidding = biddingSection(loadYamlFromClasspath("application.yml"));
-        assertEquals("${STALE_RECOVERY_ENABLED:false}", valueAt(bidding, "recovery", "enabled"));
         assertEquals(Boolean.FALSE, valueAt(bidding, "bootstrap-admin", "enabled"));
     }
 
@@ -131,7 +130,7 @@ class BiddingWorkerApplicationTest {
     }
 
     @Test
-    void apiYmlDisablesAllPollersAndRecoveryByDefault() throws Exception {
+    void apiYmlDisablesAllPollersByDefault() throws Exception {
         Path apiYml = Path.of("..", "bidding-api", "src", "main", "resources", "application.yml");
         assertTrue(Files.exists(apiYml));
         Map<String, Object> bidding;
@@ -147,7 +146,6 @@ class BiddingWorkerApplicationTest {
                 valueAt(bidding, "bid-simulation-audit", "worker-enabled"));
         assertEquals("${AI_REVIEW_PIPELINE_WORKER_ENABLED:false}",
                 valueAt(bidding, "ai-review-pipeline", "worker-enabled"));
-        assertEquals("${STALE_RECOVERY_ENABLED:false}", valueAt(bidding, "recovery", "enabled"));
     }
 
     private static Map<String, Object> loadYamlFromClasspath(String name) {

@@ -457,7 +457,9 @@
         "averageScore": 9.00,
         "rank": 1,
         "confirmedBy": null,
-        "confirmedAt": null
+        "confirmedAt": null,
+        "reviewItemCount": 1,
+        "participated": true
       }
     ],
     "scoreCompareItems": [
@@ -469,6 +471,8 @@
         "displayMode": "NORMAL",
         "averageScore": 9.00,
         "rank": 1,
+        "reviewItemCount": 1,
+        "participated": true,
         "expertScores": [
           {
             "memberId": 88,
@@ -546,19 +550,28 @@
 
 | 字段 | 说明 |
 |------|------|
+| `submittedCompanyCount` | 已完成评审的参与投标单位数；只统计有专家待评项的投标单位 |
 | `hasAnyCompleteSubmission` | 是否已有任一专家完成整份提交；为 `false` 时前端不展示评分对比、统计表格和综合排行 |
 | `expertMembers` | 专家提交情况；包含姓名、账号、成员状态、提交状态、提交时间 |
-| `companyTabs` | 投标单位标签页状态；包含正常、待确认废标、已废标、继续展示 |
-| `scoreCompareItems` | 评分对比数据；按投标单位展示已提交专家总分 |
+| `companyTabs` | 投标单位标签页状态；包含正常、待确认废标、已废标、继续展示、是否参与专家评审 |
+| `scoreCompareItems` | 评分对比数据；按投标单位展示已提交专家总分和是否参与专家评审 |
 | `itemReviewGroups` | 逐项专家评审明细；按投标单位 + 资格 / 评分项分块，块内返回每位专家的结论、分值、建议和附件 |
 | `averageRanking` | 平均分排行；已确认废标公司不进入排行 |
 | `vetoPendingItems` | 待确认废标列表；只包含 `PENDING_VETO / PENDING_CONFIRMATION` 公司 |
+
+**companyTabs[] / scoreCompareItems[] 参与评审字段**
+
+| 字段 | 说明 |
+|------|------|
+| `reviewItemCount` | 当前投标单位实际生成的专家待评项数量，按资格 / 评分项去重后统计 |
+| `participated` | 是否参与专家评审；`false` 表示该投标单位没有从 AI 审查生成资格要求或评分项，前端提交评审结果时不应要求专家填写该单位 |
 
 **统计规则**
 
 - 平均分 = 每位已提交专家对同一投标单位的所有 `SCORING` 分值求和，再对专家总分求平均，保留 2 位小数。
 - `itemReviewGroups[].averageScore` = 同一评分项下已提交专家的 `scoreValue` 平均值，资格项为 `null`。
 - 已确认废标公司保留在 `companyTabs` / `scoreCompareItems` 中，但 `averageScore`、`rank` 为空，且 `expertScores` 为空。
+- 未参与专家评审的投标单位保留在 `companyTabs` / `scoreCompareItems` 中，`reviewItemCount=0`、`participated=false`，不进入逐项明细、平均分、排行和完成判断。
 - 未提交专家不参与平均分、评分对比和排行。
 - 已提交专家若因资格项废标或逾期提交导致部分评分项为空，明细中 `result` / `scoreValue` 保持 `null`，该专家不参与对应投标单位平均分、评分对比和排行。
 - `itemReviewGroups[].expertReviews` 会返回每位专家一行；未提交专家保留行数据，`submitStatus=NOT_SUBMITTED`，评审结果字段按数据库当前值返回。
@@ -865,6 +878,8 @@ Content-Disposition: inline; filename*=UTF-8''%E7%8E%B0%E5%9C%BA%E7%85%A7%E7%89%
 | `displayMode` | 展示模式 |
 | `vetoItemCount` | 当前公司废标建议数 |
 | `averageScore` | 当前公司平均分；提交统计后才会有值 |
+| `reviewItemCount` | 当前公司下该专家的待评条目数量 |
+| `participated` | 是否参与专家评审；`false` 时 `items=[]`，不阻塞专家提交 |
 | `items` | 当前公司下该专家的待评条目 |
 
 **items[] 字段**
@@ -1251,6 +1266,7 @@ Content-Disposition: attachment; filename*=UTF-8''%E9%A1%B9%E7%9B%AE%E5%90%8D-%E
 - `hasAnyCompleteSubmission=false` 时前端不展示评分对比、统计表格和综合排行。
 - 项目专家评测聚合接口新增 `itemReviewGroups`，用于按“投标单位 + 资格 / 评分项”展示每位专家的单项结论、评分、建议、废标原因和附件。
 - 已确认废标公司不展示平均分，不进入 `averageRanking`。
+- 未从 AI 审查生成资格要求或评分项的投标单位会返回 `participated=false`、`reviewItemCount=0`；该投标单位不需要专家填写，不阻塞专家提交或项目通过评审结果。
 - 导出专家评审报告复用项目专家评测聚合结果，返回 xlsx 二进制附件。
 - 专家当前任务只返回一个最新 `RUNNING` 或 `SUCCESS` 任务；没有任务列表接口。
 - 专家当前任务返回 `pusherName`，取正式推送专家评审时的操作人姓名。
@@ -1262,6 +1278,7 @@ Content-Disposition: attachment; filename*=UTF-8''%E9%A1%B9%E7%9B%AE%E5%90%8D-%E
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-24 | 项目专家评测聚合和专家当前任务增加 `participated` / `reviewItemCount`；未生成待评项的投标单位不参与完成判断 |
 | 2026-08-21 | 调整专家提交规则：有效废标建议只豁免同一投标单位，其他投标单位仍必须评完 |
 | 2026-08-20 | 调整专家提交规则：任意资格项有效废标后，该专家可直接提交项目评审 |
 | 2026-08-20 | 新增项目端专家附件预览接口 `GET /api/projects/{projectId}/expert-reviews/items/{itemId}/attachments/{attachmentId}/preview` |

@@ -83,7 +83,7 @@
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `name` | string | 否 | 任务名称；不填默认取第一个投标文件的文件名 |
+| `name` | string | 否 | 任务名称；不填默认取第一个招标文件的文件名 |
 | `tenderFiles` | file[] | 是 | 一个或多个招标文件；multipart 同名多 part |
 | `tenderFileTypes` | string[] | 是 | 每个招标文件的业务类型；与 `tenderFiles` 按下标一一对应 |
 | `bidFiles` | file[] | 是 | 一个或多个投标文件；multipart 同名多 part |
@@ -208,6 +208,7 @@
 | `scoreSuggested` | 评分项建议总分 |
 | `scoreTotal` | 评分项满分 |
 | `status` | 审核状态：`BUILDING` 审核中 / `SUCCESS` 审核完成 / `FAILED` 审核失败 |
+| `errorMessage` | 失败提示；仅返回用户可见文案，不返回 LLM / HTTP / timeout 等底层异常 |
 | `jobId` | 模拟审核任务 ID；`BUILDING` 时可用于查询进度 |
 
 **常见错误**
@@ -240,6 +241,7 @@
     "tenderDocumentIds": [7, 8],
     "bidDocumentIds": [9, 10],
     "basicInfo": {
+      "tenderNo": "ZHCS-2024-001",
       "tenderer": "上海智慧园区发展有限公司",
       "agency": "中建咨询（招标代理）",
       "budgetAmountText": "￥12,800,000.00（含税最高限价）",
@@ -379,6 +381,7 @@
 | 字段 | 说明 |
 |------|------|
 | `basicInfo` | 招标文件基础信息，用于详情页头部展示 |
+| `basicInfo.tenderNo` | 招标编号 |
 | `basicInfo.tenderer` | 招标人 |
 | `basicInfo.agency` | 招标代理 |
 | `basicInfo.budgetAmountText` | 预算金额原文，不拆分最高限价 |
@@ -527,7 +530,7 @@ Content-Disposition: attachment; filename*=UTF-8''...xlsx
 
 - 每次模拟审核会创建一个内部 `TENDER` 包和一个内部 `BID` 包，用于复用现有文件上传、索引、对象存储、chunk/vector 能力。
 - 本模块不依赖项目，内部包不绑定项目。
-- 任务名称不传时，默认取第一个投标文件的文件名。
+- 任务名称不传时，默认取第一个招标文件的文件名。
 - 创建任务时，前端必须分别传 `tenderFileTypes` 和 `bidFileTypes`；后端按文件下标一一保存到 `biz_document.file_type`。
 
 ### 任务与进度
@@ -535,8 +538,10 @@ Content-Disposition: attachment; filename*=UTF-8''...xlsx
 - 创建模拟审核任务后，后端先为招标文件和投标文件创建 INDEX 子任务，再由 `BID_SIMULATION_AUDIT` 任务汇总执行。
 - 进度查询复用现有 job 接口，不新增专用进度接口。
 - 任一参与文件 INDEX 失败，本次投标模拟审核整体失败。
+- LLM / HTTP / timeout / JSON 解析等底层异常只写后端日志；`errorMessage` 统一返回用户可见文案，如 `审核失败，请稍后重试`。
 - 当前 `BID_SIMULATION_AUDIT` Worker 已接入执行器、轮询器、招标侧抽取、投标侧资格/评分响应审查、投标文件逻辑问题和错别字识别：等待招标文件和投标文件全部索引成功后，读取招标文件 chunk，复用建清单能力抽取 `QUALIFICATION` / `SCORING` 条目，再复用一键审查比较能力审查内部投标包；资格项返回 `PASS` / `FAIL` / `MANUAL`，评分项返回 `suggestedScore` / `fullScore`；随后读取投标文件 chunk，复用全文分批扫描能力生成 `LOGIC_ISSUE` / `TYPO` 条目。
 - Worker 配置：`bidding.bid-simulation-audit.worker-enabled`、`bidding.bid-simulation-audit.poll-ms`、`bidding.bid-simulation-audit.worker-id`。
+- 任务使用数据库轻量租约：服务重启或 Worker 异常退出后，`RUNNING` 且租约过期的模拟审核任务可被新 Worker 接管重跑，执行中进度更新会自动续租。
 
 ### 审核结果
 
@@ -552,4 +557,5 @@ Content-Disposition: attachment; filename*=UTF-8''...xlsx
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-21 | 审核失败提示脱敏：接口不返回 LLM / HTTP / timeout 等底层异常 |
 | 2026-08-21 | evidence 页码统一由后端根据 `chunkId` 从文档切块回填，避免 LLM 将 chunkId 误写为 pageNo |

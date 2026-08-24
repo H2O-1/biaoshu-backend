@@ -100,6 +100,7 @@ public interface TenderAnalysisPort {
 
     /** 基础信息草稿。 */
     class BasicInfoDraft {
+        private String tenderNo;
         private String tenderer;
         private String agency;
         private String budgetAmountText;
@@ -110,6 +111,14 @@ public interface TenderAnalysisPort {
         private String projectOverview;
         private String evidenceJson;
         private String rawJson;
+
+        public String getTenderNo() {
+            return tenderNo;
+        }
+
+        public void setTenderNo(String tenderNo) {
+            this.tenderNo = tenderNo;
+        }
 
         public String getTenderer() {
             return tenderer;
@@ -322,6 +331,7 @@ public interface TenderAnalysisPort {
         private String status;
         private Long jobId;
         private String documentIdsJson;
+        private String tenderNo;
         private String tenderer;
         private String agency;
         private String budgetAmountText;
@@ -394,6 +404,14 @@ public interface TenderAnalysisPort {
 
         public void setDocumentIdsJson(String documentIdsJson) {
             this.documentIdsJson = documentIdsJson;
+        }
+
+        public String getTenderNo() {
+            return tenderNo;
+        }
+
+        public void setTenderNo(String tenderNo) {
+            this.tenderNo = tenderNo;
         }
 
         public String getTenderer() {

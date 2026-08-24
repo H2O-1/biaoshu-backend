@@ -59,8 +59,8 @@ public class BidSimulationAuditAppService {
                 requireUploadFiles(tenderFiles, tenderFileTypes, "招标文件");
         List<UploadFileCommand> bidUploadFiles =
                 requireUploadFiles(bidFiles, bidFileTypes, "投标文件");
-        String firstBidFileName = safeOriginalFilename(bidUploadFiles.get(0).getFile());
-        String safeName = resolveName(name, firstBidFileName);
+        String firstTenderFileName = safeOriginalFilename(tenderUploadFiles.get(0).getFile());
+        String safeName = resolveName(name, firstTenderFileName);
 
         long tenderPackageId = packageCommandPort.createUnboundTenderPackage(
                 operator.getOrgId(), safeName, operator.getUserId());
@@ -304,10 +304,10 @@ public class BidSimulationAuditAppService {
         return trimmed;
     }
 
-    private String resolveName(String name, String firstBidFileName) {
+    private String resolveName(String name, String firstTenderFileName) {
         String value = name == null ? "" : name.trim();
         if (value.isEmpty()) {
-            value = firstBidFileName;
+            value = firstTenderFileName;
         }
         if (value == null || value.trim().isEmpty()) {
             value = "未命名投标模拟审核";

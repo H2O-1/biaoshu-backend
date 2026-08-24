@@ -414,6 +414,7 @@ public interface LlmPort {
 
     /** 招标基础信息字段集合。 */
     class TenderBasicInfo {
+        private FieldEvidence tenderNo;
         private FieldEvidence tenderer;
         private FieldEvidence agency;
         private FieldEvidence budgetAmount;
@@ -421,6 +422,14 @@ public interface LlmPort {
         private FieldEvidence projectIntro;
         private FieldEvidence projectBackground;
         private FieldEvidence projectOverview;
+
+        public FieldEvidence getTenderNo() {
+            return tenderNo;
+        }
+
+        public void setTenderNo(FieldEvidence tenderNo) {
+            this.tenderNo = tenderNo;
+        }
 
         public FieldEvidence getTenderer() {
             return tenderer;

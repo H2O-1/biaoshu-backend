@@ -3,7 +3,6 @@ com\bidding\review\application\RecallAppService$HitSummary.class
 com\bidding\review\application\ChecklistRecallDebugAppService$DocumentSummary.class
 com\bidding\review\infrastructure\persistence\JdbcExpertReviewStore$ReviewItemSeed.class
 com\bidding\review\application\BidSimulationAuditJobExecutor$IndexState.class
-com\bidding\review\infrastructure\worker\StaleAiWorkRecovery.class
 com\bidding\review\adapter\web\BidSimulationAuditController$AuditItemDto.class
 com\bidding\review\adapter\web\ExpertReviewController$PushResponse.class
 com\bidding\review\application\BuildChecklistJobExecutor$Payload.class

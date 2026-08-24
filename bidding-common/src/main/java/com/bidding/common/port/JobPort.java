@@ -58,6 +58,15 @@ public interface JobPort {
      */
     Optional<JobRef> claimNextPendingOrOwnedRunning(String type, String workerId);
 
+    /**
+     * 认领一条可运行的普通任务：PENDING 或租约已过期的 RUNNING。
+     * <p>
+     * 用于 INDEX / BUILD_CHECKLIST / REVIEW / TENDER_ANALYSIS / BID_SIMULATION_AUDIT。
+     * 任务执行期间由 markRunningProgress 续租；Worker 异常退出后，
+     * 租约过期即可被新 Worker 接管重跑。
+     */
+    Optional<JobRef> claimNextRunnable(String type, String workerId);
+
     /** 领取到期的流水线任务；过期租约可由其他实例接管。 */
     Optional<JobRef> claimNextRunnablePipeline(String type, String workerId, int leaseSeconds);
 

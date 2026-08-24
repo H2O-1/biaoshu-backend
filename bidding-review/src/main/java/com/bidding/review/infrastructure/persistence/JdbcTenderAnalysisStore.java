@@ -24,7 +24,7 @@ public class JdbcTenderAnalysisStore implements TenderAnalysisPort {
 
     private static final String SUMMARY_COLUMNS =
             "a.id, a.org_id, a.package_id, a.name, a.status, a.job_id, a.document_ids_json, "
-                    + "a.tenderer, a.agency, a.budget_amount_text, a.bid_deadline_text, a.bid_deadline_at, "
+                    + "a.tender_no, a.tenderer, a.agency, a.budget_amount_text, a.bid_deadline_text, a.bid_deadline_at, "
                     + "a.project_intro, a.project_background, a.project_overview, a.evidence_json, "
                     + "a.error_message, "
                     + "COALESCE(item_stats.requirement_count, 0) AS requirement_count, "
@@ -172,12 +172,13 @@ public class JdbcTenderAnalysisStore implements TenderAnalysisPort {
     public void markSuccess(long analysisId, BasicInfoDraft basicInfo, String checklistRawJson) {
         BasicInfoDraft info = basicInfo == null ? new BasicInfoDraft() : basicInfo;
         jdbcTemplate.update(
-                "UPDATE biz_tender_analysis SET status = ?, tenderer = ?, agency = ?, "
+                "UPDATE biz_tender_analysis SET status = ?, tender_no = ?, tenderer = ?, agency = ?, "
                         + "budget_amount_text = ?, bid_deadline_text = ?, bid_deadline_at = ?, "
                         + "project_intro = ?, project_background = ?, project_overview = ?, "
                         + "evidence_json = ?, basic_info_raw_json = ?, checklist_raw_json = ?, "
                         + "error_message = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 STATUS_SUCCESS,
+                info.getTenderNo(),
                 info.getTenderer(),
                 info.getAgency(),
                 info.getBudgetAmountText(),
@@ -330,8 +331,9 @@ public class JdbcTenderAnalysisStore implements TenderAnalysisPort {
         if (keyword == null || keyword.isEmpty()) {
             return;
         }
-        sql.append(" AND (a.name LIKE ? OR a.tenderer LIKE ? OR a.agency LIKE ?)");
+        sql.append(" AND (a.name LIKE ? OR a.tender_no LIKE ? OR a.tenderer LIKE ? OR a.agency LIKE ?)");
         String pattern = "%" + keyword + "%";
+        args.add(pattern);
         args.add(pattern);
         args.add(pattern);
         args.add(pattern);
@@ -355,6 +357,7 @@ public class JdbcTenderAnalysisStore implements TenderAnalysisPort {
         long jobId = rs.getLong("job_id");
         summary.setJobId(rs.wasNull() ? null : jobId);
         summary.setDocumentIdsJson(rs.getString("document_ids_json"));
+        summary.setTenderNo(rs.getString("tender_no"));
         summary.setTenderer(rs.getString("tenderer"));
         summary.setAgency(rs.getString("agency"));
         summary.setBudgetAmountText(rs.getString("budget_amount_text"));
@@ -384,6 +387,7 @@ public class JdbcTenderAnalysisStore implements TenderAnalysisPort {
         to.setStatus(from.getStatus());
         to.setJobId(from.getJobId());
         to.setDocumentIdsJson(from.getDocumentIdsJson());
+        to.setTenderNo(from.getTenderNo());
         to.setTenderer(from.getTenderer());
         to.setAgency(from.getAgency());
         to.setBudgetAmountText(from.getBudgetAmountText());

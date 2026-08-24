@@ -48,7 +48,8 @@ class TenderAnalysisExportServiceTest {
             assertEquals("任务名称", workbook.getSheet("概览").getRow(1).getCell(0).getStringCellValue());
             assertEquals("招标文件", workbook.getSheet("概览").getRow(1).getCell(1).getStringCellValue());
             assertEquals("招标文件.pdf", workbook.getSheet("源文件").getRow(1).getCell(2).getStringCellValue());
-            assertEquals("采购人A", workbook.getSheet("基础信息").getRow(1).getCell(1).getStringCellValue());
+            assertEquals("ZHCS-2024-001", workbook.getSheet("基础信息").getRow(1).getCell(1).getStringCellValue());
+            assertEquals("采购人A", workbook.getSheet("基础信息").getRow(2).getCell(1).getStringCellValue());
             assertEquals("Q1", workbook.getSheet("资格要求").getRow(1).getCell(0).getStringCellValue());
             assertEquals("S1", workbook.getSheet("评分标准").getRow(1).getCell(0).getStringCellValue());
         }
@@ -75,6 +76,7 @@ class TenderAnalysisExportServiceTest {
         detail.setName("招标文件");
         detail.setStatus(status);
         detail.setDocumentIdsJson("[7]");
+        detail.setTenderNo("ZHCS-2024-001");
         detail.setTenderer("采购人A");
         detail.setAgency("代理B");
         detail.setBudgetAmountText("预算金额100万元");

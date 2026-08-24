@@ -49,13 +49,13 @@ class BidSimulationAuditAppServiceTest {
         );
         MockMultipartFile tenderFile = file("招标文件.pdf");
         MockMultipartFile bidFile = file("投标文件.pdf");
-        when(packageCommandPort.createUnboundTenderPackage(2L, "投标文件.pdf", 10L)).thenReturn(77L);
-        when(packageCommandPort.createUnboundBidPackage(2L, "投标文件.pdf", 10L)).thenReturn(88L);
+        when(packageCommandPort.createUnboundTenderPackage(2L, "招标文件.pdf", 10L)).thenReturn(77L);
+        when(packageCommandPort.createUnboundBidPackage(2L, "招标文件.pdf", 10L)).thenReturn(88L);
         when(documentCommandPort.uploadAndIndex(eq(2L), eq(77L), eq("招标正文"), eq(tenderFile), eq(10L)))
                 .thenReturn(uploaded(7L, 101L, "招标文件.pdf", "招标正文"));
         when(documentCommandPort.uploadAndIndex(eq(2L), eq(88L), eq("投标正文"), eq(bidFile), eq(10L)))
                 .thenReturn(uploaded(8L, 102L, "投标文件.pdf", "投标正文"));
-        when(auditPort.createBuilding(2L, "投标文件.pdf", 77L, 88L, "[7]", "[8]", 10L))
+        when(auditPort.createBuilding(2L, "招标文件.pdf", 77L, 88L, "[7]", "[8]", 10L))
                 .thenReturn(55L);
         when(jobPort.insert(eq(2L), eq(null), eq(JobPort.TYPE_BID_SIMULATION_AUDIT),
                 eq(JobPort.STATUS_PENDING), anyString(), eq(10L))).thenReturn(66L);

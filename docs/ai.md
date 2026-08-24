@@ -522,8 +522,6 @@ projectId=10 pipelineJobId=501 phase=DONE | 审查完成 reviewId=201 checklistI
 | `AI_REVIEW_PIPELINE_CHILD_WAIT_TIMEOUT_MS` | 7200000 | 建清单/审查阶段超时                        |
 | `AI_REVIEW_PIPELINE_MAX_RETRIES`           | 3       | 瞬时错误最大重试次数，达到转 FAILED        |
 | `AI_REVIEW_PIPELINE_RETRY_BACKOFF_MS`      | 10000   | 瞬时错误退避基数（指数，封顶 60 倍）       |
-| `STALE_RECOVERY_ENABLED`                   | false   | 僵尸子任务回收：临时人工功能，API/Worker 均默认关闭 |
-| `STALE_RECOVERY_STALE_MINUTES`             | 30      | 显式开启时，只回收早于该分钟数的 RUNNING/BUILDING 任务 |
 | `bidding.review.compare-parallelism`       | 4       | 审查条目并行度（上限 4）                   |
 
 其余 Poller 同理：`INDEX_WORKER_ENABLED` / `CHECKLIST_WORKER_ENABLED` / `REVIEW_WORKER_ENABLED`
@@ -539,6 +537,6 @@ projectId=10 pipelineJobId=501 phase=DONE | 审查完成 reviewId=201 checklistI
 
 **发版 / 重启：** 一键审查总任务（AI_REVIEW_PIPELINE）是 PostgreSQL 持久化状态机，**不再**在启动时置失败：`RUNNING` 总任务在租约（默认 60s）过期后由任一 Worker 自动接管，按 `phase` 续跑；SUBMIT 阶段「建子任务 + 推进」同事务，崩溃回滚不产生重复子任务。Worker 可多实例部署，API 进程不跑 Poller。
 
-普通 INDEX / BUILD_CHECKLIST / REVIEW 子任务暂无租约与心跳，自动回收可能误杀长任务，故僵尸回收（`bidding.recovery.enabled`）在 API 与 Worker **一律默认关闭**，仅运维人工确认后显式开启（开启时启动日志打印高可见度警告）。**剩余风险**：Worker 异常中断留下的 RUNNING 子任务不会被自动回收，需人工核对处理；子任务统一租约化是后续任务。发版前若可停业务，仍建议先避开高峰或提示用户稍后重试。
+普通 INDEX / BUILD_CHECKLIST / REVIEW / TENDER_ANALYSIS / BID_SIMULATION_AUDIT 任务也使用轻量租约：认领 `PENDING` 或租约过期的 `RUNNING`，执行中每次进度更新续租（默认 10 分钟）。Worker 异常退出后，旧 `RUNNING` 任务会在租约过期后被新 Worker 接管重跑，不再依赖固定 workerId。
 
 **从 V29 之前版本升级：** 旧版 PENDING 总任务迁移为 INDEX_SUBMIT，可由状态机安全重驱动（阶段幂等）；旧版 RUNNING 总任务因未持久化 checklist_id / review_id 无法无损续跑，统一标记 FAILED（错误信息提示重新发起）；SUCCESS/FAILED 映射为同名终态；CANCELLED 不变。

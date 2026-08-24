@@ -194,6 +194,7 @@ public class BidSimulationAuditController {
         summary.setTypoCount(base.getTypoCount());
         dto.setSummary(summary);
         BasicInfoDto basicInfo = new BasicInfoDto();
+        basicInfo.setTenderNo(detail.getTenderNo());
         basicInfo.setTenderer(detail.getTenderer());
         basicInfo.setAgency(detail.getAgency());
         basicInfo.setBudgetAmountText(detail.getBudgetAmountText());
@@ -925,12 +926,21 @@ public class BidSimulationAuditController {
     }
 
     public static class BasicInfoDto {
+        private String tenderNo;
         private String tenderer;
         private String agency;
         private String budgetAmountText;
         private String bidDeadlineText;
         private Instant bidDeadlineAt;
         private JsonNode evidence;
+
+        public String getTenderNo() {
+            return tenderNo;
+        }
+
+        public void setTenderNo(String tenderNo) {
+            this.tenderNo = tenderNo;
+        }
 
         public String getTenderer() {
             return tenderer;

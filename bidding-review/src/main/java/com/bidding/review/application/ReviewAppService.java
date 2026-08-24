@@ -147,7 +147,7 @@ public class ReviewAppService {
     }
 
     public Optional<JobPort.JobRef> claimNextReview(String workerId) {
-        return jobPort.claimNextPending(JobPort.TYPE_REVIEW, workerId);
+        return jobPort.claimNextRunnable(JobPort.TYPE_REVIEW, workerId);
     }
 
     private RequirementChecklistPort.ChecklistDetail resolveChecklist(

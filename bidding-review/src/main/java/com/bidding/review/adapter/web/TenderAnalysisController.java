@@ -128,6 +128,7 @@ public class TenderAnalysisController {
         dto.setJobId(s.getJobId());
         dto.setDocumentIds(parseLongArray(s.getDocumentIdsJson()));
         dto.setFileCount(dto.getDocumentIds().size());
+        dto.setTenderNo(s.getTenderNo());
         dto.setTenderer(s.getTenderer());
         dto.setAgency(s.getAgency());
         dto.setBudgetAmountText(s.getBudgetAmountText());
@@ -155,6 +156,7 @@ public class TenderAnalysisController {
         dto.setJobId(base.getJobId());
         dto.setDocumentIds(base.getDocumentIds());
         dto.setFileCount(base.getFileCount());
+        dto.setTenderNo(base.getTenderNo());
         dto.setTenderer(base.getTenderer());
         dto.setAgency(base.getAgency());
         dto.setBudgetAmountText(base.getBudgetAmountText());
@@ -168,6 +170,7 @@ public class TenderAnalysisController {
         dto.setUpdatedAt(base.getUpdatedAt());
 
         BasicInfoDto basic = new BasicInfoDto();
+        basic.setTenderNo(detail.getTenderNo());
         basic.setTenderer(detail.getTenderer());
         basic.setAgency(detail.getAgency());
         basic.setBudgetAmountText(detail.getBudgetAmountText());
@@ -382,6 +385,7 @@ public class TenderAnalysisController {
         private Long jobId;
         private List<Long> documentIds = new ArrayList<>();
         private int fileCount;
+        private String tenderNo;
         private String tenderer;
         private String agency;
         private String budgetAmountText;
@@ -458,6 +462,14 @@ public class TenderAnalysisController {
 
         public void setFileCount(int fileCount) {
             this.fileCount = fileCount;
+        }
+
+        public String getTenderNo() {
+            return tenderNo;
+        }
+
+        public void setTenderNo(String tenderNo) {
+            this.tenderNo = tenderNo;
         }
 
         public String getTenderer() {
@@ -689,6 +701,7 @@ public class TenderAnalysisController {
     }
 
     public static class BasicInfoDto {
+        private String tenderNo;
         private String tenderer;
         private String agency;
         private String budgetAmountText;
@@ -698,6 +711,14 @@ public class TenderAnalysisController {
         private String projectBackground;
         private String projectOverview;
         private JsonNode evidence;
+
+        public String getTenderNo() {
+            return tenderNo;
+        }
+
+        public void setTenderNo(String tenderNo) {
+            this.tenderNo = tenderNo;
+        }
 
         public String getTenderer() {
             return tenderer;

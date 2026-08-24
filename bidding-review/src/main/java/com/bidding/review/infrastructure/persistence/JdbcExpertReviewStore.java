@@ -786,7 +786,8 @@ public class JdbcExpertReviewStore {
                         + "WHERE review_id = ? AND status NOT IN (?, ?)) AS total_count, "
                         + "(SELECT COUNT(1) FROM biz_expert_review_member "
                         + "WHERE review_id = ? AND status NOT IN (?, ?) AND submit_status IN (?, ?)) AS submitted_count, "
-                        + "(SELECT COUNT(1) FROM biz_expert_review_company WHERE review_id = ?) AS company_count"
+                        + "(SELECT COUNT(DISTINCT bid_package_id) FROM biz_expert_review_item "
+                        + "WHERE review_id = ?) AS company_count"
                         + ") stats "
                         + "WHERE r.id = ? AND r.status IN (?, ?)",
                 ReviewPort.STATUS_SUCCESS,

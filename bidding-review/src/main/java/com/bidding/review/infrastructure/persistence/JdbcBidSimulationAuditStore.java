@@ -27,7 +27,7 @@ public class JdbcBidSimulationAuditStore implements BidSimulationAuditPort {
                     + "tender_document_ids_json, bid_document_ids_json, qualification_total, "
                     + "qualification_pass_count, qualification_fail_count, qualification_manual_count, "
                     + "qualification_pass_rate, score_suggested, score_total, logic_issue_count, "
-                    + "typo_count, tenderer, agency, budget_amount_text, bid_deadline_text, "
+                    + "typo_count, tender_no, tenderer, agency, budget_amount_text, bid_deadline_text, "
                     + "bid_deadline_at, basic_info_evidence_json, basic_info_raw_json, "
                     + "error_message, created_by, created_at, updated_at";
 
@@ -133,7 +133,7 @@ public class JdbcBidSimulationAuditStore implements BidSimulationAuditPort {
                         + "qualification_pass_count = ?, qualification_fail_count = ?, "
                         + "qualification_manual_count = ?, qualification_pass_rate = ?, "
                         + "score_suggested = ?, score_total = ?, logic_issue_count = ?, typo_count = ?, "
-                        + "tenderer = ?, agency = ?, budget_amount_text = ?, bid_deadline_text = ?, "
+                        + "tender_no = ?, tenderer = ?, agency = ?, budget_amount_text = ?, bid_deadline_text = ?, "
                         + "bid_deadline_at = ?, basic_info_evidence_json = ?, basic_info_raw_json = ?, "
                         + "error_message = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 STATUS_SUCCESS,
@@ -146,6 +146,7 @@ public class JdbcBidSimulationAuditStore implements BidSimulationAuditPort {
                 zeroIfNull(safeSummary.getScoreTotal()),
                 safeSummary.getLogicIssueCount(),
                 safeSummary.getTypoCount(),
+                safeBasic.getTenderNo(),
                 safeBasic.getTenderer(),
                 safeBasic.getAgency(),
                 safeBasic.getBudgetAmountText(),
@@ -295,6 +296,7 @@ public class JdbcBidSimulationAuditStore implements BidSimulationAuditPort {
         summary.setBidPackageId(rs.getLong("bid_package_id"));
         summary.setTenderDocumentIdsJson(rs.getString("tender_document_ids_json"));
         summary.setBidDocumentIdsJson(rs.getString("bid_document_ids_json"));
+        summary.setTenderNo(rs.getString("tender_no"));
         summary.setTenderer(rs.getString("tenderer"));
         summary.setAgency(rs.getString("agency"));
         summary.setBudgetAmountText(rs.getString("budget_amount_text"));
@@ -328,6 +330,7 @@ public class JdbcBidSimulationAuditStore implements BidSimulationAuditPort {
         to.setBidPackageId(from.getBidPackageId());
         to.setTenderDocumentIdsJson(from.getTenderDocumentIdsJson());
         to.setBidDocumentIdsJson(from.getBidDocumentIdsJson());
+        to.setTenderNo(from.getTenderNo());
         to.setTenderer(from.getTenderer());
         to.setAgency(from.getAgency());
         to.setBudgetAmountText(from.getBudgetAmountText());

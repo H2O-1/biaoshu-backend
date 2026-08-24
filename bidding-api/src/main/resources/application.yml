@@ -143,10 +143,6 @@ bidding:
     child-wait-timeout-ms: ${AI_REVIEW_PIPELINE_CHILD_WAIT_TIMEOUT_MS:7200000}
     max-retries: ${AI_REVIEW_PIPELINE_MAX_RETRIES:3}
     retry-backoff-ms: ${AI_REVIEW_PIPELINE_RETRY_BACKOFF_MS:10000}
-  # 僵尸子任务回收：只在 Worker 进程开启；总任务由租约过期自动接管
-  recovery:
-    enabled: ${STALE_RECOVERY_ENABLED:false}
-    stale-minutes: ${STALE_RECOVERY_STALE_MINUTES:30}
   # 抽取 / 对照 LLM（compatible-mode chat）
   llm:
     base-url: ${LLM_BASE_URL:${EMBEDDING_BASE_URL:https://ws-jbb2t4ahvyzwxo9b.cn-beijing.maas.aliyuncs.com/compatible-mode/v1}}

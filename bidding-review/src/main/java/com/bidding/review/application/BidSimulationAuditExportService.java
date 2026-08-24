@@ -127,6 +127,8 @@ public class BidSimulationAuditExportService {
         Sheet sheet = workbook.createSheet("招标基础信息");
         header(sheet, headerStyle, "字段", "值", "页码", "chunkId", "原文片段");
         int rowIndex = 1;
+        rowIndex = basicInfoRow(sheet, rowIndex, "招标编号", detail.getTenderNo(),
+                detail.getBasicInfoEvidenceJson(), "tenderNo");
         rowIndex = basicInfoRow(sheet, rowIndex, "招标人", detail.getTenderer(),
                 detail.getBasicInfoEvidenceJson(), "tenderer");
         rowIndex = basicInfoRow(sheet, rowIndex, "招标代理", detail.getAgency(),

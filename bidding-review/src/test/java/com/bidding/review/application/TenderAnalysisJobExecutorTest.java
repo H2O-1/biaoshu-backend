@@ -52,7 +52,7 @@ class TenderAnalysisJobExecutorTest {
     @Test
     void claimAndRunOnceReturnsFalseWhenNoJob() {
         TenderAnalysisJobExecutor executor = newExecutor();
-        when(jobPort.claimNextPendingOrOwnedRunning(JobPort.TYPE_TENDER_ANALYSIS, "w1"))
+        when(jobPort.claimNextRunnable(JobPort.TYPE_TENDER_ANALYSIS, "w1"))
                 .thenReturn(Optional.empty());
 
         assertEquals(false, executor.claimAndRunOnce("w1"));
@@ -61,7 +61,7 @@ class TenderAnalysisJobExecutorTest {
     @Test
     void waitingIndexKeepsJobRunning() {
         TenderAnalysisJobExecutor executor = newExecutor();
-        when(jobPort.claimNextPendingOrOwnedRunning(JobPort.TYPE_TENDER_ANALYSIS, "w1"))
+        when(jobPort.claimNextRunnable(JobPort.TYPE_TENDER_ANALYSIS, "w1"))
                 .thenReturn(Optional.of(job()));
         DocumentAccessPort.DocumentRef doc1 = doc(7L, DocumentAccessPort.INDEX_SUCCESS);
         DocumentAccessPort.DocumentRef doc2 = doc(8L, "PROCESSING");
@@ -78,7 +78,7 @@ class TenderAnalysisJobExecutorTest {
     @Test
     void failedIndexMarksAnalysisAndJobFailed() {
         TenderAnalysisJobExecutor executor = newExecutor();
-        when(jobPort.claimNextPendingOrOwnedRunning(JobPort.TYPE_TENDER_ANALYSIS, "w1"))
+        when(jobPort.claimNextRunnable(JobPort.TYPE_TENDER_ANALYSIS, "w1"))
                 .thenReturn(Optional.of(job()));
         DocumentAccessPort.DocumentRef doc1 = doc(7L, DocumentAccessPort.INDEX_SUCCESS);
         DocumentAccessPort.DocumentRef doc2 = doc(8L, DocumentAccessPort.INDEX_FAILED);
@@ -94,9 +94,27 @@ class TenderAnalysisJobExecutorTest {
     }
 
     @Test
+    void llmFailureStoresUserFriendlyMessage() {
+        TenderAnalysisJobExecutor executor = newExecutor();
+        when(jobPort.claimNextRunnable(JobPort.TYPE_TENDER_ANALYSIS, "w1"))
+                .thenReturn(Optional.of(job()));
+        when(documentAccessPort.findActiveById(7L)).thenReturn(doc(7L, DocumentAccessPort.INDEX_SUCCESS));
+        when(documentAccessPort.findActiveById(8L)).thenReturn(doc(8L, DocumentAccessPort.INDEX_SUCCESS));
+        when(documentIndexStorePort.listChunksByDocumentIds(eq(2L), anyList()))
+                .thenReturn(List.of(chunk(9001L, 7L, "招标人：采购人A。")));
+        when(llmPort.extractTenderBasicInfo(anyString()))
+                .thenThrow(new RuntimeException("调用 LLM 失败: request timed out"));
+
+        assertEquals(true, executor.claimAndRunOnce("w1"));
+
+        verify(tenderAnalysisPort).markFailed(55L, "解析失败，请稍后重试");
+        verify(jobPort).markFailed(101L, "解析失败，请稍后重试");
+    }
+
+    @Test
     void successExtractsBasicInfoAndChecklistItems() {
         TenderAnalysisJobExecutor executor = newExecutor();
-        when(jobPort.claimNextPendingOrOwnedRunning(JobPort.TYPE_TENDER_ANALYSIS, "w1"))
+        when(jobPort.claimNextRunnable(JobPort.TYPE_TENDER_ANALYSIS, "w1"))
                 .thenReturn(Optional.of(job()));
         when(documentAccessPort.findActiveById(7L)).thenReturn(doc(7L, DocumentAccessPort.INDEX_SUCCESS));
         when(documentAccessPort.findActiveById(8L)).thenReturn(doc(8L, DocumentAccessPort.INDEX_SUCCESS));
@@ -116,11 +134,13 @@ class TenderAnalysisJobExecutorTest {
                 ArgumentCaptor.forClass(TenderAnalysisPort.BasicInfoDraft.class);
         verify(tenderAnalysisPort).markSuccess(eq(55L), basicCaptor.capture(), eq("{\"qualification\":{},\"scoring\":{}}"));
         TenderAnalysisPort.BasicInfoDraft basic = basicCaptor.getValue();
+        assertEquals("ZHCS-2024-001", basic.getTenderNo());
         assertEquals("采购人A", basic.getTenderer());
         assertEquals("代理B", basic.getAgency());
         assertEquals("预算金额100万元", basic.getBudgetAmountText());
         assertEquals("2026年8月15日17:00", basic.getBidDeadlineText());
         assertEquals(Instant.parse("2026-08-15T09:00:00Z"), basic.getBidDeadlineAt());
+        assertTrue(basic.getEvidenceJson().contains("\"field\":\"tenderNo\""));
         assertTrue(basic.getEvidenceJson().contains("\"field\":\"tenderer\""));
         assertTrue(basic.getEvidenceJson().contains("\"pageNo\":11"));
         assertTrue(basic.getEvidenceJson().contains("\"pageNo\":12"));
@@ -189,6 +209,7 @@ class TenderAnalysisJobExecutorTest {
 
     private static LlmPort.TenderBasicInfoResult basicInfoResult() {
         LlmPort.TenderBasicInfo info = new LlmPort.TenderBasicInfo();
+        LlmPort.FieldEvidence tenderNo = field("ZHCS-2024-001", "招标编号：ZHCS-2024-001", 9001L, 9001);
         LlmPort.FieldEvidence tenderer = field("采购人A", "招标人：采购人A", 9001L, 9001);
         LlmPort.FieldEvidence agency = field("代理B", "代理机构：代理B", 9002L, 9002);
         LlmPort.FieldEvidence budget = field("预算金额100万元", "预算金额100万元", 9001L, 9001);
@@ -198,6 +219,7 @@ class TenderAnalysisJobExecutorTest {
         deadline.setQuote("截止时间：2026年8月15日17:00");
         deadline.setChunkId(9001L);
         deadline.setPageNo(9001);
+        info.setTenderNo(tenderNo);
         info.setTenderer(tenderer);
         info.setAgency(agency);
         info.setBudgetAmount(budget);

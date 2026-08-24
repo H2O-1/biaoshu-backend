@@ -148,6 +148,7 @@ class JdbcBidSimulationAuditStoreTest {
         summary.setLogicIssueCount(2);
         summary.setTypoCount(3);
         TenderAnalysisPort.BasicInfoDraft basicInfo = new TenderAnalysisPort.BasicInfoDraft();
+        basicInfo.setTenderNo("ZHCS-2024-001");
         basicInfo.setTenderer("采购人A");
         basicInfo.setAgency("代理B");
         basicInfo.setBudgetAmountText("预算金额100万元");
@@ -168,13 +169,14 @@ class JdbcBidSimulationAuditStoreTest {
         assertEquals(new BigDecimal("23.00"), argsCaptor.getValue()[7]);
         assertEquals(2, argsCaptor.getValue()[8]);
         assertEquals(3, argsCaptor.getValue()[9]);
-        assertEquals("采购人A", argsCaptor.getValue()[10]);
-        assertEquals("代理B", argsCaptor.getValue()[11]);
-        assertEquals("预算金额100万元", argsCaptor.getValue()[12]);
-        assertEquals("2026年8月15日17:00", argsCaptor.getValue()[13]);
-        assertEquals("[{\"field\":\"tenderer\"}]", argsCaptor.getValue()[15]);
-        assertEquals("{\"basicInfo\":true}", argsCaptor.getValue()[16]);
-        assertEquals(66L, argsCaptor.getValue()[17]);
+        assertEquals("ZHCS-2024-001", argsCaptor.getValue()[10]);
+        assertEquals("采购人A", argsCaptor.getValue()[11]);
+        assertEquals("代理B", argsCaptor.getValue()[12]);
+        assertEquals("预算金额100万元", argsCaptor.getValue()[13]);
+        assertEquals("2026年8月15日17:00", argsCaptor.getValue()[14]);
+        assertEquals("[{\"field\":\"tenderer\"}]", argsCaptor.getValue()[16]);
+        assertEquals("{\"basicInfo\":true}", argsCaptor.getValue()[17]);
+        assertEquals(66L, argsCaptor.getValue()[18]);
     }
 
     @Test

@@ -757,6 +757,7 @@ public class HttpLlmPort implements LlmPort {
             throw new IllegalStateException("招标基础信息 LLM JSON 须为对象");
         }
         TenderBasicInfo info = new TenderBasicInfo();
+        info.setTenderNo(parseFieldEvidence(node.get("tenderNo")));
         info.setTenderer(parseFieldEvidence(node.get("tenderer")));
         info.setAgency(parseFieldEvidence(node.get("agency")));
         info.setBudgetAmount(parseFieldEvidence(node.get("budgetAmount")));
@@ -1424,7 +1425,7 @@ public class HttpLlmPort implements LlmPort {
 
     private static String defaultTenderBasicPromptTemplate() {
         return "【任务】从候选招标原文中抽取招标基础信息。\n"
-                + "【字段】招标人 tenderer；招标代理 agency；预算金额 budgetAmount；"
+                + "【字段】招标编号 tenderNo；招标人 tenderer；招标代理 agency；预算金额 budgetAmount；"
                 + "投标截止时间 bidDeadline；项目简介 projectIntro；项目背景 projectBackground；项目概况 projectOverview。\n"
                 + "【规则】预算金额不拆分，按原文整体填 value；投标截止时间 text 填原文，"
                 + "iso 填 ISO-8601 UTC 时间（示例 2026-08-15T09:00:00Z），无法确定完整年月日时分则 iso=null；"
@@ -1432,7 +1433,8 @@ public class HttpLlmPort implements LlmPort {
                 + "【约束】只输出 JSON；不得编造；不要输出多余字段；不要用未知/无等占位文字。\n"
                 + "【候选原文】\n{{recalled_chunks}}\n"
                 + "【输出外形】\n"
-                + "{\"tenderer\":{\"value\":null,\"quote\":null,\"chunkId\":null},"
+                + "{\"tenderNo\":{\"value\":null,\"quote\":null,\"chunkId\":null},"
+                + "\"tenderer\":{\"value\":null,\"quote\":null,\"chunkId\":null},"
                 + "\"agency\":{\"value\":null,\"quote\":null,\"chunkId\":null},"
                 + "\"budgetAmount\":{\"value\":null,\"quote\":null,\"chunkId\":null},"
                 + "\"bidDeadline\":{\"text\":null,\"iso\":null,\"quote\":null,\"chunkId\":null},"

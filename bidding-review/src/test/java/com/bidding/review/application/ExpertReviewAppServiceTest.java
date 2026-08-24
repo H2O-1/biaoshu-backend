@@ -301,7 +301,8 @@ class ExpertReviewAppServiceTest {
         when(expertReviewStore.findEvidenceChunkRefs(any())).thenReturn(refs);
         when(expertReviewStore.listAttachmentsByItemIds(List.of(801L)))
                 .thenReturn(Map.of(801L, List.of(attachment)));
-        when(expertReviewStore.listCompanies(501L)).thenReturn(List.of(company));
+        CompanyRow emptyCompany = company(302L, 82L, "投标包B");
+        when(expertReviewStore.listCompanies(501L)).thenReturn(List.of(company, emptyCompany));
 
         ExpertReviewAppService.CurrentTaskDetail detail = service.getCurrentTask();
 
@@ -312,11 +313,18 @@ class ExpertReviewAppServiceTest {
         assertEquals("陈明", detail.getPusherName());
         assertFalse(detail.isReadOnly());
         assertTrue(detail.getRemainingDays() >= 1);
-        assertEquals(1, detail.getCompanies().size());
+        assertEquals(2, detail.getCompanies().size());
         ExpertReviewAppService.TaskCompany taskCompany = detail.getCompanies().get(0);
         assertEquals(81L, taskCompany.getBidPackageId());
         assertEquals("投标包A", taskCompany.getSupplierName());
+        assertTrue(taskCompany.isParticipated());
+        assertEquals(1, taskCompany.getReviewItemCount());
         assertEquals(1, taskCompany.getItems().size());
+        ExpertReviewAppService.TaskCompany emptyTaskCompany = detail.getCompanies().get(1);
+        assertEquals(82L, emptyTaskCompany.getBidPackageId());
+        assertFalse(emptyTaskCompany.isParticipated());
+        assertEquals(0, emptyTaskCompany.getReviewItemCount());
+        assertTrue(emptyTaskCompany.getItems().isEmpty());
         ExpertReviewAppService.TaskItem taskItem = taskCompany.getItems().get(0);
         assertEquals(801L, taskItem.getItemId());
         assertEquals(701L, taskItem.getSourceReviewItemId());
@@ -405,6 +413,39 @@ class ExpertReviewAppServiceTest {
         assertEquals(new BigDecimal("9.00"), snapshot.getItemReviewGroups().get(0).getExpertReviews().get(0).getScoreValue());
         assertEquals("NOT_SUBMITTED", snapshot.getItemReviewGroups().get(0).getExpertReviews().get(1).getSubmitStatus());
         assertEquals(new BigDecimal("9.00"), snapshot.getItemReviewGroups().get(0).getAverageScore());
+    }
+
+    @Test
+    void getSnapshotMarksCompaniesWithoutReviewItemsAsNotParticipated() {
+        ReviewRow review = runningReview(Instant.now().plusSeconds(86_400L));
+        review.setHasAnyCompleteSubmission(true);
+        review.setSubmittedExpertCount(1);
+        review.setSubmittedCompanyCount(2);
+        MemberRow submitted = submittedMember(88L, 77L);
+        CompanyRow companyA = company(301L, 81L, "投标单位A");
+        CompanyRow companyB = company(302L, 82L, "投标单位B");
+
+        when(projectLookupPort.findActiveById(100L)).thenReturn(project());
+        when(expertReviewStore.findLatestByProject(2L, 100L)).thenReturn(review);
+        when(expertReviewStore.listMembers(501L)).thenReturn(List.of(submitted));
+        when(expertReviewStore.listCompanies(501L)).thenReturn(List.of(companyA, companyB));
+        when(expertReviewStore.listItemsForMember(501L, 88L))
+                .thenReturn(List.of(scoringItem(801L, 81L, "9.00")));
+        when(expertReviewStore.listAttachmentsByItemIds(List.of(801L))).thenReturn(Map.of());
+
+        ExpertReviewAppService.ReviewSnapshot snapshot = service.getSnapshot(100L);
+
+        assertEquals(1, snapshot.getSubmittedCompanyCount());
+        assertEquals(2, snapshot.getCompanyTabs().size());
+        assertTrue(snapshot.getCompanyTabs().get(0).isParticipated());
+        assertEquals(1, snapshot.getCompanyTabs().get(0).getReviewItemCount());
+        assertFalse(snapshot.getCompanyTabs().get(1).isParticipated());
+        assertEquals(0, snapshot.getCompanyTabs().get(1).getReviewItemCount());
+        assertNull(snapshot.getCompanyTabs().get(1).getAverageScore());
+        assertEquals(1, snapshot.getItemReviewGroups().size());
+        assertEquals(81L, snapshot.getItemReviewGroups().get(0).getBidPackageId());
+        assertTrue(snapshot.getScoreCompareItems().get(0).isParticipated());
+        assertFalse(snapshot.getScoreCompareItems().get(1).isParticipated());
     }
 
     @Test

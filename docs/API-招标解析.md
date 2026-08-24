@@ -156,6 +156,7 @@
         "fileCount": 2,
         "requirementCount": 12,
         "issueCount": 3,
+        "tenderNo": "ZHCS-2024-001",
         "tenderer": "上海智慧园区发展有限公司",
         "agency": "中建咨询（招标代理）",
         "budgetAmountText": "￥12,800,000.00（含税最高限价）",
@@ -183,6 +184,7 @@
 | `requirementCount` | 招标要求数量；`QUALIFICATION` + `SCORING` 条目数 |
 | `issueCount` | 发现问题数量；`LOGIC_ISSUE` + `TYPO` 条目数 |
 | `status` | 解析状态：`BUILDING` 解析中 / `SUCCESS` 解析完成 / `FAILED` 解析失败 |
+| `errorMessage` | 失败提示；仅返回用户可见文案，不返回 LLM / HTTP / timeout 等底层异常 |
 | `jobId` | 解析任务 ID；`BUILDING` 时可用于查询进度 |
 | `sourceAnalysisId` | 重试解析来源记录 ID；首次创建为空 |
 | `originalCreatedAt` | 首次创建时间；首次创建时等于 `createdAt`，重试解析记录继承来源记录的首次创建时间 |
@@ -221,6 +223,7 @@
     "createdAt": "2026-08-11T08:30:00Z",
     "updatedAt": "2026-08-11T08:35:00Z",
     "basicInfo": {
+      "tenderNo": "ZHCS-2024-001",
       "tenderer": "上海智慧园区发展有限公司",
       "agency": "中建咨询（招标代理）",
       "budgetAmountText": "￥12,800,000.00（含税最高限价）",
@@ -498,11 +501,14 @@ Content-Disposition: attachment; filename*=UTF-8''...xlsx
 - 创建解析任务后，后端先为文件创建 INDEX 子任务，再由 `TENDER_ANALYSIS` 任务汇总执行。
 - 进度查询复用现有 job 接口，不新增专用进度接口。
 - 任一文件 INDEX 失败，本次招标解析整体失败。
+- LLM / HTTP / timeout / JSON 解析等底层异常只写后端日志；`errorMessage` 统一返回用户可见文案，如 `解析失败，请稍后重试`。
 - 当前 `TENDER_ANALYSIS` Worker 已接入完整解析主流程：全部文件索引成功后，读取本次文档 chunk，调用 LLM 抽取基础信息、资格要求、评分标准，并保存基础信息 evidence 与条目 evidence。
 - Worker 配置：`bidding.tender-analysis.worker-enabled`、`bidding.tender-analysis.poll-ms`、`bidding.tender-analysis.worker-id`。
+- 任务使用数据库轻量租约：服务重启或 Worker 异常退出后，`RUNNING` 且租约过期的解析任务可被新 Worker 接管重跑，执行中进度更新会自动续租。
 
 ### 抽取结果
 
+- `招标编号` 返回为 `tenderNo`；证据数组使用 `field: "tenderNo"`。
 - `预算金额` 不拆分为预算金额 / 最高限价，本期统一返回 `budgetAmountText`。
 - `投标截止时间` 返回原文 `bidDeadlineText`；`bidDeadlineAt` 只接受 LLM 返回的 ISO-8601 UTC 时间，无法解析则为 `null`。
 - 资格要求和评分标准沿用现有 `Q1` / `S1` 编号规则。
@@ -520,4 +526,5 @@ Content-Disposition: attachment; filename*=UTF-8''...xlsx
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-21 | 解析失败提示脱敏：接口不返回 LLM / HTTP / timeout 等底层异常 |
 | 2026-08-21 | evidence 页码统一由后端根据 `chunkId` 从文档切块回填，避免 LLM 将 chunkId 误写为 pageNo |

@@ -245,6 +245,7 @@ class HttpLlmPortTest {
     @Test
     void parseTenderBasicInfoReadsFieldsAndEvidence() throws Exception {
         String json = "{"
+                + "\"tenderNo\":{\"value\":\"ZHCS-2024-001\",\"quote\":\"招标编号：ZHCS-2024-001\",\"chunkId\":10,\"pageNo\":1},"
                 + "\"tenderer\":{\"value\":\"采购人A\",\"quote\":\"采购人：采购人A\",\"chunkId\":11,\"pageNo\":1},"
                 + "\"agency\":{\"value\":\"代理B\",\"quote\":\"代理机构：代理B\",\"chunkId\":12,\"pageNo\":2},"
                 + "\"budgetAmount\":{\"value\":\"预算金额100万元\",\"quote\":\"预算金额100万元\",\"chunkId\":13,\"pageNo\":3},"
@@ -255,6 +256,8 @@ class HttpLlmPortTest {
                 + "\"projectOverview\":{\"value\":\"项目概况\",\"quote\":\"项目概况原文\",\"chunkId\":17,\"pageNo\":7}"
                 + "}";
         LlmPort.TenderBasicInfo info = llmPort.parseTenderBasicInfoFromContent(json);
+        assertEquals("ZHCS-2024-001", info.getTenderNo().getValue());
+        assertEquals(Long.valueOf(10L), info.getTenderNo().getChunkId());
         assertEquals("采购人A", info.getTenderer().getValue());
         assertEquals(Long.valueOf(11L), info.getTenderer().getChunkId());
         assertEquals("代理B", info.getAgency().getValue());

@@ -112,7 +112,7 @@ public class JobAppService {
      * 认领下一条 INDEX 任务。
      */
     public Optional<JobPort.JobRef> claimNextIndex(String workerId) {
-        return jobPort.claimNextPending(JobPort.TYPE_INDEX, workerId);
+        return jobPort.claimNextRunnable(JobPort.TYPE_INDEX, workerId);
     }
 
     public void markIndexSuccess(long jobId, long documentId, String message) {
