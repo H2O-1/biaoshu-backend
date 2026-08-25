@@ -1,9 +1,13 @@
-com\bidding\ai\infrastructure\chunk\ChapterChunkingPort$Section.class
 com\bidding\ai\infrastructure\embedding\HttpEmbeddingPort.class
 com\bidding\ai\infrastructure\extract\PdfWordTextExtractPort.class
-com\bidding\ai\infrastructure\llm\HttpLlmPort.class
 com\bidding\ai\infrastructure\rerank\HttpRerankPort.class
+com\bidding\ai\infrastructure\ocr\HttpDocumentOcrPort.class
+com\bidding\ai\infrastructure\chunk\ChapterChunkingPort.class
+com\bidding\ai\infrastructure\ocr\OcrProperties.class
+com\bidding\ai\infrastructure\chunk\ChapterChunkingPort$Section.class
+com\bidding\ai\infrastructure\llm\HttpLlmPort.class
 com\bidding\ai\package-info.class
 com\bidding\ai\infrastructure\fake\FakeEmbeddingPort.class
 com\bidding\ai\infrastructure\fake\FakeChunkingPort.class
-com\bidding\ai\infrastructure\chunk\ChapterChunkingPort.class
+com\bidding\ai\infrastructure\ocr\dto\OcrPageResponse.class
+com\bidding\ai\infrastructure\ocr\dto\OcrPdfResponse.class

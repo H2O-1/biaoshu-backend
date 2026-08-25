@@ -147,6 +147,69 @@ class IndexJobExecutorTest {
     }
 
     @Test
+    void executeRealModePreservesExtractedPageNoWhenStoringChunks() {
+        IndexJobExecutor indexJobExecutor = newExecutor("real");
+
+        JobPort.JobRef job = new JobPort.JobRef();
+        job.setId(56L);
+        job.setPayloadJson("{\"documentId\":10}");
+
+        DocumentAccessPort.DocumentRef doc = new DocumentAccessPort.DocumentRef();
+        doc.setId(10L);
+        doc.setOrgId(2L);
+        doc.setProjectId(100L);
+        doc.setPackageId(50L);
+        doc.setFileName("scan.pdf");
+        doc.setFileExt("pdf");
+        when(documentAccessPort.findActiveById(10L)).thenReturn(doc);
+
+        DocumentContentPort.DocumentContent content = new DocumentContentPort.DocumentContent();
+        content.setDocumentId(10L);
+        content.setFileExt("pdf");
+        content.setInputStream(new ByteArrayInputStream("pdf".getBytes(StandardCharsets.UTF_8)));
+        when(documentContentPort.openActive(10L)).thenReturn(content);
+
+        DocumentTextExtractPort.PageText page = new DocumentTextExtractPort.PageText();
+        page.setPageNo(7);
+        page.setText("OCR 第七页正文");
+
+        DocumentTextExtractPort.ExtractResult extracted = new DocumentTextExtractPort.ExtractResult();
+        extracted.setFullText("OCR 第七页正文");
+        extracted.setPages(List.of(page));
+        when(documentTextExtractPort.extract(eq("pdf"), any())).thenReturn(extracted);
+
+        when(chunkingPort.chunk(any(DocumentTextExtractPort.ExtractResult.class))).thenAnswer(invocation -> {
+            DocumentTextExtractPort.ExtractResult source = invocation.getArgument(0);
+            assertEquals(7, source.getPages().get(0).getPageNo());
+
+            ChunkingPort.ChunkDraft draft = new ChunkingPort.ChunkDraft();
+            draft.setChunkIndex(0);
+            draft.setPageNo(source.getPages().get(0).getPageNo());
+            draft.setContent(source.getPages().get(0).getText());
+            draft.setTokenEstimate(6);
+            return List.of(draft);
+        });
+
+        List<float[]> vectors = new ArrayList<>();
+        vectors.add(new float[]{0.1f});
+        when(embeddingPort.embed(anyList())).thenReturn(vectors);
+        when(embeddingPort.dimension()).thenReturn(1);
+        when(embeddingPort.modelName()).thenReturn("BGE-M3");
+
+        indexJobExecutor.execute(job);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<DocumentIndexStorePort.IndexedChunk>> captor =
+                ArgumentCaptor.forClass(List.class);
+        verify(documentIndexStorePort).replaceAll(
+                eq(2L), eq(100L), eq(50L), eq(10L), eq("BGE-M3"), captor.capture());
+        assertEquals(1, captor.getValue().size());
+        assertEquals(7, captor.getValue().get(0).getPageNo());
+        assertEquals("OCR 第七页正文", captor.getValue().get(0).getContent());
+        verify(jobAppService).markIndexSuccess(eq(56L), eq(10L), anyString());
+    }
+
+    @Test
     void executeFailsWhenDocumentMissing() {
         IndexJobExecutor indexJobExecutor = newExecutor("fake");
 
@@ -192,14 +255,14 @@ class IndexJobExecutorTest {
 
         DocumentTextExtractPort.ExtractResult extracted = new DocumentTextExtractPort.ExtractResult();
         extracted.setFullText("   ");
-        extracted.setWarning("未能抽取到文本，可能是扫描件（本期不支持 OCR）");
+        extracted.setWarning("未能从文件抽取到文本，扫描版 PDF 需启用 OCR 服务");
         when(documentTextExtractPort.extract(eq("pdf"), any())).thenReturn(extracted);
 
         indexJobExecutor.execute(job);
 
         ArgumentCaptor<String> msgCaptor = ArgumentCaptor.forClass(String.class);
         verify(jobAppService).markIndexFailed(eq(55L), eq(9L), msgCaptor.capture());
-        assertTrue(msgCaptor.getValue().contains("扫描件") || msgCaptor.getValue().contains("文本"));
+        assertEquals("未能从文件抽取到文本，扫描版 PDF 需启用 OCR 服务", msgCaptor.getValue());
     }
 
     private IndexJobExecutor newExecutor(String mode) {

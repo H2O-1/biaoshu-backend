@@ -4,5 +4,9 @@ D:\Work\bidding-architecture\backend\bidding-ai\src\main\java\com\bidding\ai\inf
 D:\Work\bidding-architecture\backend\bidding-ai\src\main\java\com\bidding\ai\infrastructure\fake\FakeChunkingPort.java
 D:\Work\bidding-architecture\backend\bidding-ai\src\main\java\com\bidding\ai\infrastructure\fake\FakeEmbeddingPort.java
 D:\Work\bidding-architecture\backend\bidding-ai\src\main\java\com\bidding\ai\infrastructure\llm\HttpLlmPort.java
+D:\Work\bidding-architecture\backend\bidding-ai\src\main\java\com\bidding\ai\infrastructure\ocr\dto\OcrPageResponse.java
+D:\Work\bidding-architecture\backend\bidding-ai\src\main\java\com\bidding\ai\infrastructure\ocr\dto\OcrPdfResponse.java
+D:\Work\bidding-architecture\backend\bidding-ai\src\main\java\com\bidding\ai\infrastructure\ocr\HttpDocumentOcrPort.java
+D:\Work\bidding-architecture\backend\bidding-ai\src\main\java\com\bidding\ai\infrastructure\ocr\OcrProperties.java
 D:\Work\bidding-architecture\backend\bidding-ai\src\main\java\com\bidding\ai\infrastructure\rerank\HttpRerankPort.java
 D:\Work\bidding-architecture\backend\bidding-ai\src\main\java\com\bidding\ai\package-info.java

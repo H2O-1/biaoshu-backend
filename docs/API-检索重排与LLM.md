@@ -22,14 +22,14 @@
 | 任务状态 | `PENDING` → `RUNNING` → `SUCCESS` / `FAILED` / `CANCELLED` |
 | 文档 `indexStatus` | 创建任务时 `PROCESSING`；Worker 成功/失败回写 `SUCCESS` / `FAILED` |
 | 执行器（当前） | 同进程定时认领；`INDEX_MODE=real` 时真抽文本/切块 + 百炼向量 |
-| 真索引 | 百炼 `text-embedding-v4`；PDF/docx 抽文本；章节切块 |
+| 真索引 | 百炼 `text-embedding-v4`；PDF/docx 抽文本；OCR 启用时增强扫描/混排 PDF；章节切块 |
 | 召回 / 重排列表 | **不入库**；开发期可用 debug 接口 |
 | 审查维度 | 全局表；招标文件 RAG 13 维全选（V26/V27）；建清单不提供前端勾选 |
 | 建清单 | `BUILD_CHECKLIST`：招标侧多维召回→资格/评分双路重排→LLM→落库 |
 | 智能审查 | `REVIEW`：按包×条目；召回**仅** `bidSearch`（无则跳过召回）；重排/对照用 `text` |
 
 角色：仅 `TENDERER`（维度管理除外）；跨组织资源一律 `40400`。  
-配置（可选）：`INDEX_MODE`、`DASHSCOPE_API_KEY`、`EMBEDDING_*`、`RECALL_*`、`RERANK_*`、`CHECKLIST_*`、`LLM_*`、`REVIEW_*`。
+配置（可选）：`INDEX_MODE`、`DASHSCOPE_API_KEY`、`EMBEDDING_*`、`BIDDING_OCR_*`、`RECALL_*`、`RERANK_*`、`CHECKLIST_*`、`LLM_*`、`REVIEW_*`。
 
 ---
 
@@ -444,8 +444,11 @@
 
 ### 索引流水线（INDEX）
 - 同进程 Worker 定时认领 `PENDING` 任务 → `RUNNING` → `SUCCESS`/`FAILED`。
-- `INDEX_MODE=real`：读对象存储 → 抽文本（PDF/docx）→ 章节切块 → 百炼 embedding → 写 chunk/vector；空文本/扫描件常见失败原因。
+- `INDEX_MODE=real`：读对象存储 → 抽文本（PDF/docx；OCR 启用时增强扫描/混排 PDF）→ 章节切块 → 百炼 embedding → 写 chunk/vector；OCR 未启用时空文本/扫描件仍会索引失败。
 - `INDEX_MODE` 非 real 时可能走 stub/降级（以环境配置为准）。
+- OCR 为索引阶段内部能力，不新增用户侧 OCR API；默认关闭，配置 `BIDDING_OCR_ENABLED=true` 后调用外置 OCR 服务。
+- OCR 服务地址配置 `BIDDING_OCR_BASE_URL`，线上建议 `http://127.0.0.1:8090`，对应 Docker 容器 `bidding-ocr`。
+- OCR 启用后，PDF 原生全文字符过少、任意页字符过少、或任意页包含大图片时触发 OCR；不提供整份 OCR 开关环境变量。
 - 同一文档 `indexStatus=PROCESSING` 时禁止重复提交（409）。
 - 向量当前存 `embedding_json`（应用层余弦），默认约 1024 维、batch≤10。
 

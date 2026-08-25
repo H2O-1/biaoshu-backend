@@ -14,6 +14,7 @@ D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\co
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\DocumentIndexCountPort.java
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\DocumentIndexJobPort.java
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\DocumentIndexStorePort.java
+D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\DocumentOcrPort.java
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\DocumentProjectBindPort.java
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\DocumentTextExtractPort.java
 D:\Work\bidding-architecture\backend\bidding-common\src\main\java\com\bidding\common\port\EmbeddingPort.java

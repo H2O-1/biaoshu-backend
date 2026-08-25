@@ -1,0 +1,17 @@
+services:
+  ocr:
+    build: ./ocr-service
+    container_name: bidding-ocr
+    ports:
+      - "127.0.0.1:8090:8090"
+    environment:
+      OCR_DPI: "200"
+      OCR_MIN_IMAGE_AREA: "8000"
+      OCR_MAX_UPLOAD_MB: "200"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped

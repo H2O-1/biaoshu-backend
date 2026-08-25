@@ -180,7 +180,7 @@ public class IndexJobExecutor {
             if (extracted == null || extracted.isBlank()) {
                 String warning = extracted == null ? null : extracted.getWarning();
                 if (warning == null || warning.isEmpty()) {
-                    warning = "未能从文件抽取到文本（可能是扫描件，本期不支持 OCR）";
+                    warning = "未能从文件抽取到文本，扫描版 PDF 需启用 OCR 服务";
                 }
                 throw new IllegalStateException(warning);
             }

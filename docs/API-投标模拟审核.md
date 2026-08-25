@@ -16,7 +16,7 @@
 - 本册业务接口角色：仅 `BIDDER` 可访问。
 - 跨组织资源一律 **40400**（不暴露是否存在）。
 - 任务进度：复用 `GET /api/jobs/{jobId}` 短轮询，或 `GET /api/jobs/{jobId}/events` SSE；`BID_SIMULATION_AUDIT` 任务的 `JobSummary.auditId` 为模拟审核记录 ID。
-- 文件解析：复用现有 INDEX；扫描版 PDF 无文本时可能失败，本期不做 OCR。
+- 文件解析：复用现有 INDEX；OCR 启用时扫描/混排 PDF 可在索引阶段识别文本，OCR 未启用或识别失败时索引失败。
 - 本册为接口文档；当前已实现创建任务、历史列表、详情查询、删除、重新审核、导出结果接口。
 
 ---

@@ -3,6 +3,7 @@ com\bidding\common\port\TenderAnalysisDocumentCommandPort$UploadResult.class
 com\bidding\common\port\JobPort$JobRef.class
 com\bidding\common\port\LlmPort$TenderIssueScanResult.class
 com\bidding\common\port\package-info.class
+com\bidding\common\port\ProjectExpertReviewProgressPort$Summary.class
 com\bidding\common\port\RequirementChecklistPort$ItemDraft.class
 com\bidding\common\port\DocumentIndexStorePort$ChunkView.class
 com\bidding\common\port\BidSimulationAuditPort.class
@@ -22,12 +23,14 @@ com\bidding\common\port\VectorRecallPort.class
 com\bidding\common\port\VectorRecallPort$RecallMultiQuery.class
 com\bidding\common\port\DocumentProjectBindPort.class
 com\bidding\common\port\LlmPort$BidSearchRow.class
+com\bidding\common\port\DocumentOcrPort.class
 com\bidding\common\port\BidPackageReviewSummaryPort.class
 com\bidding\common\port\ExpertAccountPort.class
 com\bidding\common\port\BidPackageReviewSummaryPort$Summary.class
 com\bidding\common\port\TenderAnalysisPort$ItemDraft.class
 com\bidding\common\port\DocumentIndexStorePort.class
 com\bidding\common\port\ProjectArtifactInvalidationPort.class
+com\bidding\common\port\DocumentOcrPort$OcrPageResult.class
 com\bidding\common\port\RerankPort.class
 com\bidding\common\port\LlmPort$TenderBasicInfoResult.class
 com\bidding\common\port\DocumentAccessPort$DocumentRef.class
@@ -52,6 +55,7 @@ com\bidding\common\port\DocumentTextExtractPort$OutlineItem.class
 com\bidding\common\port\LlmPort$LogicIssueCandidate.class
 com\bidding\common\port\LlmPort.class
 com\bidding\common\api\ApiResponse.class
+com\bidding\common\port\DocumentOcrPort$OcrPdfResult.class
 com\bidding\common\port\TenderAnalysisPort$BasicInfoDraft.class
 com\bidding\common\port\ReviewStatusCountPort.class
 com\bidding\common\port\ReviewPort$ReviewSummary.class
@@ -61,6 +65,7 @@ com\bidding\common\api\PageResult.class
 com\bidding\common\port\DocumentIndexStorePort$IndexedChunk.class
 com\bidding\common\port\ReviewPort$ItemDraft.class
 com\bidding\common\security\BusinessAuth.class
+com\bidding\common\port\ProjectExpertReviewProgressPort.class
 com\bidding\common\port\RerankPort$RerankHit.class
 com\bidding\common\port\TenderAnalysisPort$AnalysisDetail.class
 com\bidding\common\port\VectorRecallPort$RecallQuery.class
@@ -69,6 +74,7 @@ com\bidding\common\port\PackageCountPort.class
 com\bidding\common\port\LlmPort$FieldEvidence.class
 com\bidding\common\port\LlmPort$BidSearchResult.class
 com\bidding\common\port\LlmPort$TenderBasicInfo.class
+com\bidding\common\port\BinaryObjectStoragePort.class
 com\bidding\common\port\ReviewPort$ReviewDetail.class
 com\bidding\common\port\VectorRecallPort$RecallHit.class
 com\bidding\common\security\CurrentUser.class
