@@ -43,6 +43,25 @@ public class PackageCommandPortAdapter implements PackageCommandPort {
     }
 
     @Override
+    public long createUnboundBidPackage(long orgId, String preferredName, long createdBy) {
+        String uniqueName = allocateUniqueName(orgId, PackageAppService.TYPE_BID, preferredName, "未命名投标模拟审核");
+        return packageRepository.insert(
+                orgId,
+                null,
+                PackageAppService.TYPE_BID,
+                uniqueName,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                STATUS_ACTIVE,
+                createdBy
+        );
+    }
+
+    @Override
     public long createBoundBidPackage(long orgId,
                                       long projectId,
                                       String preferredName,

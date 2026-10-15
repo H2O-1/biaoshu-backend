@@ -21,6 +21,8 @@ import java.util.Optional;
 @Repository
 public class JdbcJobRepository implements JobPort {
 
+    private static final int NORMAL_JOB_LEASE_SECONDS = 600;
+
     private static final String COLUMNS = "id, org_id, project_id, type, status, progress, message, "
             + "payload_json, error_message, retry_count, created_by, worker_id, "
             + "phase, next_run_at, lease_expires_at, phase_started_at, checklist_id, review_id, "
@@ -177,6 +179,39 @@ public class JdbcJobRepository implements JobPort {
 
     @Override
     @Transactional
+    public Optional<JobRef> claimNextRunnable(String type, String workerId) {
+        int leaseSeconds = Math.max(NORMAL_JOB_LEASE_SECONDS, 10);
+        List<Long> ids = jdbcTemplate.query(
+                "SELECT id FROM biz_job WHERE type = ? AND status IN ('PENDING', 'RUNNING') "
+                        + "AND (status = 'PENDING' OR lease_expires_at IS NULL "
+                        + "OR lease_expires_at <= CURRENT_TIMESTAMP) "
+                        + "ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1",
+                (rs, rowNum) -> rs.getLong(1),
+                type
+        );
+        if (ids.isEmpty()) {
+            return Optional.empty();
+        }
+        long id = ids.get(0);
+        int updated = jdbcTemplate.update(
+                "UPDATE biz_job SET status = 'RUNNING', worker_id = ?, locked_at = CURRENT_TIMESTAMP, "
+                        + "lease_expires_at = CURRENT_TIMESTAMP + (? * INTERVAL '1 second'), "
+                        + "started_at = COALESCE(started_at, CURRENT_TIMESTAMP), "
+                        + "message = CASE WHEN status = 'PENDING' THEN '处理中' ELSE message END, "
+                        + "progress = CASE WHEN status = 'PENDING' THEN 1 ELSE progress END, "
+                        + "updated_at = CURRENT_TIMESTAMP "
+                        + "WHERE id = ? AND status IN ('PENDING', 'RUNNING') "
+                        + "AND (status = 'PENDING' OR lease_expires_at IS NULL "
+                        + "OR lease_expires_at <= CURRENT_TIMESTAMP)",
+                workerId,
+                leaseSeconds,
+                id
+        );
+        return updated == 1 ? findById(id) : Optional.empty();
+    }
+
+    @Override
+    @Transactional
     public Optional<JobRef> claimNextRunnablePipeline(String type, String workerId, int leaseSeconds) {
         List<Long> ids = jdbcTemplate.query(
                 "SELECT id FROM biz_job WHERE type = ? AND status IN ('PENDING', 'RUNNING') "
@@ -278,9 +313,13 @@ public class JdbcJobRepository implements JobPort {
     @Override
     public void markRunningProgress(long jobId, int progress, String message) {
         jdbcTemplate.update(
-                "UPDATE biz_job SET progress = ?, message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                "UPDATE biz_job SET progress = ?, message = ?, "
+                        + "lease_expires_at = CASE WHEN status = 'RUNNING' "
+                        + "THEN CURRENT_TIMESTAMP + (? * INTERVAL '1 second') ELSE lease_expires_at END, "
+                        + "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 progress,
                 message,
+                NORMAL_JOB_LEASE_SECONDS,
                 jobId
         );
     }

@@ -55,6 +55,18 @@ public interface LlmPort {
      */
     TenderBasicInfoResult extractTenderBasicInfo(String chunksText);
 
+    /**
+     * 扫描一批招标文件 chunk，输出逻辑问题和错别字候选。
+     * <p>
+     * 本方法用于招标解析二期的全文分批扫描；默认未实现，HTTP LLM 实现将在后续步骤接入。
+     *
+     * @param chunksText 已格式化的批次原文（须含 chunkId/pageNo/documentId）
+     * @return 逻辑问题候选 + 错别字候选 + 模型原始 content
+     */
+    default TenderIssueScanResult scanTenderIssues(String chunksText) {
+        throw new UnsupportedOperationException("scanTenderIssues 未实现");
+    }
+
     /** 建清单抽取结果（含 LLM 原文）。 */
     class ExtractChecklistResult {
         private List<ExtractedRequirement> items = new ArrayList<>();
@@ -200,6 +212,184 @@ public interface LlmPort {
         }
     }
 
+    /** 招标文件逻辑问题 / 错别字批次扫描结果（含 LLM 原文）。 */
+    class TenderIssueScanResult {
+        private List<LogicIssueCandidate> logicIssues = new ArrayList<>();
+        private List<TypoCandidate> typos = new ArrayList<>();
+        private String rawContent;
+
+        public List<LogicIssueCandidate> getLogicIssues() {
+            return logicIssues;
+        }
+
+        public void setLogicIssues(List<LogicIssueCandidate> logicIssues) {
+            this.logicIssues = logicIssues == null ? new ArrayList<>() : logicIssues;
+        }
+
+        public List<TypoCandidate> getTypos() {
+            return typos;
+        }
+
+        public void setTypos(List<TypoCandidate> typos) {
+            this.typos = typos == null ? new ArrayList<>() : typos;
+        }
+
+        public String getRawContent() {
+            return rawContent;
+        }
+
+        public void setRawContent(String rawContent) {
+            this.rawContent = rawContent;
+        }
+    }
+
+    /** 逻辑问题候选。 */
+    class LogicIssueCandidate {
+        private String title;
+        private String severity;
+        private String issueType;
+        private String problem;
+        private String suggestion;
+        private List<IssueEvidence> evidence = new ArrayList<>();
+
+        public String getTitle() {
+            return title;
+        }
+
+        public void setTitle(String title) {
+            this.title = title;
+        }
+
+        public String getSeverity() {
+            return severity;
+        }
+
+        public void setSeverity(String severity) {
+            this.severity = severity;
+        }
+
+        public String getIssueType() {
+            return issueType;
+        }
+
+        public void setIssueType(String issueType) {
+            this.issueType = issueType;
+        }
+
+        public String getProblem() {
+            return problem;
+        }
+
+        public void setProblem(String problem) {
+            this.problem = problem;
+        }
+
+        public String getSuggestion() {
+            return suggestion;
+        }
+
+        public void setSuggestion(String suggestion) {
+            this.suggestion = suggestion;
+        }
+
+        public List<IssueEvidence> getEvidence() {
+            return evidence;
+        }
+
+        public void setEvidence(List<IssueEvidence> evidence) {
+            this.evidence = evidence == null ? new ArrayList<>() : evidence;
+        }
+    }
+
+    /** 错别字候选。 */
+    class TypoCandidate {
+        private String wrongText;
+        private String suggestedText;
+        private String context;
+        private String confidence;
+        private String suggestion;
+        private List<IssueEvidence> evidence = new ArrayList<>();
+
+        public String getWrongText() {
+            return wrongText;
+        }
+
+        public void setWrongText(String wrongText) {
+            this.wrongText = wrongText;
+        }
+
+        public String getSuggestedText() {
+            return suggestedText;
+        }
+
+        public void setSuggestedText(String suggestedText) {
+            this.suggestedText = suggestedText;
+        }
+
+        public String getContext() {
+            return context;
+        }
+
+        public void setContext(String context) {
+            this.context = context;
+        }
+
+        public String getConfidence() {
+            return confidence;
+        }
+
+        public void setConfidence(String confidence) {
+            this.confidence = confidence;
+        }
+
+        public String getSuggestion() {
+            return suggestion;
+        }
+
+        public void setSuggestion(String suggestion) {
+            this.suggestion = suggestion;
+        }
+
+        public List<IssueEvidence> getEvidence() {
+            return evidence;
+        }
+
+        public void setEvidence(List<IssueEvidence> evidence) {
+            this.evidence = evidence == null ? new ArrayList<>() : evidence;
+        }
+    }
+
+    /** 逻辑问题 / 错别字证据。 */
+    class IssueEvidence {
+        private Long chunkId;
+        private Integer pageNo;
+        private String quote;
+
+        public Long getChunkId() {
+            return chunkId;
+        }
+
+        public void setChunkId(Long chunkId) {
+            this.chunkId = chunkId;
+        }
+
+        public Integer getPageNo() {
+            return pageNo;
+        }
+
+        public void setPageNo(Integer pageNo) {
+            this.pageNo = pageNo;
+        }
+
+        public String getQuote() {
+            return quote;
+        }
+
+        public void setQuote(String quote) {
+            this.quote = quote;
+        }
+    }
+
     /** 招标基础信息抽取结果（含 LLM 原文）。 */
     class TenderBasicInfoResult {
         private TenderBasicInfo info = new TenderBasicInfo();
@@ -224,6 +414,7 @@ public interface LlmPort {
 
     /** 招标基础信息字段集合。 */
     class TenderBasicInfo {
+        private FieldEvidence tenderNo;
         private FieldEvidence tenderer;
         private FieldEvidence agency;
         private FieldEvidence budgetAmount;
@@ -231,6 +422,14 @@ public interface LlmPort {
         private FieldEvidence projectIntro;
         private FieldEvidence projectBackground;
         private FieldEvidence projectOverview;
+
+        public FieldEvidence getTenderNo() {
+            return tenderNo;
+        }
+
+        public void setTenderNo(FieldEvidence tenderNo) {
+            this.tenderNo = tenderNo;
+        }
 
         public FieldEvidence getTenderer() {
             return tenderer;

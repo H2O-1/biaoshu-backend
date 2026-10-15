@@ -74,4 +74,9 @@ public class CurrentUser {
     public boolean isTenderer() {
         return hasRole("TENDERER");
     }
+
+    /** 是否投标方 */
+    public boolean isBidder() {
+        return hasRole("BIDDER");
+    }
 }

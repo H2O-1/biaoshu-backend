@@ -61,7 +61,7 @@ public class ChapterChunkingPort implements ChunkingPort {
 
         List<Section> sections = splitByOutline(source);
         if (sections.isEmpty()) {
-            sections = splitByHeadingHeuristic(source.getFullText());
+            sections = splitByHeadingHeuristic(source);
         }
         if (sections.isEmpty()) {
             Section whole = new Section();
@@ -163,6 +163,71 @@ public class ChapterChunkingPort implements ChunkingPort {
             section.level = Math.max(1, item.getLevel());
             section.titlePath = titlePathByLevel(sorted, i);
             section.body = body;
+            sections.add(section);
+        }
+        return sections;
+    }
+
+    private List<Section> splitByHeadingHeuristic(DocumentTextExtractPort.ExtractResult source) {
+        List<Section> sections = new ArrayList<>();
+        List<DocumentTextExtractPort.PageText> pages = source == null ? null : source.getPages();
+        if (pages == null || pages.isEmpty()) {
+            return splitByHeadingHeuristic(source == null ? null : source.getFullText());
+        }
+        StringBuilder current = new StringBuilder();
+        String currentTitle = null;
+        String currentTitlePath = null;
+        int currentLevel = 0;
+        Integer currentPage = firstPageNo(source);
+        List<String> titleStack = new ArrayList<>();
+
+        for (int p = 0; p < pages.size(); p++) {
+            DocumentTextExtractPort.PageText page = pages.get(p);
+            if (page == null || page.getText() == null || page.getText().trim().isEmpty()) {
+                continue;
+            }
+            Integer pageNo = page.getPageNo() > 0 ? page.getPageNo() : currentPage;
+            String[] lines = page.getText().split("\\R");
+            for (int i = 0; i < lines.length; i++) {
+                String line = lines[i] == null ? "" : lines[i].trim();
+                if (line.isEmpty()) {
+                    continue;
+                }
+                if (isHeadingLine(line)) {
+                    if (current.length() > 0 || (currentTitle != null && !currentTitle.isEmpty())) {
+                        Section section = new Section();
+                        section.pageNo = currentPage;
+                        section.title = currentTitle;
+                        section.titlePath = currentTitlePath;
+                        section.level = currentLevel;
+                        section.body = current.length() > 0 ? current.toString().trim() : currentTitle;
+                        sections.add(section);
+                        current = new StringBuilder();
+                    }
+                    int level = headingLevel(line);
+                    updateTitleStack(titleStack, level, line);
+                    currentTitle = line;
+                    currentTitlePath = joinTitleStack(titleStack);
+                    currentLevel = level;
+                    currentPage = pageNo;
+                    continue;
+                }
+                if (current.length() > 0) {
+                    current.append('\n');
+                }
+                current.append(line);
+            }
+        }
+        if (current.length() > 0 || (currentTitle != null && !currentTitle.isEmpty())) {
+            Section section = new Section();
+            section.pageNo = currentPage;
+            section.title = currentTitle;
+            section.titlePath = currentTitlePath;
+            section.level = currentLevel;
+            section.body = current.toString().trim();
+            if (section.body.isEmpty() && currentTitle != null) {
+                section.body = currentTitle;
+            }
             sections.add(section);
         }
         return sections;

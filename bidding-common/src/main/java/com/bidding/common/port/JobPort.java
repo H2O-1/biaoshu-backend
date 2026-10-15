@@ -17,6 +17,8 @@ public interface JobPort {
     String TYPE_AI_REVIEW_PIPELINE = "AI_REVIEW_PIPELINE";
     /** 独立招标文件解析：INDEX → 基础信息 / 资格要求 / 评分标准抽取。 */
     String TYPE_TENDER_ANALYSIS = "TENDER_ANALYSIS";
+    /** 投标模拟审核：INDEX → 招标要求抽取 → 投标响应审查 → 投标文件问题识别。 */
+    String TYPE_BID_SIMULATION_AUDIT = "BID_SIMULATION_AUDIT";
     String STATUS_PENDING = "PENDING";
     String STATUS_RUNNING = "RUNNING";
     String STATUS_SUCCESS = "SUCCESS";
@@ -55,6 +57,15 @@ public interface JobPort {
      * 下次由同一 workerId 继续检查。
      */
     Optional<JobRef> claimNextPendingOrOwnedRunning(String type, String workerId);
+
+    /**
+     * 认领一条可运行的普通任务：PENDING 或租约已过期的 RUNNING。
+     * <p>
+     * 用于 INDEX / BUILD_CHECKLIST / REVIEW / TENDER_ANALYSIS / BID_SIMULATION_AUDIT。
+     * 任务执行期间由 markRunningProgress 续租；Worker 异常退出后，
+     * 租约过期即可被新 Worker 接管重跑。
+     */
+    Optional<JobRef> claimNextRunnable(String type, String workerId);
 
     /** 领取到期的流水线任务；过期租约可由其他实例接管。 */
     Optional<JobRef> claimNextRunnablePipeline(String type, String workerId, int leaseSeconds);

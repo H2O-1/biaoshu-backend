@@ -10,7 +10,7 @@
 
 ## 1. 为什么用 SSE
 
-长任务（`INDEX` / `BUILD_CHECKLIST` / `REVIEW` / `AI_REVIEW_PIPELINE`）写入表 `biz_job` 后异步执行。  
+长任务（`INDEX` / `BUILD_CHECKLIST` / `REVIEW` / `AI_REVIEW_PIPELINE` / `BID_SIMULATION_AUDIT`）写入表 `biz_job` 后异步执行。  
 前端需要知道 `status`、`progress`、`message`。
 
 | 方式 | 接口 | 说明 |
@@ -30,7 +30,7 @@
 Authorization: Bearer <accessToken>
 ```
 
-- 角色：仅 **`TENDERER`**
+- 角色：**`TENDERER` / `BIDDER`**；投标模拟审核由 `BIDDER` 查询进度，招标解析 / 一键审查等仍由 `TENDERER` 查询进度
 - 任务须属**当前用户所在组织**；不存在或跨组织 → **40400**（与查询任务一致，故意模糊）
 - 未登录 / Token 失效 → **40100**
 
@@ -75,6 +75,7 @@ Authorization: Bearer <accessToken>
 2. 服务端按配置间隔读 `biz_job`，仅当下列字段变化时再推：
    - `status`、`progress`、`message`、`errorMessage`、`payloadJson`
    - 一键审查额外关心摘要中的 `checklistId`、`reviewId`（从 payload 抽出）
+   - 投标模拟审核额外关心摘要中的 `auditId`（从 payload 抽出）
 3. 无变化时定期发 SSE **注释心跳**（`: ping`），降低代理掐空闲连接概率。
 4. `status` 为 `SUCCESS` / `FAILED` / `CANCELLED` 时推送对应终态事件后**关闭流**。
 5. **不替代**短轮询：刷新、重连务必先 `GET /api/jobs/{jobId}`。
@@ -114,7 +115,7 @@ data: {"id":55,"orgId":2,"projectId":10,"type":"AI_REVIEW_PIPELINE","status":"SU
 | id | number | 任务 id（即 jobId） |
 | orgId | number | 组织 id |
 | projectId | number \| null | 项目 id |
-| type | string | `INDEX` / `BUILD_CHECKLIST` / `REVIEW` / `AI_REVIEW_PIPELINE` |
+| type | string | `INDEX` / `BUILD_CHECKLIST` / `REVIEW` / `AI_REVIEW_PIPELINE` / `BID_SIMULATION_AUDIT` |
 | status | string | `PENDING` → `RUNNING` → `SUCCESS` / `FAILED` / `CANCELLED` |
 | progress | number | 0–100 进度 |
 | message | string \| null | 进度文案（如「建清单中」「AI审查中」） |
@@ -125,6 +126,7 @@ data: {"id":55,"orgId":2,"projectId":10,"type":"AI_REVIEW_PIPELINE","status":"SU
 | createdAt / startedAt / finishedAt / updatedAt | string \| null | ISO-8601 时间 |
 | checklistId | number \| null | **仅**一键审查类型可能有：清单 id |
 | reviewId | number \| null | **仅**一键审查类型可能有：审查 id |
+| auditId | number \| null | **仅**投标模拟审核类型可能有：模拟审核记录 id |
 
 任务类型说明见 [检索重排与LLM](./API-检索重排与LLM.md)（创建接口返回 `jobId` 后即可订阅本册 SSE）。
 
@@ -140,7 +142,7 @@ data: {"id":55,"orgId":2,"projectId":10,"type":"AI_REVIEW_PIPELINE","status":"SU
    Header: Authorization + Accept: text/event-stream
 4. 解析 event / data：
    - snapshot / progress → 更新进度条与文案
-   - done → 成功 UI；一键审查可读 checklistId、reviewId
+   - done → 成功 UI；一键审查可读 checklistId、reviewId；投标模拟审核可读 auditId
    - failed → 失败 UI，展示 errorMessage
 5. 终态后关闭 reader / AbortController
 6. 用户刷新页面：
@@ -244,6 +246,7 @@ SSE 为长连接，反代注意：
 | 文档索引 | `POST /api/packages/{packageId}/files/{documentId}/index` | 本册 SSE 或短轮询 |
 | 建清单 | `POST /api/projects/{projectId}/checklists` | 同上 |
 | 一键审查 | `POST /api/projects/{projectId}/ai-reviews/run` | 同上；成功后可读 `checklistId`/`reviewId` |
+| 投标模拟审核 | `POST /api/bid-simulation-audits` | 同上；成功后可读 `auditId` |
 | 项目详情续查 | 项目上的 `aiReviewJobId` 等字段 | 用该 id 调本册接口 |
 
 ---
@@ -254,7 +257,7 @@ SSE 为长连接，反代注意：
 2. **服务端实现是读库 diff**，不是 MQ；进度粒度约等于 `poll-ms`，不是毫秒级总线推送。
 3. **多实例部署**：每台机器各自为已建立的 SSE 连接读库推送即可，不依赖本机内存事件总线。
 4. **原生 EventSource 不可用**（Bearer）；必须用可自定义 Header 的 HTTP 客户端。
-5. 任务被服务重启回收为 `FAILED` 时（见后端 `StaleAiWorkRecovery`），SSE 会推到 `failed` 或下次轮询看到失败。
+5. 普通任务与一键审查总任务都使用数据库租约；服务重启后，仍为 `RUNNING` 且租约过期的任务可被 Worker 接管继续推进。若任务最终失败，SSE 会推到 `failed` 或下次轮询看到失败。
 6. 本册**只覆盖 job 进度**，不包含「项目聚合状态」专用 SSE；项目级字段仍走项目查询接口。
 
 ---
@@ -264,3 +267,5 @@ SSE 为长连接，反代注意：
 | 日期 | 说明 |
 |------|------|
 | 2026-08-04 | 初版：`GET /api/jobs/{jobId}/events`；保留 `GET /api/jobs/{jobId}` 短轮询 |
+| 2026-08-14 | 补充 `BID_SIMULATION_AUDIT` 任务类型；JobSummary 增加投标模拟审核 `auditId` |
+| 2026-08-24 | 普通任务增加轻量租约：租约过期的 `RUNNING` 可被 Worker 接管，进度更新自动续租 |

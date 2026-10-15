@@ -4,7 +4,7 @@
 > 文件上传与标包 CRUD 见：[文件与标包](./API-文件与标包.md)  
 > 账号 / 组织 / 项目见：[账号组织项目](./API-账号组织项目.md) · [总索引](./API.md)  
 > Base URL（本地）：`http://localhost:8080`  
-> 更新：2026-08-07
+> 更新：2026-08-19
 
 ## 通用约定（摘要）
 
@@ -22,14 +22,14 @@
 | 任务状态 | `PENDING` → `RUNNING` → `SUCCESS` / `FAILED` / `CANCELLED` |
 | 文档 `indexStatus` | 创建任务时 `PROCESSING`；Worker 成功/失败回写 `SUCCESS` / `FAILED` |
 | 执行器（当前） | 同进程定时认领；`INDEX_MODE=real` 时真抽文本/切块 + 百炼向量 |
-| 真索引 | 百炼 `text-embedding-v4`；PDF/docx 抽文本；章节切块 |
+| 真索引 | 百炼 `text-embedding-v4`；PDF/docx 抽文本；OCR 启用时增强扫描/混排 PDF；章节切块 |
 | 召回 / 重排列表 | **不入库**；开发期可用 debug 接口 |
 | 审查维度 | 全局表；招标文件 RAG 13 维全选（V26/V27）；建清单不提供前端勾选 |
-| 建清单 | `BUILD_CHECKLIST`：招标侧多维召回→综合 query 重排→LLM→落库 |
+| 建清单 | `BUILD_CHECKLIST`：招标侧多维召回→资格/评分双路重排→LLM→落库 |
 | 智能审查 | `REVIEW`：按包×条目；召回**仅** `bidSearch`（无则跳过召回）；重排/对照用 `text` |
 
 角色：仅 `TENDERER`（维度管理除外）；跨组织资源一律 `40400`。  
-配置（可选）：`INDEX_MODE`、`DASHSCOPE_API_KEY`、`EMBEDDING_*`、`RECALL_*`、`RERANK_*`、`CHECKLIST_*`、`LLM_*`、`REVIEW_*`。
+配置（可选）：`INDEX_MODE`、`DASHSCOPE_API_KEY`、`EMBEDDING_*`、`BIDDING_OCR_*`、`RECALL_*`、`RERANK_*`、`CHECKLIST_*`、`LLM_*`、`REVIEW_*`。
 
 ---
 
@@ -238,7 +238,7 @@
 仅当 `bidding.rerank.debug-enabled=true`（环境变量 `RERANK_DEBUG`）时注册；关闭后接口不存在（404）。  
 仅 `TENDERER`；项目须属本组织。结果**不入库**。
 
-用途：按正式建清单链路自动查看“招标侧多维召回 → 综合重排”后的 topN 片段。调用方不传 query，后端会自动使用数据库里全部启用审查维度的检索词，并使用正式建清单的综合重排 query。
+用途：按正式建清单链路自动查看“招标侧多维召回 → 资格/评分双路重排”后的 topN 片段。调用方不传 query，后端会自动使用数据库里全部启用审查维度的检索词；资格侧使用非 `SCORING` 维度拼 query，评分侧只使用 `SCORING` 维度拼 query。
 
 **请求体**
 
@@ -251,8 +251,8 @@
 | 项目 | 路径参数 `projectId` |
 | 招标包 / 招标文件 | 同 `checklist-recall-debug`，使用项目 `TENDER` 标包下所有 `indexStatus=SUCCESS` 文档 |
 | 召回 query | 自动使用全部启用审查维度的非空 query |
-| 重排 query | 自动拼接维度名与检索词：`维度名：query1；query2。维度名：query1` |
-| 输出顺序 | 与正式建清单一致：先跨文件合并召回候选，再由 `qwen3-rerank` 重排输出 topN |
+| 重排 query | `qualificationRerankQuery` 自动拼接非 `SCORING` 维度；`scoringRerankQuery` 只拼接 `SCORING` 维度 |
+| 输出顺序 | 与正式建清单一致：先跨文件合并召回候选，再由 `qwen3-rerank` 分别重排资格 topN 与评分 topN |
 | 多文件输出 | 多个招标文件的片段会跨文件统一排序；每条 hit 通过 `documentId` / `fileName` / `pageNo` 区分来源 |
 
 **成功 `data` 示例**
@@ -276,11 +276,15 @@
     "找出所有关于信息安全服务资质的规定",
     "CCRC信息安全服务资质要求"
   ],
-  "rerankQuery": "安全资质与认证体系：找出所有关于信息安全服务资质的规定；CCRC信息安全服务资质要求",
+  "rerankQuery": "资格要求类：投标人资格条件是什么",
+  "qualificationRerankQuery": "资格要求类：投标人资格条件是什么",
+  "scoringRerankQuery": "评分评审类：评分标准和打分办法是什么；评标办法",
   "recallTopK": 40,
   "recallHitCount": 40,
   "rerankTopN": 15,
   "rerankHitCount": 15,
+  "qualificationHitCount": 15,
+  "scoringHitCount": 15,
   "hits": [
     {
       "rank": 1,
@@ -295,6 +299,38 @@
       "packageName": "招标文件",
       "recallScore": 0.0327,
       "rerankScore": 0.91
+    }
+  ],
+  "qualificationHits": [
+    {
+      "rank": 1,
+      "chunkId": 9001,
+      "chunkIndex": 12,
+      "pageNo": 8,
+      "content": "供应商须具备信息安全服务资质...",
+      "documentId": 101,
+      "fileName": "招标文件.pdf",
+      "packageId": 50,
+      "packageType": "TENDER",
+      "packageName": "招标文件",
+      "recallScore": 0.0327,
+      "rerankScore": 0.91
+    }
+  ],
+  "scoringHits": [
+    {
+      "rank": 1,
+      "chunkId": 9015,
+      "chunkIndex": 31,
+      "pageNo": 22,
+      "content": "评分标准：技术方案满分15分...",
+      "documentId": 101,
+      "fileName": "招标文件.pdf",
+      "packageId": 50,
+      "packageType": "TENDER",
+      "packageName": "招标文件",
+      "recallScore": 0.0281,
+      "rerankScore": 0.89
     }
   ]
 }
@@ -312,7 +348,7 @@
 
 #### 8.0.6 建清单（BUILD_CHECKLIST）
 
-异步：按勾选审查维度，在**招标包**已 INDEX 成功的文档上多 query 召回并合并 → **综合 query 重排一次** → **按产物拆分 LLM**（资格条目 A ∥ 评分条目 B → 程序编号 Q/S → bidSearch C → evidence D；版本记 `extract-artifact-v1`）→ 落库新版本清单。  
+异步：按勾选审查维度，在**招标包**已 INDEX 成功的文档上多 query 召回并合并 → **资格/评分双路重排**（资格侧用非 `SCORING` 维度，评分侧只用 `SCORING` 维度）→ **按产物拆分 LLM**（资格条目 A ∥ 评分条目 B → 程序编号 Q/S → bidSearch C → evidence D；版本记 `extract-artifact-v1`）→ 落库新版本清单。
 **A/B/C/D 任一步 LLM 调用失败 → 整单建清单 FAILED**（job + checklist 均 FAILED）。编号后 **C∥D 并行**（墙钟 ≈ max(C,D)）。无 `chunkIds` 的条目跳过 D、`evidenceJson=[]`。首条 evidence 的 quote 写入 `sourceExcerpt`（审查 `tenderQuote`）。  
 不做人工确认；`SUCCESS` 即可被后续 REVIEW 引用。条目 `mainType`=`QUALIFICATION`/`SCORING`；`dimensionCode` 写入主类。
 
@@ -350,7 +386,7 @@
 #### 8.0.7 智能审查结果（REVIEW）
 
 审查创建入口已收敛到一键 AI 审查：`POST /api/projects/{projectId}/ai-reviews/run`。  
-`REVIEW` 是一键流程内部创建的子任务结果。基于某版 **SUCCESS** 清单，对选定 **投标包逐个**、对清单条目逐条：  
+`REVIEW` 是一键流程内部创建的子任务结果。基于某版 **SUCCESS** 清单，对有文件的 **投标包逐个**、对清单条目逐条：  
 投标侧召回（**仅 `bidSearchJson` 多词合并；无 bidSearch 则不召回**，资格→无法判断 / 评分→0）→ 用要求正文 **`text` 重排** → LLM 对照 → 落库。  
 `items` 数量 ≈ **投标包数 × 清单条目数**，每条必有 `packageId`。  
 **无项目级总判定**（`overallVerdict` 为 `null`）；符合/不符合由前端按包统计。无召回 → 该条 `FAIL`。
@@ -360,6 +396,8 @@
 `GET /api/projects/{projectId}/reviews` — 列表（按 version 降序）
 
 `GET /api/projects/{projectId}/reviews/{reviewId}` — 详情按投标包嵌套：`packages[]` 含 `supplier`、**整包**`suggestedScoreTotal`/`fullScoreTotal`、`qualificationResponses`、`scoringResponses`（含 `mainType`/`mainTypeLabel`、`title`/`content`/`subType`/`status` 或建议分、`judgement`、`bidEvidence`、`llmRawJson`）
+
+> 空投标包不参与审查，不会出现在详情 `packages[]` 中。
 
 配置：`REVIEW_*`、`LLM_REVIEW_PROMPT_VERSION`（默认 `review-v2`）；对照模型复用 `LLM_MODEL`。
 
@@ -375,7 +413,7 @@
 **前置**
 
 - 已绑招标包、至少一个投标包
-- 招标包 / 投标包下至少各有 1 个未删除文件
+- 招标包至少 1 个未删除文件；项目下全部投标包合计至少 1 个未删除文件
 - 同项目无进行中的一键审查任务（否则 **409**）
 
 **成功 `data`**
@@ -397,7 +435,7 @@
 
 - 向量化：`SUCCESS` 跳过；`PROCESSING` 等待不重复入队；`PENDING`/`FAILED` 入队；任一失败整单失败
 - 清单：有 SUCCESS 且有条目则复用，否则新建
-- 审查：由一键审查内部创建；全部投标包 × 清单条目全量审完；`items` 带 `packageId`；无项目级总判定
+- 审查：由一键审查内部创建；有文件的投标包 × 清单条目全量审完；空投标包跳过且不出现在 `packages[]`；`items` 带 `packageId`；无项目级总判定
 - 流程日志：`logs/ai.log`（Logger `ai.pipeline`）
 
 ---
@@ -406,8 +444,11 @@
 
 ### 索引流水线（INDEX）
 - 同进程 Worker 定时认领 `PENDING` 任务 → `RUNNING` → `SUCCESS`/`FAILED`。
-- `INDEX_MODE=real`：读对象存储 → 抽文本（PDF/docx）→ 章节切块 → 百炼 embedding → 写 chunk/vector；空文本/扫描件常见失败原因。
+- `INDEX_MODE=real`：读对象存储 → 抽文本（PDF/docx；OCR 启用时增强扫描/混排 PDF）→ 章节切块 → 百炼 embedding → 写 chunk/vector；OCR 未启用时空文本/扫描件仍会索引失败。
 - `INDEX_MODE` 非 real 时可能走 stub/降级（以环境配置为准）。
+- OCR 为索引阶段内部能力，不新增用户侧 OCR API；默认关闭，配置 `BIDDING_OCR_ENABLED=true` 后调用外置 OCR 服务。
+- OCR 服务地址配置 `BIDDING_OCR_BASE_URL`，线上建议 `http://127.0.0.1:8090`，对应 Docker 容器 `bidding-ocr`。
+- OCR 启用后，PDF 原生全文字符过少、任意页字符过少、或任意页包含大图片时触发 OCR；不提供整份 OCR 开关环境变量。
 - 同一文档 `indexStatus=PROCESSING` 时禁止重复提交（409）。
 - 向量当前存 `embedding_json`（应用层余弦），默认约 1024 维、batch≤10。
 
@@ -419,7 +460,7 @@
 ### 重排（Rerank）
 - 典型链路：向量召回 topK → 百炼 `qwen3-rerank` → 截断 topN；**结果不入库**。
 - 重排 API 路径为业务空间 `compatible-api/v1/reranks`（与 embedding 的 `compatible-mode` 不同）。
-- 建清单重排调试固定复用真实建清单综合 `rerankQuery`，不再支持手动传 query。
+- 建清单重排调试固定复用真实建清单双路 query，返回 `qualificationHits` 与 `scoringHits`；`hits` 保留为资格侧结果。
 - `checklist-rerank-debug` 仅 `RERANK_DEBUG=true` 时可用。
 
 ### 审查维度
@@ -429,22 +470,23 @@
 
 ### 建清单（BUILD_CHECKLIST）
 - 只在**招标包**已 INDEX 成功文档上跑。
-- 仍用管理员配置的审查维度 queries 做多路召回；合并后综合重排一次；**LLM 按产物拆分**（A 资格 ∥ B 评分 → 编号 → C bidSearch → D evidence，`extract-artifact-v1`）。
+- 仍用管理员配置的审查维度 queries 做多路召回；合并后资格/评分双路重排；**LLM 按产物拆分**（A 资格 ∥ B 评分 → 编号 → C bidSearch → D evidence，`extract-artifact-v1`）。
 - 条目含：`title`、`mainType`、`subType`、`text`(content)、`bidSearchJson`、`evidenceJson`、`sourceExcerpt`、评分字段；保留 `chunkIds`；`dimension_code` 写主类。
+- `evidenceJson` 的页码由后端根据 `fragmentId/chunkId` 从召回命中或文档切块表回填，不使用 LLM 返回的 `page/pageNo`。
 - 成功时主表写入 `llm_raw_json`（含 A/B/C/D 原文拼接）；详情 API 返回 `llmRawJson`。
 - 状态 `BUILDING` → `SUCCESS`/`FAILED`；成功后即可被 REVIEW 引用，无人工确认步。
 - LLM 默认模型 `qwen3.7-plus`（`LLM_MODEL`），复用 `DASHSCOPE_API_KEY`。
 
 ### 智能审查（REVIEW）
-- 基于某版 **SUCCESS** 清单；对每个投标包单独做召回→重排→LLM 对照（N×P）。
+- 基于某版 **SUCCESS** 清单；对每个有文件的投标包单独做召回→重排→LLM 对照（N×P），空投标包不参与。
 - **召回**：仅用条目 `bidSearchJson`（多词各自召回后按 chunk 合并）；**无 bidSearch 不召回、不调对照 LLM**（走无证据规则）。
 - **重排 / 对照**：query 与招标要求正文均用条目 **`text`**（对照 LLM 为 **review-v2** 产品输出）。
-- `bidEvidence` 落库前清洗：占位文案或不在候选原文中 → 丢弃；资格无证据 → `无法判断`；评分无证据 → 建议分 0。
+- `bidEvidence` 落库前清洗：占位文案或不在候选原文中 → 丢弃；页码按匹配到的召回 chunk 回填；资格无证据 → `无法判断`；评分无证据 → 建议分 0。
 - 详情 API 按包嵌套返回 `qualificationResponses` / `scoringResponses`；`overall_verdict` 置空。
 - 有对照的条目写入 `llm_raw_json`；详情 `items[].llmRawJson` 返回；无召回未调 LLM 则为空。
 - 无召回 / 无可用证据 → 该条 `FAIL`。
 - `needHumanReview` 默认 `true`。
-- 不传 `checklistId` → 取项目下最新 SUCCESS 清单；不传 `packageIds` → 该项目全部投标包。
+- 新建审查统一由一键审查总任务内部触发；空投标包会被跳过。
 - 详情扁平返回，前端按 `packageId` → `dimensionCode`/`mainType` 分组展示。
 
 ### 一键审查（AI_REVIEW_PIPELINE）

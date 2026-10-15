@@ -4,9 +4,12 @@ import com.bidding.common.api.PageResult;
 import com.bidding.common.error.BizException;
 import com.bidding.common.error.ErrorCode;
 import com.bidding.common.port.BidPackageReviewSummaryPort;
+import com.bidding.common.port.DocumentCascadePort;
 import com.bidding.common.port.DocumentCountPort;
 import com.bidding.common.port.DocumentProjectBindPort;
 import com.bidding.common.port.OrgLookupPort;
+import com.bidding.common.port.ProjectArtifactInvalidationPort;
+import com.bidding.common.port.ProjectExpertReviewProgressPort;
 import com.bidding.common.port.ProjectReviewProgressPort;
 import com.bidding.common.port.ReviewPort;
 import com.bidding.common.security.CurrentUser;
@@ -19,6 +22,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -38,6 +42,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -52,6 +57,9 @@ class ProjectAppServiceTest {
     private PackageRepository packageRepository;
 
     @Mock
+    private DocumentCascadePort documentCascadePort;
+
+    @Mock
     private DocumentCountPort documentCountPort;
 
     @Mock
@@ -64,7 +72,13 @@ class ProjectAppServiceTest {
     private ProjectReviewProgressPort projectReviewProgressPort;
 
     @Mock
+    private ProjectExpertReviewProgressPort projectExpertReviewProgressPort;
+
+    @Mock
     private BidPackageReviewSummaryPort bidPackageReviewSummaryPort;
+
+    @Mock
+    private ProjectArtifactInvalidationPort projectArtifactInvalidationPort;
 
     @InjectMocks
     private ProjectAppService projectAppService;
@@ -235,6 +249,31 @@ class ProjectAppServiceTest {
     }
 
     @Test
+    void deleteCleansExpertReviewsBeforeProjectDeleted() {
+        when(projectRepository.findById(100L)).thenReturn(Optional.of(
+                project(100L, 2L, "市政道路改造", "ACTIVE")));
+        when(projectArtifactInvalidationPort.deleteExpertReviewsByProjectId(2L, 100L))
+                .thenReturn(1);
+        when(packageRepository.listByProjectIdAndType(100L, "BID")).thenReturn(List.of(
+                boundBid(60L, 2L, 100L, "华建集团"),
+                boundBid(61L, 2L, 100L, "中建集团")
+        ));
+
+        projectAppService.delete(100L);
+
+        InOrder inOrder = inOrder(projectRepository, projectArtifactInvalidationPort,
+                packageRepository, documentCascadePort);
+        inOrder.verify(projectRepository).findById(100L);
+        inOrder.verify(projectArtifactInvalidationPort).deleteExpertReviewsByProjectId(2L, 100L);
+        inOrder.verify(packageRepository).listByProjectIdAndType(100L, "BID");
+        inOrder.verify(documentCascadePort).softDeleteAllActiveByPackageId(60L);
+        inOrder.verify(packageRepository).updateStatus(60L, "DELETED");
+        inOrder.verify(documentCascadePort).softDeleteAllActiveByPackageId(61L);
+        inOrder.verify(packageRepository).updateStatus(61L, "DELETED");
+        inOrder.verify(projectRepository).updateStatus(100L, "DELETED");
+    }
+
+    @Test
     void listOk() {
         when(projectRepository.searchByOrgId(eq(2L), eq(""), eq(""), eq(0), eq(20)))
                 .thenReturn(List.of(project(100L, 2L, "市政道路改造", "ACTIVE")));
@@ -260,7 +299,7 @@ class ProjectAppServiceTest {
                 .thenReturn(0L);
 
         assertEquals(ProjectAppService.WORKFLOW_NEED_BID_FILES,
-                projectAppService.resolveWorkflowStatus(100L));
+                projectAppService.resolveWorkflowStatus(2L, 100L));
     }
 
     @Test
@@ -270,7 +309,7 @@ class ProjectAppServiceTest {
                 .thenReturn(1L);
 
         assertEquals(ProjectAppService.WORKFLOW_NEED_TENDER_FILES,
-                projectAppService.resolveWorkflowStatus(100L));
+                projectAppService.resolveWorkflowStatus(2L, 100L));
     }
 
     @Test
@@ -309,7 +348,7 @@ class ProjectAppServiceTest {
                 .thenReturn(1L);
 
         assertEquals(ProjectAppService.WORKFLOW_NEED_BID_FILES,
-                projectAppService.resolveWorkflowStatus(100L));
+                projectAppService.resolveWorkflowStatus(2L, 100L));
     }
 
     @Test
@@ -319,7 +358,7 @@ class ProjectAppServiceTest {
         when(projectReviewProgressPort.findLatestReviewStatus(100L)).thenReturn(null);
 
         assertEquals(ProjectAppService.WORKFLOW_READY_FOR_AI_REVIEW,
-                projectAppService.resolveWorkflowStatus(100L));
+                projectAppService.resolveWorkflowStatus(2L, 100L));
     }
 
     @Test
@@ -328,7 +367,7 @@ class ProjectAppServiceTest {
         when(projectReviewProgressPort.hasInProgressReview(100L)).thenReturn(true);
 
         assertEquals(ProjectAppService.WORKFLOW_AI_REVIEWING,
-                projectAppService.resolveWorkflowStatus(100L));
+                projectAppService.resolveWorkflowStatus(2L, 100L));
     }
 
     @Test
@@ -338,12 +377,40 @@ class ProjectAppServiceTest {
         when(projectReviewProgressPort.findLatestReviewStatus(100L))
                 .thenReturn(ReviewPort.STATUS_SUCCESS);
         assertEquals(ProjectAppService.WORKFLOW_AI_REVIEW_SUCCESS,
-                projectAppService.resolveWorkflowStatus(100L));
+                projectAppService.resolveWorkflowStatus(2L, 100L));
 
         when(projectReviewProgressPort.findLatestReviewStatus(100L))
                 .thenReturn(ReviewPort.STATUS_FAILED);
         assertEquals(ProjectAppService.WORKFLOW_AI_REVIEW_FAILED,
-                projectAppService.resolveWorkflowStatus(100L));
+                projectAppService.resolveWorkflowStatus(2L, 100L));
+    }
+
+    @Test
+    void resolveWorkflow_expertReviewingWhenAiSuccessAndExpertRunning() {
+        stubDocsReady(100L);
+        when(projectReviewProgressPort.hasInProgressReview(100L)).thenReturn(false);
+        when(projectReviewProgressPort.findLatestReviewStatus(100L))
+                .thenReturn(ReviewPort.STATUS_SUCCESS);
+        when(projectExpertReviewProgressPort.findLatestActiveByProject(2L, 100L))
+                .thenReturn(expertReviewProgress(
+                        900L, ProjectExpertReviewProgressPort.STATUS_RUNNING, 3, 1));
+
+        assertEquals(ProjectAppService.WORKFLOW_EXPERT_REVIEWING,
+                projectAppService.resolveWorkflowStatus(2L, 100L));
+    }
+
+    @Test
+    void resolveWorkflow_expertReviewSuccessWhenAiSuccessAndExpertSuccess() {
+        stubDocsReady(100L);
+        when(projectReviewProgressPort.hasInProgressReview(100L)).thenReturn(false);
+        when(projectReviewProgressPort.findLatestReviewStatus(100L))
+                .thenReturn(ReviewPort.STATUS_SUCCESS);
+        when(projectExpertReviewProgressPort.findLatestActiveByProject(2L, 100L))
+                .thenReturn(expertReviewProgress(
+                        900L, ProjectExpertReviewProgressPort.STATUS_SUCCESS, 3, 3));
+
+        assertEquals(ProjectAppService.WORKFLOW_EXPERT_REVIEW_SUCCESS,
+                projectAppService.resolveWorkflowStatus(2L, 100L));
     }
 
     @Test
@@ -403,6 +470,33 @@ class ProjectAppServiceTest {
         assertEquals(1L, item.getBidPackageUploadedCount());
         assertEquals(3L, item.getBidFileCount());
         assertEquals(ProjectAppService.WORKFLOW_READY_FOR_AI_REVIEW, item.getWorkflowStatus());
+    }
+
+    @Test
+    void listOk_fillsExpertReviewProgressColumns() {
+        when(projectRepository.searchByOrgId(eq(2L), eq(""), eq(""), eq(0), eq(20)))
+                .thenReturn(List.of(project(100L, 2L, "市政道路改造", "ACTIVE")));
+        when(projectRepository.countSearchByOrgId(eq(2L), eq(""), eq(""))).thenReturn(1L);
+        when(packageRepository.findByProjectIdAndType(100L, "TENDER"))
+                .thenReturn(Optional.of(boundTender(50L, 2L, 100L, "包")));
+        stubDocsReadyForList(100L);
+        when(projectReviewProgressPort.hasInProgressReview(100L)).thenReturn(false);
+        when(projectReviewProgressPort.findLatestReviewStatus(100L))
+                .thenReturn(ReviewPort.STATUS_SUCCESS);
+        when(projectExpertReviewProgressPort.findLatestActiveByProject(2L, 100L))
+                .thenReturn(expertReviewProgress(
+                        900L, ProjectExpertReviewProgressPort.STATUS_RUNNING, 3, 1));
+
+        PageResult<ProjectAppService.ProjectSummary> page =
+                projectAppService.list("", "", "", 1, 20);
+
+        ProjectAppService.ProjectSummary item = page.getItems().get(0);
+        assertEquals(ProjectAppService.WORKFLOW_EXPERT_REVIEWING, item.getWorkflowStatus());
+        assertEquals("专家评审中", item.getWorkflowMessage());
+        assertEquals(900L, item.getExpertReviewId());
+        assertEquals(ProjectExpertReviewProgressPort.STATUS_RUNNING, item.getExpertReviewStatus());
+        assertEquals(3, item.getExpertCount());
+        assertEquals(1, item.getSubmittedExpertCount());
     }
 
     @Test
@@ -509,5 +603,16 @@ class ProjectAppServiceTest {
         return new BizPackage(id, orgId, projectId, "BID", name,
                 "联系人", "13800000000", null, null, null, null,
                 "ACTIVE", 10L, Instant.now(), Instant.now());
+    }
+
+    private static ProjectExpertReviewProgressPort.Summary expertReviewProgress(
+            long reviewId, String status, int expertCount, int submittedExpertCount) {
+        ProjectExpertReviewProgressPort.Summary summary =
+                new ProjectExpertReviewProgressPort.Summary();
+        summary.setReviewId(reviewId);
+        summary.setStatus(status);
+        summary.setExpertCount(expertCount);
+        summary.setSubmittedExpertCount(submittedExpertCount);
+        return summary;
     }
 }

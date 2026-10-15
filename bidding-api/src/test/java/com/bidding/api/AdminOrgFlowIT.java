@@ -176,7 +176,7 @@ class AdminOrgFlowIT {
                                   "displayName": "组织用户B",
                                   "phone": "13910000002",
                                   "email": "org_user_b@example.com",
-                                  "roleCodes": ["BIDDER"]
+                                  "roleCodes": ["TENDERER"]
                                 }
                                 """.formatted(orgId)))
                 .andExpect(status().isOk())

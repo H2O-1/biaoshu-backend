@@ -12,6 +12,7 @@ public class Org {
     private final String code;
     private final String name;
     private final String city;
+    private final String orgType;
     private final String status;
     private final Long createdBy;
     private final Instant createdAt;
@@ -21,6 +22,7 @@ public class Org {
                String code,
                String name,
                String city,
+               String orgType,
                String status,
                Long createdBy,
                Instant createdAt,
@@ -29,10 +31,22 @@ public class Org {
         this.code = code;
         this.name = name;
         this.city = city;
+        this.orgType = orgType;
         this.status = status;
         this.createdBy = createdBy;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
+    }
+
+    public Org(long id,
+               String code,
+               String name,
+               String city,
+               String status,
+               Long createdBy,
+               Instant createdAt,
+               Instant updatedAt) {
+        this(id, code, name, city, "TENDERER", status, createdBy, createdAt, updatedAt);
     }
 
     public long getId() {
@@ -49,6 +63,10 @@ public class Org {
 
     public String getCity() {
         return city;
+    }
+
+    public String getOrgType() {
+        return orgType;
     }
 
     public String getStatus() {

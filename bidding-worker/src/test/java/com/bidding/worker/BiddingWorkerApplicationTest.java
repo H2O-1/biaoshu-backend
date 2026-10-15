@@ -101,13 +101,14 @@ class BiddingWorkerApplicationTest {
         assertEquals(true, valueAt(bidding, "index", "worker-enabled"));
         assertEquals(true, valueAt(bidding, "checklist", "worker-enabled"));
         assertEquals(true, valueAt(bidding, "review", "worker-enabled"));
+        assertEquals(true, valueAt(bidding, "tender-analysis", "worker-enabled"));
+        assertEquals(true, valueAt(bidding, "bid-simulation-audit", "worker-enabled"));
         assertEquals(true, valueAt(bidding, "ai-review-pipeline", "worker-enabled"));
     }
 
     @Test
-    void workerYmlKeepsRecoveryDisabledByDefault() {
+    void workerYmlKeepsBootstrapAdminDisabledByDefault() {
         Map<String, Object> bidding = biddingSection(loadYamlFromClasspath("application.yml"));
-        assertEquals("${STALE_RECOVERY_ENABLED:false}", valueAt(bidding, "recovery", "enabled"));
         assertEquals(Boolean.FALSE, valueAt(bidding, "bootstrap-admin", "enabled"));
     }
 
@@ -129,7 +130,7 @@ class BiddingWorkerApplicationTest {
     }
 
     @Test
-    void apiYmlDisablesAllPollersAndRecoveryByDefault() throws Exception {
+    void apiYmlDisablesAllPollersByDefault() throws Exception {
         Path apiYml = Path.of("..", "bidding-api", "src", "main", "resources", "application.yml");
         assertTrue(Files.exists(apiYml));
         Map<String, Object> bidding;
@@ -139,9 +140,12 @@ class BiddingWorkerApplicationTest {
         assertEquals("${INDEX_WORKER_ENABLED:false}", valueAt(bidding, "index", "worker-enabled"));
         assertEquals("${CHECKLIST_WORKER_ENABLED:false}", valueAt(bidding, "checklist", "worker-enabled"));
         assertEquals("${REVIEW_WORKER_ENABLED:false}", valueAt(bidding, "review", "worker-enabled"));
+        assertEquals("${TENDER_ANALYSIS_WORKER_ENABLED:false}",
+                valueAt(bidding, "tender-analysis", "worker-enabled"));
+        assertEquals("${BID_SIMULATION_AUDIT_WORKER_ENABLED:false}",
+                valueAt(bidding, "bid-simulation-audit", "worker-enabled"));
         assertEquals("${AI_REVIEW_PIPELINE_WORKER_ENABLED:false}",
                 valueAt(bidding, "ai-review-pipeline", "worker-enabled"));
-        assertEquals("${STALE_RECOVERY_ENABLED:false}", valueAt(bidding, "recovery", "enabled"));
     }
 
     private static Map<String, Object> loadYamlFromClasspath(String name) {

@@ -170,7 +170,7 @@ class AiReviewPipelineJobExecutorTest {
         assertTrue(executor.claimAndRunOnce(WORKER));
 
         verify(jobPort).failPipeline(eq(JOB_ID), eq(WORKER), eq(JobPort.PHASE_INDEX_WAIT),
-                contains("文件索引失败"));
+                eq("文件解析失败：doc-1.pdf"));
     }
 
     @Test

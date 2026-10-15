@@ -1,12 +1,12 @@
 # 招投标后端 · API（招标解析）
 
 > 本册范围：**独立招标文件上传解析**。  
-> 用户上传一个或多个招标文件，后端自动解析基础信息、资格要求、评分标准；不创建项目、不上传投标文件、不发起审查。  
+> 用户上传一个或多个招标文件，后端自动解析基础信息、资格要求、评分标准、逻辑问题、错别字识别；不创建项目、不上传投标文件、不发起审查。  
 > 文件 / 标包通用能力见：[文件与标包](./API-文件与标包.md)  
 > 任务进度见：[任务进度 SSE](./API-任务进度SSE.md)  
 > 账号 / 组织 / 项目见：[账号组织项目](./API-账号组织项目.md) · [总索引](./API.md)  
 > Base URL（本地）：`http://localhost:8080`  
-> 更新：2026-08-11
+> 更新：2026-08-20
 
 ## 通用约定（摘要）
 
@@ -15,7 +15,7 @@
 - 本册业务接口角色：**仅 `TENDERER`**；平台管理员无招标方角色 → **403**。
 - 跨组织资源一律 **40400**（不暴露是否存在）。
 - 任务进度：复用 `GET /api/jobs/{jobId}` 短轮询，或 `GET /api/jobs/{jobId}/events` SSE。
-- 文件解析：复用现有 INDEX；扫描版 PDF 无文本时可能失败，本期不做 OCR。
+- 文件解析：复用现有 INDEX；OCR 启用时扫描/混排 PDF 可在索引阶段识别文本，OCR 未启用或识别失败时索引失败。
 
 ---
 
@@ -30,7 +30,11 @@
 | 基础信息 | 招标人、招标代理、预算金额、投标截止时间、项目简介、项目背景、项目概况 |
 | 资格要求 | 沿用 `Q1` / `Q2` 编号 |
 | 评分标准 | 沿用 `S1` / `S2` 编号 |
+| 逻辑问题 | 全文 chunk 分批扫描后合并，沿用 `逻辑问题-1` / `逻辑问题-2` 编号 |
+| 错别字识别 | 全文 chunk 分批扫描后合并，沿用 `错别字-1` / `错别字-2` 编号 |
 | 查看原文片段 | 返回 evidence，前端可通过 chunk / page / quote 定位原文片段 |
+| 重试链路追踪 | 重试解析生成新记录，并返回来源记录与首次创建时间 |
+| 导出结果 | 成功解析后可导出 xlsx 结果文件 |
 
 ---
 
@@ -51,6 +55,8 @@
 |----------|------|
 | `QUALIFICATION` | 资格要求 |
 | `SCORING` | 评分标准 |
+| `LOGIC_ISSUE` | 逻辑问题 |
+| `TYPO` | 错别字识别 |
 
 ---
 
@@ -118,7 +124,7 @@
 
 ### 3.2 历史记录
 
-`GET /api/tender-analyses?page=1&size=20&keyword=`
+`GET /api/tender-analyses?page=1&size=20&keyword=&status=`
 
 查询当前登录招标方组织下的招标解析历史记录。按创建时间倒序返回。
 
@@ -127,6 +133,7 @@
 | 参数 | 类型 | 必填 | 默认 | 说明 |
 |------|------|------|------|------|
 | `keyword` | string | 否 | `""` | 按任务名称 / 招标人 / 招标代理模糊搜 |
+| `status` | string | 否 | `""` | 解析状态过滤；空=全部，支持 `BUILDING` / `SUCCESS` / `FAILED` |
 | `page` | number | 否 | 1 | 页码，从 1 起 |
 | `size` | number | 否 | 20 | 每页条数，最大 100 |
 
@@ -147,6 +154,9 @@
         "jobId": 101,
         "documentIds": [7, 8],
         "fileCount": 2,
+        "requirementCount": 12,
+        "issueCount": 3,
+        "tenderNo": "ZHCS-2024-001",
         "tenderer": "上海智慧园区发展有限公司",
         "agency": "中建咨询（招标代理）",
         "budgetAmountText": "￥12,800,000.00（含税最高限价）",
@@ -154,6 +164,8 @@
         "bidDeadlineAt": "2026-08-15T09:00:00Z",
         "errorMessage": null,
         "createdBy": 10,
+        "sourceAnalysisId": null,
+        "originalCreatedAt": "2026-08-11T08:30:00Z",
         "createdAt": "2026-08-11T08:30:00Z",
         "updatedAt": "2026-08-11T08:35:00Z"
       }
@@ -169,12 +181,20 @@
 |------|------|
 | `documentIds` | 参与解析的招标文档 ID 数组 |
 | `fileCount` | 由 `documentIds` 数组长度派生 |
+| `requirementCount` | 招标要求数量；`QUALIFICATION` + `SCORING` 条目数 |
+| `issueCount` | 发现问题数量；`LOGIC_ISSUE` + `TYPO` 条目数 |
+| `status` | 解析状态：`BUILDING` 解析中 / `SUCCESS` 解析完成 / `FAILED` 解析失败 |
+| `errorMessage` | 失败提示；仅返回用户可见文案，不返回 LLM / HTTP / timeout 等底层异常 |
 | `jobId` | 解析任务 ID；`BUILDING` 时可用于查询进度 |
+| `sourceAnalysisId` | 重试解析来源记录 ID；首次创建为空 |
+| `originalCreatedAt` | 首次创建时间；首次创建时等于 `createdAt`，重试解析记录继承来源记录的首次创建时间 |
+| `createdAt` | 当前这次解析任务的创建时间；重试解析会生成新记录，因此该字段会变成本次重试时间 |
 
 **常见错误**
 
 | code | 场景 |
 |------|------|
+| 40000 | `status` 不在 `BUILDING` / `SUCCESS` / `FAILED` 范围内 |
 | 40100 | 未登录或 token 失效 |
 | 40300 | 当前用户不是招标方 |
 
@@ -198,7 +218,12 @@
     "packageId": 50,
     "documentIds": [7, 8],
     "fileCount": 2,
+    "sourceAnalysisId": null,
+    "originalCreatedAt": "2026-08-11T08:30:00Z",
+    "createdAt": "2026-08-11T08:30:00Z",
+    "updatedAt": "2026-08-11T08:35:00Z",
     "basicInfo": {
+      "tenderNo": "ZHCS-2024-001",
       "tenderer": "上海智慧园区发展有限公司",
       "agency": "中建咨询（招标代理）",
       "budgetAmountText": "￥12,800,000.00（含税最高限价）",
@@ -246,6 +271,81 @@
         "createdAt": "2026-08-11T08:35:00Z"
       }
     ],
+    "logicIssueItems": [
+      {
+        "id": 30,
+        "analysisId": 1,
+        "itemType": "LOGIC_ISSUE",
+        "requirementCode": "逻辑问题-1",
+        "title": "业绩门槛与项目预算规模不匹配",
+        "content": "项目预算金额为1280万元，但类似业绩要求达到5000万元，门槛明显高于项目规模。建议补充设置依据，或调整为与项目规模相称的合理区间。",
+        "subType": "THRESHOLD_INCONSISTENCY",
+        "severity": "MEDIUM",
+        "severityLabel": "中风险",
+        "issueType": "THRESHOLD_INCONSISTENCY",
+        "issueTypeLabel": "门槛条件逻辑",
+        "suggestion": "建议补充设置依据，或调整为与项目规模相称的合理区间。",
+        "sourceExcerpt": "预算金额为人民币 1280 万元；近三年需具有 5000 万元以上类似项目业绩",
+        "pageNo": 5,
+        "chunkIds": [9001, 9010],
+        "evidence": [
+          {
+            "chunkId": 9001,
+            "pageNo": 1,
+            "quote": "预算金额为人民币 1280 万元",
+            "severity": "MEDIUM",
+            "issueType": "THRESHOLD_INCONSISTENCY",
+            "suggestion": "建议补充设置依据，或调整为与项目规模相称的合理区间。"
+          },
+          {
+            "chunkId": 9010,
+            "pageNo": 5,
+            "quote": "近三年需具有 5000 万元以上类似项目业绩",
+            "severity": "MEDIUM",
+            "issueType": "THRESHOLD_INCONSISTENCY",
+            "suggestion": "建议补充设置依据，或调整为与项目规模相称的合理区间。"
+          }
+        ],
+        "sortOrder": 0,
+        "createdAt": "2026-08-11T08:35:00Z"
+      }
+    ],
+    "typoItems": [
+      {
+        "id": 40,
+        "analysisId": 1,
+        "itemType": "TYPO",
+        "requirementCode": "错别字-1",
+        "title": "“按装调试”应为“安装调试”",
+        "content": "招标范围条款存在错别字。建议：更正为“安装调试”。",
+        "subType": null,
+        "severity": "LOW",
+        "severityLabel": "低风险",
+        "issueType": "TYPO",
+        "issueTypeLabel": "错别字",
+        "suggestion": "更正为“安装调试”。",
+        "wrongText": "按装调试",
+        "suggestedText": "安装调试",
+        "confidence": "HIGH",
+        "confidenceLabel": "高置信",
+        "sourceExcerpt": "招标范围条款“按装调试”存在错别字。",
+        "pageNo": 12,
+        "chunkIds": [9015],
+        "evidence": [
+          {
+            "chunkId": 9015,
+            "pageNo": 12,
+            "quote": "招标范围条款“按装调试”存在错别字。",
+            "wrongText": "按装调试",
+            "suggestedText": "安装调试",
+            "confidence": "HIGH",
+            "suggestion": "更正为“安装调试”。"
+          }
+        ],
+        "sortOrder": 0,
+        "createdAt": "2026-08-11T08:35:00Z"
+      }
+    ],
     "basicInfoRawJson": "{}",
     "checklistRawJson": "{}"
   }
@@ -257,8 +357,19 @@
 | `basicInfo.evidence` | 基础信息证据数组，用于“查看原文片段” |
 | `qualificationItems` | 资格要求列表，按 `sortOrder/id` 升序 |
 | `scoringItems` | 评分标准列表，按 `sortOrder/id` 升序 |
+| `logicIssueItems` | 逻辑问题列表，按 `sortOrder/id` 升序；由全文 chunk 分批扫描候选合并生成 |
+| `typoItems` | 错别字识别列表，按 `sortOrder/id` 升序；由全文 chunk 分批扫描候选合并生成 |
 | `items[].chunkIds` | 来源 chunk ID 数组 |
 | `items[].evidence` | 条目原文证据数组，用于“查看原文片段” |
+| `items[].severity` | 风险等级：`HIGH` / `MEDIUM` / `LOW`；逻辑问题从 evidence 派生，错别字默认 `LOW` |
+| `items[].severityLabel` | 风险等级中文：`高风险` / `中风险` / `低风险` |
+| `items[].issueType` | 问题类型；逻辑问题为 LLM 输出的类型，错别字为 `TYPO` |
+| `items[].issueTypeLabel` | 问题类型中文，如 `资格与废标逻辑` / `门槛条件逻辑` / `错别字` |
+| `items[].suggestion` | 修改建议；从 evidence 中的 `suggestion` 派生 |
+| `items[].wrongText` | 错别字原文，仅 `TYPO` 返回 |
+| `items[].suggestedText` | 建议修改文字，仅 `TYPO` 返回 |
+| `items[].confidence` | 错别字置信度：`HIGH` / `MEDIUM` / `LOW`，仅 `TYPO` 返回 |
+| `items[].confidenceLabel` | 错别字置信度中文：`高置信` / `中置信` / `低置信`，仅 `TYPO` 返回 |
 | `basicInfoRawJson` | 基础信息抽取 LLM 原始输出，仅详情返回 |
 | `checklistRawJson` | 资格/评分抽取 LLM 原始输出，仅详情返回 |
 
@@ -301,6 +412,79 @@
 | 40300 | 当前用户不是招标方 |
 | 40400 | 解析记录不存在、不属于本组织或已删除 |
 
+### 3.5 重试解析
+
+`POST /api/tender-analyses/{analysisId}/rerun`
+
+重试一条招标解析记录。后端会将旧记录标记为 `OBSOLETE`，复用原包与原文件重新创建一条 `BUILDING` 记录，并重新创建 `TENDER_ANALYSIS` 总任务。
+
+新记录的 `createdAt` 表示本次重试任务创建时间；列表 / 详情会额外返回 `sourceAnalysisId` 和 `originalCreatedAt`，用于前端展示来源记录与首次创建时间。
+
+**成功响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "analysisId": 2,
+    "jobId": 102,
+    "packageId": 50,
+    "documentIds": [7, 8],
+    "indexJobIds": [],
+    "files": []
+  }
+}
+```
+
+**常见错误**
+
+| code | 场景 |
+|------|------|
+| 40000 | 原记录缺少文档信息 |
+| 40100 | 未登录或 token 失效 |
+| 40300 | 当前用户不是招标方 |
+| 40400 | 解析记录不存在、不属于本组织 |
+| 40900 | 原记录仍处于解析中 |
+
+### 3.6 导出解析结果
+
+`GET /api/tender-analyses/{analysisId}/export`
+
+导出一条招标解析结果。仅 `SUCCESS` 状态可导出，响应为 xlsx 二进制附件，不使用统一 JSON 包装。
+
+**响应头**
+
+```http
+Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+Content-Disposition: attachment; filename*=UTF-8''...xlsx
+```
+
+**文件名**
+
+`{解析名称}-招标解析结果.xlsx`
+
+**工作表**
+
+| sheet | 内容 |
+|------|------|
+| 概览 | 解析 ID、任务名称、状态、文件数量、资格要求数量、评分标准数量、问题数量、创建 / 更新时间 |
+| 源文件 | 文档 ID、标包 ID、文件名、扩展名、索引状态 |
+| 基础信息 | 招标人、招标代理、预算金额、投标截止时间、项目简介、项目背景、项目概况及 evidence |
+| 资格要求 | 编号、标题、内容、分类、页码、chunkIds、原文片段 |
+| 评分标准 | 编号、标题、内容、满分、分项合计一致性、分类、页码、chunkIds、原文片段 |
+| 逻辑问题 | 编号、标题、内容、严重程度、问题类型、修改建议、页码、chunkIds、原文片段 |
+| 错别字 | 编号、错误文本、建议文本、置信度、修改建议、页码、chunkIds、原文片段 |
+
+**常见错误**
+
+| code | 场景 |
+|------|------|
+| 40100 | 未登录或 token 失效 |
+| 40300 | 当前用户不是招标方 |
+| 40400 | 解析记录不存在、不属于本组织或已删除 |
+| 40900 | 解析未成功，不能导出 |
+
 ---
 
 ## 隐藏逻辑（本册必读）
@@ -317,13 +501,30 @@
 - 创建解析任务后，后端先为文件创建 INDEX 子任务，再由 `TENDER_ANALYSIS` 任务汇总执行。
 - 进度查询复用现有 job 接口，不新增专用进度接口。
 - 任一文件 INDEX 失败，本次招标解析整体失败。
+- LLM / HTTP / timeout / JSON 解析等底层异常只写后端日志；`errorMessage` 统一返回用户可见文案，如 `解析失败，请稍后重试`。
 - 当前 `TENDER_ANALYSIS` Worker 已接入完整解析主流程：全部文件索引成功后，读取本次文档 chunk，调用 LLM 抽取基础信息、资格要求、评分标准，并保存基础信息 evidence 与条目 evidence。
 - Worker 配置：`bidding.tender-analysis.worker-enabled`、`bidding.tender-analysis.poll-ms`、`bidding.tender-analysis.worker-id`。
+- 任务使用数据库轻量租约：服务重启或 Worker 异常退出后，`RUNNING` 且租约过期的解析任务可被新 Worker 接管重跑，执行中进度更新会自动续租。
 
 ### 抽取结果
 
+- `招标编号` 返回为 `tenderNo`；证据数组使用 `field: "tenderNo"`。
 - `预算金额` 不拆分为预算金额 / 最高限价，本期统一返回 `budgetAmountText`。
 - `投标截止时间` 返回原文 `bidDeadlineText`；`bidDeadlineAt` 只接受 LLM 返回的 ISO-8601 UTC 时间，无法解析则为 `null`。
 - 资格要求和评分标准沿用现有 `Q1` / `S1` 编号规则。
-- 前端“查看原文片段”依赖 evidence 中的 chunk / page / quote 信息。
+- 逻辑问题沿用 `逻辑问题-1` / `逻辑问题-2` 编号规则。
+- 错别字识别沿用 `错别字-1` / `错别字-2` 编号规则。
+- 前端“查看原文片段”依赖 evidence 中的 chunk / page / quote 信息；`pageNo` 由后端根据 `chunkId` 从文档切块表回填，不使用 LLM 返回的页码。
+- PDF 切块页码为真实 PDF 页序号；DOCX 无法稳定取得 Word 自动分页，`pageNo` 只能代表后端抽取到的逻辑页，要求精确页码时建议上传 PDF。
 - 资格要求 / 评分标准复用建清单拆分链路：资格和评分分开抽取，再生成条目检索词与招标侧原文 evidence；本接口不发起投标文件审查。
+- 逻辑问题 / 错别字识别不复用建清单召回链路；文件 INDEX 成功后读取本次文档 chunk，按批次交给 LLM 扫描候选问题，再由后端合并去重后返回。
+- 本期不做法律风险识别，不接入法律库。
+- 导出解析结果复用详情聚合数据与内部包文件列表，只允许 `SUCCESS` 记录导出。
+- 重试解析不会改旧记录 `createdAt`；旧记录标记为 `OBSOLETE`，新记录使用新的 `createdAt`，并通过 `sourceAnalysisId` / `originalCreatedAt` 关联首次创建信息。
+
+## 更新记录
+
+| 日期 | 说明 |
+|------|------|
+| 2026-08-21 | 解析失败提示脱敏：接口不返回 LLM / HTTP / timeout 等底层异常 |
+| 2026-08-21 | evidence 页码统一由后端根据 `chunkId` 从文档切块回填，避免 LLM 将 chunkId 误写为 pageNo |

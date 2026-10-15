@@ -46,6 +46,7 @@ public class AdminDashboardAppService {
 
         DashboardSummary summary = new DashboardSummary();
         summary.setTendererOrgCount(orgRepository.countTendererOrgs());
+        summary.setBidderOrgCount(orgRepository.countBidderOrgs());
         summary.setPlatformAdminActiveCount(
                 userRepository.countPlatformAdminsByStatus(STATUS_ACTIVE));
         summary.setPlatformAdminDisabledCount(
@@ -75,6 +76,7 @@ public class AdminDashboardAppService {
     /** 平台首页汇总。 */
     public static class DashboardSummary {
         private long tendererOrgCount;
+        private long bidderOrgCount;
         private long platformAdminActiveCount;
         private long platformAdminDisabledCount;
         private long reviewSuccessCount;
@@ -88,6 +90,14 @@ public class AdminDashboardAppService {
 
         public void setTendererOrgCount(long tendererOrgCount) {
             this.tendererOrgCount = tendererOrgCount;
+        }
+
+        public long getBidderOrgCount() {
+            return bidderOrgCount;
+        }
+
+        public void setBidderOrgCount(long bidderOrgCount) {
+            this.bidderOrgCount = bidderOrgCount;
         }
 
         public long getPlatformAdminActiveCount() {

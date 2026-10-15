@@ -50,6 +50,14 @@ bidding:
     # 业务校验上限，须 ≤ spring.servlet.multipart.max-file-size
     max-size-bytes: ${UPLOAD_MAX_SIZE_BYTES:104857600}
     max-files-per-package: 5
+  # OCR：默认关闭；启用后由 INDEX 阶段调用外置 OCR 服务增强扫描 PDF 文本抽取
+  ocr:
+    enabled: ${BIDDING_OCR_ENABLED:false}
+    base-url: ${BIDDING_OCR_BASE_URL:}
+    min-total-chars: ${BIDDING_OCR_MIN_TOTAL_CHARS:50}
+    min-page-chars: ${BIDDING_OCR_MIN_PAGE_CHARS:30}
+    connect-timeout-ms: ${BIDDING_OCR_CONNECT_TIMEOUT_MS:5000}
+    read-timeout-ms: ${BIDDING_OCR_READ_TIMEOUT_MS:120000}
   # INDEX：fake=假向量；real=百炼 text-embedding-v4
   # worker-enabled 默认 false：任务执行在独立 bidding-worker 进程；单进程调试用 local profile 或环境变量打开
   index:
@@ -113,6 +121,16 @@ bidding:
     worker-enabled: ${TENDER_ANALYSIS_WORKER_ENABLED:false}
     poll-ms: ${TENDER_ANALYSIS_POLL_MS:3000}
     worker-id: ${TENDER_ANALYSIS_WORKER_ID:}
+  # 投标模拟审核 BID_SIMULATION_AUDIT（worker-enabled 默认 false，同 index 说明）
+  bid-simulation-audit:
+    worker-enabled: ${BID_SIMULATION_AUDIT_WORKER_ENABLED:false}
+    poll-ms: ${BID_SIMULATION_AUDIT_POLL_MS:3000}
+    worker-id: ${BID_SIMULATION_AUDIT_WORKER_ID:}
+  # 专家评审截止自动提交（worker-enabled 默认 false，同 index 说明）
+  expert-review:
+    deadline-worker-enabled: ${EXPERT_REVIEW_DEADLINE_WORKER_ENABLED:false}
+    deadline-poll-ms: ${EXPERT_REVIEW_DEADLINE_POLL_MS:60000}
+    deadline-batch-size: ${EXPERT_REVIEW_DEADLINE_BATCH_SIZE:20}
   # 任务进度 SSE（GET /api/jobs/{id}/events）；短轮询 GET /api/jobs/{id} 仍保留
   job:
     sse:
@@ -133,10 +151,6 @@ bidding:
     child-wait-timeout-ms: ${AI_REVIEW_PIPELINE_CHILD_WAIT_TIMEOUT_MS:7200000}
     max-retries: ${AI_REVIEW_PIPELINE_MAX_RETRIES:3}
     retry-backoff-ms: ${AI_REVIEW_PIPELINE_RETRY_BACKOFF_MS:10000}
-  # 僵尸子任务回收：只在 Worker 进程开启；总任务由租约过期自动接管
-  recovery:
-    enabled: ${STALE_RECOVERY_ENABLED:false}
-    stale-minutes: ${STALE_RECOVERY_STALE_MINUTES:30}
   # 抽取 / 对照 LLM（compatible-mode chat）
   llm:
     base-url: ${LLM_BASE_URL:${EMBEDDING_BASE_URL:https://ws-jbb2t4ahvyzwxo9b.cn-beijing.maas.aliyuncs.com/compatible-mode/v1}}

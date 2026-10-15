@@ -211,6 +211,58 @@ class JdbcJobRepositoryLeaseTest {
     }
 
     @Test
+    void normalPendingClaimInitializesLeaseWithoutPhase() {
+        insertNormalJob(JobPort.STATUS_PENDING);
+
+        Optional<JobPort.JobRef> claimed = claimNormalInTx("w1");
+
+        assertTrue(claimed.isPresent());
+        JobPort.JobRef job = claimed.get();
+        assertEquals(JobPort.STATUS_RUNNING, job.getStatus());
+        assertNull(job.getPhase(), "普通任务不使用阶段状态机");
+        assertEquals("w1", job.getWorkerId());
+        assertNotNull(job.getStartedAt());
+        assertNotNull(job.getLeaseExpiresAt());
+        assertTrue(job.getLeaseExpiresAt().isAfter(Instant.now()));
+    }
+
+    @Test
+    void normalUnexpiredLeaseBlocksOtherWorkerAndExpiredLeaseAllowsTakeover() {
+        long jobId = insertNormalJob(JobPort.STATUS_PENDING);
+        Optional<JobPort.JobRef> first = claimNormalInTx("w1");
+        assertTrue(first.isPresent());
+        Instant firstStartedAt = first.get().getStartedAt();
+
+        assertTrue(claimNormalInTx("w2").isEmpty(), "普通任务租约未过期时不可接管");
+
+        jdbc.update("UPDATE biz_job SET lease_expires_at = ? WHERE id = ?",
+                Timestamp.from(Instant.now().minusSeconds(1)), jobId);
+        Optional<JobPort.JobRef> takeover = claimNormalInTx("w2");
+
+        assertTrue(takeover.isPresent(), "普通任务租约过期后可由新 Worker 接管");
+        assertEquals("w2", takeover.get().getWorkerId());
+        assertEquals(firstStartedAt, takeover.get().getStartedAt());
+        assertTrue(takeover.get().getLeaseExpiresAt().isAfter(Instant.now()));
+    }
+
+    @Test
+    void runningProgressRenewsNormalLease() {
+        long jobId = insertNormalJob(JobPort.STATUS_PENDING);
+        Optional<JobPort.JobRef> claimed = claimNormalInTx("w1");
+        assertTrue(claimed.isPresent());
+        jdbc.update("UPDATE biz_job SET lease_expires_at = ? WHERE id = ?",
+                Timestamp.from(Instant.now().plusSeconds(5)), jobId);
+
+        repository.markRunningProgress(jobId, 50, "处理中");
+
+        JobPort.JobRef renewed = repository.findById(jobId).orElseThrow();
+        assertEquals(50, renewed.getProgress());
+        assertEquals("处理中", renewed.getMessage());
+        assertTrue(renewed.getLeaseExpiresAt().isAfter(Instant.now().plusSeconds(60)),
+                "进度更新应延长普通任务租约");
+    }
+
+    @Test
     void jobWithFutureNextRunAtIsNotClaimable() {
         long jobId = insertPipelineJob(JobPort.STATUS_PENDING, null);
         jdbc.update("UPDATE biz_job SET next_run_at = ? WHERE id = ?",
@@ -615,6 +667,11 @@ class JdbcJobRepositoryLeaseTest {
                 repository.claimNextRunnablePipeline(TYPE, workerId, 60));
     }
 
+    private Optional<JobPort.JobRef> claimNormalInTx(String workerId) {
+        return txTemplate.execute(tx ->
+                repository.claimNextRunnable(JobPort.TYPE_TENDER_ANALYSIS, workerId));
+    }
+
     private static long insertPipelineJob(String status, String phase) {
         return jdbc.queryForObject(
                 "INSERT INTO biz_job (org_id, project_id, type, status, progress, payload_json, "
@@ -622,6 +679,15 @@ class JdbcJobRepositoryLeaseTest {
                         + "VALUES (2, 100, ?, ?, 0, '{\"projectId\":100}', 0, 10, "
                         + "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?) RETURNING id",
                 Long.class, TYPE, status, phase);
+    }
+
+    private static long insertNormalJob(String status) {
+        return jdbc.queryForObject(
+                "INSERT INTO biz_job (org_id, project_id, type, status, progress, payload_json, "
+                        + "retry_count, created_by, created_at, updated_at) "
+                        + "VALUES (2, 100, ?, ?, 0, '{\"analysisId\":50}', 0, 10, "
+                        + "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) RETURNING id",
+                Long.class, JobPort.TYPE_TENDER_ANALYSIS, status);
     }
 
     /** 在指定库直接插入一键审查任务（绕开应用层，验证数据库唯一约束本身）。 */

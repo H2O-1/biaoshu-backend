@@ -141,11 +141,27 @@ class JobAppServiceTest {
     }
 
     @Test
+    void getJobExposesBidSimulationAuditId() {
+        UserContext.set(new CurrentUser(10L, 2L, "bidder01", Set.of("BIDDER"), 0, false));
+        JobPort.JobRef job = new JobPort.JobRef();
+        job.setId(56L);
+        job.setOrgId(2L);
+        job.setType(JobPort.TYPE_BID_SIMULATION_AUDIT);
+        job.setStatus(JobPort.STATUS_SUCCESS);
+        job.setPayloadJson("{\"auditId\":55,\"bidPackageId\":88}");
+        when(jobPort.findById(56L)).thenReturn(Optional.of(job));
+
+        JobAppService.JobSummary summary = jobAppService.getJob(56L);
+
+        assertEquals(Long.valueOf(55L), summary.getAuditId());
+    }
+
+    @Test
     void claimAndMarkSuccess() {
         JobPort.JobRef running = new JobPort.JobRef();
         running.setId(55L);
         running.setStatus(JobPort.STATUS_RUNNING);
-        when(jobPort.claimNextPending(JobPort.TYPE_INDEX, "w1")).thenReturn(Optional.of(running));
+        when(jobPort.claimNextRunnable(JobPort.TYPE_INDEX, "w1")).thenReturn(Optional.of(running));
 
         Optional<JobPort.JobRef> claimed = jobAppService.claimNextIndex("w1");
         assertTrue(claimed.isPresent());

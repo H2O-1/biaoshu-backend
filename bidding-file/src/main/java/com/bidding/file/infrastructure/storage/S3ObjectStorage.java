@@ -22,7 +22,7 @@ import java.net.URI;
  */
 @Component
 @ConditionalOnProperty(name = "bidding.storage.type", havingValue = "s3")
-public class S3ObjectStorage implements ObjectStoragePort {
+public class S3ObjectStorage implements ObjectStoragePort, com.bidding.common.port.BinaryObjectStoragePort {
 
     private final S3Client s3Client;
     private final String bucket;

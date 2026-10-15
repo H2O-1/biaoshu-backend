@@ -180,6 +180,57 @@ public class ReviewComparePipeline {
         return result;
     }
 
+    /**
+     * 投标模拟审核入口：不依赖项目和清单落库，直接用本次抽取出的招标侧要求草稿审查一个内部投标包。
+     */
+    public PipelineResult runSimulation(
+            long orgId,
+            List<RequirementChecklistPort.ItemDraft> requirements,
+            long bidPackageId,
+            int recallTopK,
+            int rerankTopN,
+            ProgressCallback progress) {
+        List<RequirementChecklistPort.ItemView> views = toItemViews(requirements);
+        List<Long> packageIds = new ArrayList<>();
+        packageIds.add(bidPackageId);
+        return run(orgId, 0L, views, packageIds, recallTopK, rerankTopN, progress);
+    }
+
+    private List<RequirementChecklistPort.ItemView> toItemViews(
+            List<RequirementChecklistPort.ItemDraft> drafts) {
+        List<RequirementChecklistPort.ItemView> views = new ArrayList<>();
+        if (drafts == null) {
+            return views;
+        }
+        for (int i = 0; i < drafts.size(); i++) {
+            RequirementChecklistPort.ItemDraft draft = drafts.get(i);
+            if (draft == null) {
+                continue;
+            }
+            RequirementChecklistPort.ItemView view = new RequirementChecklistPort.ItemView();
+            view.setId(i + 1L);
+            view.setChecklistId(0L);
+            view.setDimensionCode(draft.getDimensionCode());
+            view.setText(draft.getText());
+            view.setSourceExcerpt(draft.getSourceExcerpt());
+            view.setPageNo(draft.getPageNo());
+            view.setChunkIdsJson(draft.getChunkIdsJson());
+            view.setMust(draft.isMust());
+            view.setSortOrder(draft.getSortOrder());
+            view.setTitle(draft.getTitle());
+            view.setMainType(draft.getMainType());
+            view.setSubType(draft.getSubType());
+            view.setBidSearchJson(draft.getBidSearchJson());
+            view.setEvidenceJson(draft.getEvidenceJson());
+            view.setScoreTotal(draft.getScoreTotal());
+            view.setScorePartsJson(draft.getScorePartsJson());
+            view.setScoreSumMatches(draft.getScoreSumMatches());
+            view.setRequirementCode(draft.getRequirementCode());
+            views.add(view);
+        }
+        return views;
+    }
+
     private static final class CompareTask {
         private int sortIndex;
         private long packageId;
@@ -498,7 +549,7 @@ public class ReviewComparePipeline {
             String canonical = canonicalQuoteFromContent(content, quote);
             LlmPort.BidEvidence copy = new LlmPort.BidEvidence();
             copy.setFragmentId(matched.getChunkId());
-            copy.setPage(ev.getPage() != null ? ev.getPage() : matched.getPageNo());
+            copy.setPage(matched.getPageNo());
             copy.setQuote(canonical);
             result.add(copy);
         }

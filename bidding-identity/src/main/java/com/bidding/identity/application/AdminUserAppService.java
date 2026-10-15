@@ -178,6 +178,7 @@ public class AdminUserAppService {
         PasswordPolicy.validateNewPassword(password);
         Set<String> roles = checkAndNormalizeRoles(roleCodes);
         applySuperAdminRoleRules(operator, Set.of(), roles);
+        validateRolesMatchOrgType(optionalOrg.get(), roles);
 
         String passwordHash = passwordEncoder.encode(password);
         // 新建账号一律强制首次改密
@@ -230,16 +231,25 @@ public class AdminUserAppService {
         return toSummary(requireUser(userId));
     }
 
-    /**
-     * 修改指定招标方组织下招标方账号的负责人姓名、手机号、邮箱（均必填）。
-     * 不改公司名称、城市、登录账号。
-     */
-    @Transactional
     public UserSummary updateTendererProfile(long orgId,
                                              long userId,
                                              String displayName,
                                              String phone,
                                              String email) {
+        return updateOrgBusinessUserProfile(orgId, userId, displayName, phone, email);
+    }
+
+    /**
+     * 修改指定组织下业务账号的负责人姓名、手机号、邮箱（均必填）。
+     * TENDERER 组织只能改 TENDERER 账号；BIDDER 组织只能改 BIDDER 账号。
+     * 不改公司名称、城市、登录账号。
+     */
+    @Transactional
+    public UserSummary updateOrgBusinessUserProfile(long orgId,
+                                                    long userId,
+                                                    String displayName,
+                                                    String phone,
+                                                    String email) {
         checkPlatformAdmin();
 
         Optional<Org> optionalOrg = orgRepository.findById(orgId);
@@ -258,8 +268,9 @@ public class AdminUserAppService {
         if (target.getOrgId() != orgId) {
             throw new BizException(ErrorCode.BAD_REQUEST, "用户不属于该组织");
         }
-        if (!target.getRoleCodes().contains(RoleCode.TENDERER.name())) {
-            throw new BizException(ErrorCode.BAD_REQUEST, "仅可修改招标方账号资料");
+        RoleCode expectedRole = businessRoleOf(org);
+        if (!target.getRoleCodes().contains(expectedRole.name())) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "仅可修改该组织类型对应的业务账号资料");
         }
 
         String safeDisplayName = normalizeDisplayName(displayName);
@@ -274,6 +285,17 @@ public class AdminUserAppService {
 
         userRepository.updateProfile(userId, safeDisplayName, safePhone, safeEmail);
         return toSummary(requireUser(userId));
+    }
+
+    private RoleCode businessRoleOf(Org org) {
+        String orgType = org.getOrgType() == null ? AdminOrgAppService.ORG_TYPE_TENDERER : org.getOrgType();
+        if (AdminOrgAppService.ORG_TYPE_TENDERER.equalsIgnoreCase(orgType)) {
+            return RoleCode.TENDERER;
+        }
+        if (AdminOrgAppService.ORG_TYPE_BIDDER.equalsIgnoreCase(orgType)) {
+            return RoleCode.BIDDER;
+        }
+        throw new BizException(ErrorCode.BAD_REQUEST, "组织类型不支持业务账号资料编辑");
     }
 
     /**
@@ -295,6 +317,11 @@ public class AdminUserAppService {
         if (wasAdmin && !willBeAdmin
                 && countEffectivePlatformAdmins() <= 1) {
             throw new BizException(ErrorCode.CONFLICT, "系统至少保留一名平台管理员");
+        }
+        if (nextRoles.contains(RoleCode.TENDERER.name()) || nextRoles.contains(RoleCode.BIDDER.name())) {
+            Org targetOrg = orgRepository.findById(target.getOrgId())
+                    .orElseThrow(() -> new BizException(ErrorCode.BAD_REQUEST, "组织不存在"));
+            validateRolesMatchOrgType(targetOrg, nextRoles);
         }
 
         userRepository.replaceRoles(userId, nextRoles);
@@ -551,6 +578,27 @@ public class AdminUserAppService {
             result.add(role.name());
         }
         return result;
+    }
+
+    private void validateRolesMatchOrgType(Org org, Set<String> roleCodes) {
+        if (org == null || roleCodes == null || roleCodes.isEmpty()) {
+            return;
+        }
+        String orgType = org.getOrgType() == null ? AdminOrgAppService.ORG_TYPE_TENDERER : org.getOrgType();
+        if (AdminOrgAppService.ORG_TYPE_SYSTEM.equalsIgnoreCase(orgType)) {
+            if (roleCodes.contains(RoleCode.TENDERER.name()) || roleCodes.contains(RoleCode.BIDDER.name())) {
+                throw new BizException(ErrorCode.BAD_REQUEST, "系统组织不能创建招标方或投标方账号");
+            }
+            return;
+        }
+        if (AdminOrgAppService.ORG_TYPE_TENDERER.equalsIgnoreCase(orgType)
+                && roleCodes.contains(RoleCode.BIDDER.name())) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "招标方组织不能创建投标方账号");
+        }
+        if (AdminOrgAppService.ORG_TYPE_BIDDER.equalsIgnoreCase(orgType)
+                && roleCodes.contains(RoleCode.TENDERER.name())) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "投标方组织不能创建招标方账号");
+        }
     }
 
     private CurrentUser checkPlatformAdmin() {

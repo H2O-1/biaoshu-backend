@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -23,6 +24,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.argThat;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -71,7 +73,7 @@ class ChecklistBuildPipelineTest {
         s1.setMainType("SCORING");
         s1.setTitle("技术方案");
         List<Long> sChunkIds = new ArrayList<>();
-        sChunkIds.add(1L);
+        sChunkIds.add(2L);
         s1.setChunkIds(sChunkIds);
         List<LlmPort.ExtractedRequirement> scoreItems = new ArrayList<>();
         scoreItems.add(s1);
@@ -104,12 +106,12 @@ class ChecklistBuildPipelineTest {
         LlmPort.EvidenceRow evQ = new LlmPort.EvidenceRow();
         evQ.setId("Q1");
         evQ.setFragmentId(1L);
-        evQ.setPage(3);
+        evQ.setPage(101);
         evQ.setQuote("要求具备二级资质");
         LlmPort.EvidenceRow evS = new LlmPort.EvidenceRow();
         evS.setId("S1");
-        evS.setFragmentId(1L);
-        evS.setPage(3);
+        evS.setFragmentId(2L);
+        evS.setPage(102);
         evS.setQuote("技术方案满分15分");
         LlmPort.EvidenceResult evidenceResult = new LlmPort.EvidenceResult();
         List<LlmPort.EvidenceRow> evRows = new ArrayList<>();
@@ -133,8 +135,9 @@ class ChecklistBuildPipelineTest {
         assertEquals("Q1", items.get(0).getRequirementCode());
         assertEquals("[\"资质证书\",\"资质扫描件\"]", items.get(0).getBidSearchJson());
         assertTrue(items.get(0).getEvidenceJson().contains("\"fragmentId\":1"));
+        assertTrue(items.get(0).getEvidenceJson().contains("\"page\":7"));
         assertEquals("要求具备二级资质", items.get(0).getSourceExcerpt());
-        assertEquals(Integer.valueOf(3), items.get(0).getPageNo());
+        assertEquals(Integer.valueOf(7), items.get(0).getPageNo());
         assertEquals("SCORING", items.get(1).getMainType());
         assertEquals("S1", items.get(1).getRequirementCode());
         assertEquals("[\"技术方案\"]", items.get(1).getBidSearchJson());
@@ -142,8 +145,11 @@ class ChecklistBuildPipelineTest {
         assertTrue(result.getLlmRawJson().contains("scoring"));
         assertTrue(result.getLlmRawJson().contains("bidSearch"));
         assertTrue(result.getLlmRawJson().contains("evidence"));
-        verify(llmPort, times(1)).extractQualificationChecklist(anyString());
-        verify(llmPort, times(1)).extractScoringChecklist(anyString());
+        verify(llmPort, times(1)).extractQualificationChecklist(argThat(text ->
+                text.contains("要求具备二级资质") && !text.contains("技术方案满分15分")));
+        verify(llmPort, times(1)).extractScoringChecklist(argThat(text ->
+                text.contains("技术方案满分15分") && !text.contains("要求具备二级资质")));
+        verify(rerankPort, times(2)).rerank(anyString(), anyList(), anyInt(), eq("instruct"));
         verify(llmPort, times(1)).generateBidSearch(anyString());
         verify(llmPort, times(1)).generateEvidence(anyString(), anyString());
     }
@@ -211,6 +217,14 @@ class ChecklistBuildPipelineTest {
         dim.setQueries(queries);
         List<ReviewDimensionPort.Dimension> dims = new ArrayList<>();
         dims.add(dim);
+        ReviewDimensionPort.Dimension scoring = new ReviewDimensionPort.Dimension();
+        scoring.setCode("SCORING");
+        scoring.setName("评分评审类");
+        List<String> scoringQueries = new ArrayList<>();
+        scoringQueries.add("评分标准");
+        scoringQueries.add("技术方案评分项");
+        scoring.setQueries(scoringQueries);
+        dims.add(scoring);
         return dims;
     }
 
@@ -226,7 +240,7 @@ class ChecklistBuildPipelineTest {
         });
 
         VectorRecallPort.RecallHit h0 = hit(1L, "要求具备二级资质");
-        VectorRecallPort.RecallHit h1 = hit(2L, "另一段");
+        VectorRecallPort.RecallHit h1 = hit(2L, "技术方案满分15分");
         when(vectorRecallPort.recallMulti(any())).thenAnswer(invocation -> {
             VectorRecallPort.RecallMultiQuery mq = invocation.getArgument(0);
             int qCount = mq.getQueryEmbeddings() == null ? 0 : mq.getQueryEmbeddings().size();
@@ -247,12 +261,15 @@ class ChecklistBuildPipelineTest {
             return result;
         });
 
-        RerankPort.RerankHit r0 = new RerankPort.RerankHit();
-        r0.setIndex(0);
-        r0.setScore(0.9f);
-        List<RerankPort.RerankHit> ranked = new ArrayList<>();
-        ranked.add(r0);
-        when(rerankPort.rerank(anyString(), anyList(), anyInt(), eq("instruct"))).thenReturn(ranked);
+        when(rerankPort.rerank(anyString(), anyList(), anyInt(), eq("instruct"))).thenAnswer(invocation -> {
+            String query = invocation.getArgument(0);
+            RerankPort.RerankHit r = new RerankPort.RerankHit();
+            r.setIndex(query.contains("评分") ? 1 : 0);
+            r.setScore(0.9f);
+            List<RerankPort.RerankHit> ranked = new ArrayList<>();
+            ranked.add(r);
+            return ranked;
+        });
     }
 
     @Test
@@ -411,9 +428,23 @@ class ChecklistBuildPipelineTest {
                 ChecklistBuildPipeline.buildAllDimensionsRerankQuery(dims));
     }
 
+    @Test
+    void buildSplitRerankQueriesSeparateScoringDimension() {
+        List<ReviewDimensionPort.Dimension> dims = sampleDims();
+
+        String qualificationQuery = ChecklistBuildPipeline.buildQualificationRerankQuery(dims);
+        String scoringQuery = ChecklistBuildPipeline.buildScoringRerankQuery(dims);
+
+        assertTrue(qualificationQuery.contains("资格条件"));
+        assertFalse(qualificationQuery.contains("评分标准"));
+        assertTrue(scoringQuery.contains("评分标准"));
+        assertFalse(scoringQuery.contains("资格条件"));
+    }
+
     private static VectorRecallPort.RecallHit hit(long chunkId, String content) {
         VectorRecallPort.RecallHit h = new VectorRecallPort.RecallHit();
         h.setChunkId(chunkId);
+        h.setPageNo(chunkId == 1L ? 7 : 8);
         h.setContent(content);
         h.setDocumentId(1L);
         h.setFileName("a.pdf");

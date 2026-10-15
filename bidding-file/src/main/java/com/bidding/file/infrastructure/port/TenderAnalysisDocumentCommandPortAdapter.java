@@ -6,7 +6,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 
 /**
- * 招标解析文件写操作适配。
+ * 内部分析文件写操作适配。
  */
 @Component
 public class TenderAnalysisDocumentCommandPortAdapter implements TenderAnalysisDocumentCommandPort {

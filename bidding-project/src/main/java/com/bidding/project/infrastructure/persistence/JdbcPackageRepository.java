@@ -293,6 +293,17 @@ public class JdbcPackageRepository implements PackageRepository {
     }
 
     @Override
+    public List<BizPackage> listByProjectIdAndType(long projectId, String type) {
+        return jdbcTemplate.query(
+                "SELECT " + PACKAGE_COLUMNS + " FROM biz_package "
+                        + "WHERE project_id = ? AND type = ? AND status <> 'DELETED' "
+                        + "ORDER BY id ASC",
+                packageRowMapper,
+                projectId, type
+        );
+    }
+
+    @Override
     public long countByProjectIdAndType(long projectId, String type) {
         Long count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(1) FROM biz_package "

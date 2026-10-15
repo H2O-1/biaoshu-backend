@@ -4,8 +4,10 @@ import com.bidding.common.api.ApiResponse;
 import com.bidding.common.api.PageResult;
 import com.bidding.common.port.TenderAnalysisPort;
 import com.bidding.review.application.TenderAnalysisAppService;
+import com.bidding.review.application.TenderAnalysisExportService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.http.HttpHeaders;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -15,9 +17,12 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -29,12 +34,18 @@ import java.util.List;
 @RequestMapping("/api/tender-analyses")
 public class TenderAnalysisController {
 
+    private static final MediaType XLSX_MEDIA_TYPE =
+            MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+
     private final TenderAnalysisAppService tenderAnalysisAppService;
+    private final TenderAnalysisExportService tenderAnalysisExportService;
     private final ObjectMapper objectMapper;
 
     public TenderAnalysisController(TenderAnalysisAppService tenderAnalysisAppService,
+                                    TenderAnalysisExportService tenderAnalysisExportService,
                                     ObjectMapper objectMapper) {
         this.tenderAnalysisAppService = tenderAnalysisAppService;
+        this.tenderAnalysisExportService = tenderAnalysisExportService;
         this.objectMapper = objectMapper;
     }
 
@@ -58,10 +69,11 @@ public class TenderAnalysisController {
     @GetMapping
     public ApiResponse<PageResult<AnalysisSummaryDto>> list(
             @RequestParam(required = false, defaultValue = "") String keyword,
+            @RequestParam(required = false, defaultValue = "") String status,
             @RequestParam(required = false, defaultValue = "1") int page,
             @RequestParam(required = false, defaultValue = "20") int size) {
         PageResult<TenderAnalysisPort.AnalysisSummary> result =
-                tenderAnalysisAppService.list(keyword, page, size);
+                tenderAnalysisAppService.list(keyword, status, page, size);
         List<AnalysisSummaryDto> items = new ArrayList<>();
         for (TenderAnalysisPort.AnalysisSummary item : result.getItems()) {
             items.add(toSummaryDto(item));
@@ -75,10 +87,35 @@ public class TenderAnalysisController {
         return ApiResponse.ok(toDetailDto(tenderAnalysisAppService.get(analysisId)));
     }
 
+    @GetMapping("/{analysisId}/export")
+    public ResponseEntity<byte[]> export(@PathVariable("analysisId") long analysisId) {
+        TenderAnalysisExportService.ExportFile file = tenderAnalysisExportService.exportAnalysis(analysisId);
+        String encodedFileName = URLEncoder.encode(file.getFileName(), StandardCharsets.UTF_8)
+                .replace("+", "%20");
+        return ResponseEntity.ok()
+                .contentType(XLSX_MEDIA_TYPE)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename*=UTF-8''" + encodedFileName)
+                .body(file.getContent());
+    }
+
     @DeleteMapping("/{analysisId}")
     public ApiResponse<Void> delete(@PathVariable("analysisId") long analysisId) {
         tenderAnalysisAppService.delete(analysisId);
         return ApiResponse.ok(null);
+    }
+
+    @PostMapping("/{analysisId}/rerun")
+    public ApiResponse<CreateResponse> rerun(@PathVariable("analysisId") long analysisId) {
+        TenderAnalysisAppService.CreateResult rerun = tenderAnalysisAppService.rerun(analysisId);
+        CreateResponse response = new CreateResponse();
+        response.setAnalysisId(rerun.getAnalysisId());
+        response.setJobId(rerun.getJobId());
+        response.setPackageId(rerun.getPackageId());
+        response.setDocumentIds(rerun.getDocumentIds());
+        response.setIndexJobIds(rerun.getIndexJobIds());
+        response.setFiles(rerun.getFiles());
+        return ApiResponse.ok(response);
     }
 
     private AnalysisSummaryDto toSummaryDto(TenderAnalysisPort.AnalysisSummary s) {
@@ -91,13 +128,18 @@ public class TenderAnalysisController {
         dto.setJobId(s.getJobId());
         dto.setDocumentIds(parseLongArray(s.getDocumentIdsJson()));
         dto.setFileCount(dto.getDocumentIds().size());
+        dto.setTenderNo(s.getTenderNo());
         dto.setTenderer(s.getTenderer());
         dto.setAgency(s.getAgency());
         dto.setBudgetAmountText(s.getBudgetAmountText());
         dto.setBidDeadlineText(s.getBidDeadlineText());
         dto.setBidDeadlineAt(s.getBidDeadlineAt());
         dto.setErrorMessage(s.getErrorMessage());
+        dto.setRequirementCount(s.getRequirementCount());
+        dto.setIssueCount(s.getIssueCount());
         dto.setCreatedBy(s.getCreatedBy());
+        dto.setSourceAnalysisId(s.getSourceAnalysisId());
+        dto.setOriginalCreatedAt(s.getOriginalCreatedAt());
         dto.setCreatedAt(s.getCreatedAt());
         dto.setUpdatedAt(s.getUpdatedAt());
         return dto;
@@ -114,6 +156,7 @@ public class TenderAnalysisController {
         dto.setJobId(base.getJobId());
         dto.setDocumentIds(base.getDocumentIds());
         dto.setFileCount(base.getFileCount());
+        dto.setTenderNo(base.getTenderNo());
         dto.setTenderer(base.getTenderer());
         dto.setAgency(base.getAgency());
         dto.setBudgetAmountText(base.getBudgetAmountText());
@@ -121,10 +164,13 @@ public class TenderAnalysisController {
         dto.setBidDeadlineAt(base.getBidDeadlineAt());
         dto.setErrorMessage(base.getErrorMessage());
         dto.setCreatedBy(base.getCreatedBy());
+        dto.setSourceAnalysisId(base.getSourceAnalysisId());
+        dto.setOriginalCreatedAt(base.getOriginalCreatedAt());
         dto.setCreatedAt(base.getCreatedAt());
         dto.setUpdatedAt(base.getUpdatedAt());
 
         BasicInfoDto basic = new BasicInfoDto();
+        basic.setTenderNo(detail.getTenderNo());
         basic.setTenderer(detail.getTenderer());
         basic.setAgency(detail.getAgency());
         basic.setBudgetAmountText(detail.getBudgetAmountText());
@@ -143,6 +189,10 @@ public class TenderAnalysisController {
             AnalysisItemDto itemDto = toItemDto(item);
             if (TenderAnalysisPort.ITEM_SCORING.equals(item.getItemType())) {
                 dto.getScoringItems().add(itemDto);
+            } else if (TenderAnalysisPort.ITEM_LOGIC_ISSUE.equals(item.getItemType())) {
+                dto.getLogicIssueItems().add(itemDto);
+            } else if (TenderAnalysisPort.ITEM_TYPO.equals(item.getItemType())) {
+                dto.getTypoItems().add(itemDto);
             } else {
                 dto.getQualificationItems().add(itemDto);
             }
@@ -162,13 +212,131 @@ public class TenderAnalysisController {
         dto.setSourceExcerpt(item.getSourceExcerpt());
         dto.setPageNo(item.getPageNo());
         dto.setChunkIds(parseLongArray(item.getChunkIdsJson()));
-        dto.setEvidence(parseJsonArray(item.getEvidenceJson()));
+        JsonNode evidence = parseJsonArray(item.getEvidenceJson());
+        dto.setEvidence(evidence);
+        applyDisplayFields(dto, evidence);
         dto.setScoreTotal(item.getScoreTotal());
         dto.setScoreParts(parseJsonArray(item.getScorePartsJson()));
         dto.setScoreSumMatches(item.getScoreSumMatches());
         dto.setSortOrder(item.getSortOrder());
         dto.setCreatedAt(item.getCreatedAt());
         return dto;
+    }
+
+    private void applyDisplayFields(AnalysisItemDto dto, JsonNode evidence) {
+        if (dto == null) {
+            return;
+        }
+        JsonNode first = firstEvidence(evidence);
+        if (TenderAnalysisPort.ITEM_LOGIC_ISSUE.equals(dto.getItemType())) {
+            String severity = upperText(textOf(first, "severity"));
+            dto.setSeverity(severity);
+            dto.setSeverityLabel(severityLabel(severity));
+            String issueType = upperText(firstNonBlank(textOf(first, "issueType"), dto.getSubType()));
+            dto.setIssueType(issueType);
+            dto.setIssueTypeLabel(issueTypeLabel(issueType, dto.getItemType()));
+            dto.setSuggestion(textOf(first, "suggestion"));
+        } else if (TenderAnalysisPort.ITEM_TYPO.equals(dto.getItemType())) {
+            String severity = upperText(firstNonBlank(textOf(first, "severity"), "LOW"));
+            dto.setSeverity(severity);
+            dto.setSeverityLabel(severityLabel(severity));
+            dto.setIssueType(TenderAnalysisPort.ITEM_TYPO);
+            dto.setIssueTypeLabel("错别字");
+            dto.setWrongText(textOf(first, "wrongText"));
+            dto.setSuggestedText(textOf(first, "suggestedText"));
+            String confidence = upperText(textOf(first, "confidence"));
+            dto.setConfidence(confidence);
+            dto.setConfidenceLabel(confidenceLabel(confidence));
+            dto.setSuggestion(textOf(first, "suggestion"));
+        }
+    }
+
+    private JsonNode firstEvidence(JsonNode evidence) {
+        if (evidence == null || !evidence.isArray() || evidence.isEmpty()) {
+            return null;
+        }
+        JsonNode first = evidence.get(0);
+        return first != null && first.isObject() ? first : null;
+    }
+
+    private String textOf(JsonNode node, String field) {
+        if (node == null || field == null) {
+            return null;
+        }
+        JsonNode value = node.get(field);
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        String text = value.asText();
+        if (text == null || text.trim().isEmpty()) {
+            return null;
+        }
+        return text.trim();
+    }
+
+    private String firstNonBlank(String first, String second) {
+        return first == null || first.trim().isEmpty() ? second : first;
+    }
+
+    private String upperText(String value) {
+        if (value == null || value.trim().isEmpty()) {
+            return null;
+        }
+        return value.trim().toUpperCase(java.util.Locale.ROOT).replace('-', '_').replace(' ', '_');
+    }
+
+    private String severityLabel(String severity) {
+        if ("HIGH".equals(severity)) {
+            return "高风险";
+        }
+        if ("MEDIUM".equals(severity)) {
+            return "中风险";
+        }
+        if ("LOW".equals(severity)) {
+            return "低风险";
+        }
+        return null;
+    }
+
+    private String confidenceLabel(String confidence) {
+        if ("HIGH".equals(confidence)) {
+            return "高置信";
+        }
+        if ("MEDIUM".equals(confidence)) {
+            return "中置信";
+        }
+        if ("LOW".equals(confidence)) {
+            return "低置信";
+        }
+        return null;
+    }
+
+    private String issueTypeLabel(String issueType, String itemType) {
+        if (TenderAnalysisPort.ITEM_TYPO.equals(itemType)) {
+            return "错别字";
+        }
+        if ("AMOUNT_INCONSISTENCY".equals(issueType)) {
+            return "金额逻辑";
+        }
+        if ("TIME_CONFLICT".equals(issueType)) {
+            return "时间冲突";
+        }
+        if ("SCORE_SUM_MISMATCH".equals(issueType)) {
+            return "评分分值逻辑";
+        }
+        if ("TERM_INCONSISTENCY".equals(issueType)) {
+            return "术语前后一致性";
+        }
+        if ("THRESHOLD_INCONSISTENCY".equals(issueType)) {
+            return "门槛条件逻辑";
+        }
+        if ("QUALIFICATION_REJECT_LOGIC".equals(issueType)) {
+            return "资格与废标逻辑";
+        }
+        if ("OTHER".equals(issueType)) {
+            return "逻辑问题";
+        }
+        return issueType == null ? null : "逻辑问题";
     }
 
     private List<Long> parseLongArray(String json) {
@@ -217,13 +385,18 @@ public class TenderAnalysisController {
         private Long jobId;
         private List<Long> documentIds = new ArrayList<>();
         private int fileCount;
+        private String tenderNo;
         private String tenderer;
         private String agency;
         private String budgetAmountText;
         private String bidDeadlineText;
         private Instant bidDeadlineAt;
         private String errorMessage;
+        private int requirementCount;
+        private int issueCount;
         private long createdBy;
+        private Long sourceAnalysisId;
+        private Instant originalCreatedAt;
         private Instant createdAt;
         private Instant updatedAt;
 
@@ -291,6 +464,14 @@ public class TenderAnalysisController {
             this.fileCount = fileCount;
         }
 
+        public String getTenderNo() {
+            return tenderNo;
+        }
+
+        public void setTenderNo(String tenderNo) {
+            this.tenderNo = tenderNo;
+        }
+
         public String getTenderer() {
             return tenderer;
         }
@@ -339,12 +520,44 @@ public class TenderAnalysisController {
             this.errorMessage = errorMessage;
         }
 
+        public int getRequirementCount() {
+            return requirementCount;
+        }
+
+        public void setRequirementCount(int requirementCount) {
+            this.requirementCount = requirementCount;
+        }
+
+        public int getIssueCount() {
+            return issueCount;
+        }
+
+        public void setIssueCount(int issueCount) {
+            this.issueCount = issueCount;
+        }
+
         public long getCreatedBy() {
             return createdBy;
         }
 
         public void setCreatedBy(long createdBy) {
             this.createdBy = createdBy;
+        }
+
+        public Long getSourceAnalysisId() {
+            return sourceAnalysisId;
+        }
+
+        public void setSourceAnalysisId(Long sourceAnalysisId) {
+            this.sourceAnalysisId = sourceAnalysisId;
+        }
+
+        public Instant getOriginalCreatedAt() {
+            return originalCreatedAt;
+        }
+
+        public void setOriginalCreatedAt(Instant originalCreatedAt) {
+            this.originalCreatedAt = originalCreatedAt;
         }
 
         public Instant getCreatedAt() {
@@ -425,6 +638,8 @@ public class TenderAnalysisController {
         private BasicInfoDto basicInfo;
         private List<AnalysisItemDto> qualificationItems = new ArrayList<>();
         private List<AnalysisItemDto> scoringItems = new ArrayList<>();
+        private List<AnalysisItemDto> logicIssueItems = new ArrayList<>();
+        private List<AnalysisItemDto> typoItems = new ArrayList<>();
         private String basicInfoRawJson;
         private String checklistRawJson;
 
@@ -452,6 +667,22 @@ public class TenderAnalysisController {
             this.scoringItems = scoringItems == null ? new ArrayList<>() : scoringItems;
         }
 
+        public List<AnalysisItemDto> getLogicIssueItems() {
+            return logicIssueItems;
+        }
+
+        public void setLogicIssueItems(List<AnalysisItemDto> logicIssueItems) {
+            this.logicIssueItems = logicIssueItems == null ? new ArrayList<>() : logicIssueItems;
+        }
+
+        public List<AnalysisItemDto> getTypoItems() {
+            return typoItems;
+        }
+
+        public void setTypoItems(List<AnalysisItemDto> typoItems) {
+            this.typoItems = typoItems == null ? new ArrayList<>() : typoItems;
+        }
+
         public String getBasicInfoRawJson() {
             return basicInfoRawJson;
         }
@@ -470,6 +701,7 @@ public class TenderAnalysisController {
     }
 
     public static class BasicInfoDto {
+        private String tenderNo;
         private String tenderer;
         private String agency;
         private String budgetAmountText;
@@ -479,6 +711,14 @@ public class TenderAnalysisController {
         private String projectBackground;
         private String projectOverview;
         private JsonNode evidence;
+
+        public String getTenderNo() {
+            return tenderNo;
+        }
+
+        public void setTenderNo(String tenderNo) {
+            this.tenderNo = tenderNo;
+        }
 
         public String getTenderer() {
             return tenderer;
@@ -568,6 +808,15 @@ public class TenderAnalysisController {
         private BigDecimal scoreTotal;
         private JsonNode scoreParts;
         private Boolean scoreSumMatches;
+        private String severity;
+        private String severityLabel;
+        private String issueType;
+        private String issueTypeLabel;
+        private String suggestion;
+        private String wrongText;
+        private String suggestedText;
+        private String confidence;
+        private String confidenceLabel;
         private int sortOrder;
         private Instant createdAt;
 
@@ -681,6 +930,78 @@ public class TenderAnalysisController {
 
         public void setScoreSumMatches(Boolean scoreSumMatches) {
             this.scoreSumMatches = scoreSumMatches;
+        }
+
+        public String getSeverity() {
+            return severity;
+        }
+
+        public void setSeverity(String severity) {
+            this.severity = severity;
+        }
+
+        public String getSeverityLabel() {
+            return severityLabel;
+        }
+
+        public void setSeverityLabel(String severityLabel) {
+            this.severityLabel = severityLabel;
+        }
+
+        public String getIssueType() {
+            return issueType;
+        }
+
+        public void setIssueType(String issueType) {
+            this.issueType = issueType;
+        }
+
+        public String getIssueTypeLabel() {
+            return issueTypeLabel;
+        }
+
+        public void setIssueTypeLabel(String issueTypeLabel) {
+            this.issueTypeLabel = issueTypeLabel;
+        }
+
+        public String getSuggestion() {
+            return suggestion;
+        }
+
+        public void setSuggestion(String suggestion) {
+            this.suggestion = suggestion;
+        }
+
+        public String getWrongText() {
+            return wrongText;
+        }
+
+        public void setWrongText(String wrongText) {
+            this.wrongText = wrongText;
+        }
+
+        public String getSuggestedText() {
+            return suggestedText;
+        }
+
+        public void setSuggestedText(String suggestedText) {
+            this.suggestedText = suggestedText;
+        }
+
+        public String getConfidence() {
+            return confidence;
+        }
+
+        public void setConfidence(String confidence) {
+            this.confidence = confidence;
+        }
+
+        public String getConfidenceLabel() {
+            return confidenceLabel;
+        }
+
+        public void setConfidenceLabel(String confidenceLabel) {
+            this.confidenceLabel = confidenceLabel;
         }
 
         public int getSortOrder() {

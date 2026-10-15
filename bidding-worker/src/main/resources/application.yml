@@ -43,6 +43,14 @@ bidding:
   file:
     max-size-bytes: ${UPLOAD_MAX_SIZE_BYTES:104857600}
     max-files-per-package: 5
+  # OCR：默认关闭；启用后由 INDEX 阶段调用外置 OCR 服务增强扫描 PDF 文本抽取
+  ocr:
+    enabled: ${BIDDING_OCR_ENABLED:false}
+    base-url: ${BIDDING_OCR_BASE_URL:}
+    min-total-chars: ${BIDDING_OCR_MIN_TOTAL_CHARS:50}
+    min-page-chars: ${BIDDING_OCR_MIN_PAGE_CHARS:30}
+    connect-timeout-ms: ${BIDDING_OCR_CONNECT_TIMEOUT_MS:5000}
+    read-timeout-ms: ${BIDDING_OCR_READ_TIMEOUT_MS:120000}
   # INDEX：fake=假向量；real=百炼 text-embedding-v4
   # worker-enabled 在本进程写死 true：API/Worker 共用 .env 时，若把 INDEX_WORKER_ENABLED=false
   # 给 API 用，会连带把 Worker 的 Poller 关掉（表现为 Started 后无「INDEX Worker 已启用」、任务一直 PENDING）。
@@ -104,6 +112,16 @@ bidding:
     worker-enabled: true
     poll-ms: ${TENDER_ANALYSIS_POLL_MS:3000}
     worker-id: ${TENDER_ANALYSIS_WORKER_ID:}
+  # 投标模拟审核 BID_SIMULATION_AUDIT（本进程写死开启，原因同 index.worker-enabled）
+  bid-simulation-audit:
+    worker-enabled: true
+    poll-ms: ${BID_SIMULATION_AUDIT_POLL_MS:3000}
+    worker-id: ${BID_SIMULATION_AUDIT_WORKER_ID:}
+  # 专家评审截止自动提交（本进程写死开启，原因同 index.worker-enabled）
+  expert-review:
+    deadline-worker-enabled: true
+    deadline-poll-ms: ${EXPERT_REVIEW_DEADLINE_POLL_MS:60000}
+    deadline-batch-size: ${EXPERT_REVIEW_DEADLINE_BATCH_SIZE:20}
   # 一键审查总流程（本进程写死开启，原因同 index.worker-enabled）
   ai-review-pipeline:
     worker-enabled: true
@@ -120,11 +138,6 @@ bidding:
     # 瞬时错误（网络超时、限流等）：retry_count + 1 并指数退避，达到上限转 FAILED
     max-retries: ${AI_REVIEW_PIPELINE_MAX_RETRIES:3}
     retry-backoff-ms: ${AI_REVIEW_PIPELINE_RETRY_BACKOFF_MS:10000}
-  # 僵尸子任务回收：临时管理功能，API 与 Worker 一律默认关闭，仅人工显式开启；
-  # 普通子任务租约化之前不允许启动时自动全局回收（可能误杀长任务）
-  recovery:
-    enabled: ${STALE_RECOVERY_ENABLED:false}
-    stale-minutes: ${STALE_RECOVERY_STALE_MINUTES:30}
   # 抽取 / 对照 LLM（compatible-mode chat）
   llm:
     base-url: ${LLM_BASE_URL:${EMBEDDING_BASE_URL:https://ws-jbb2t4ahvyzwxo9b.cn-beijing.maas.aliyuncs.com/compatible-mode/v1}}

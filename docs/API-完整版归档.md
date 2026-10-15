@@ -238,6 +238,7 @@ Authorization: Bearer <accessToken>
   "message": "ok",
   "data": {
     "tendererOrgCount": 12,
+    "bidderOrgCount": 5,
     "platformAdminActiveCount": 3,
     "platformAdminDisabledCount": 1,
     "reviewSuccessCount": 8,
@@ -251,6 +252,7 @@ Authorization: Bearer <accessToken>
 | 字段 | 说明 |
 |------|------|
 | tendererOrgCount | 招标方组织总数（排除系统组织与已删除） |
+| bidderOrgCount | 投标方组织总数（排除系统组织与已删除） |
 | platformAdminActiveCount | 正常平台管理员账号数（含超管；`ACTIVE`） |
 | platformAdminDisabledCount | 已停用平台管理员账号数（含超管；`DISABLED`） |
 | reviewSuccessCount | AI 审查成功数（`biz_review.status=SUCCESS`，含历史版本行） |
@@ -680,6 +682,7 @@ Authorization: Bearer <accessToken>
         "code": "ORG_A1B2C3D4E5F6",
         "name": "华能招标有限公司",
         "city": "北京市",
+        "orgType": "TENDERER",
         "status": "ACTIVE",
         "userCount": 0,
         "projectCount": 0,
@@ -702,6 +705,7 @@ Authorization: Bearer <accessToken>
 |------|------|
 | code | 系统自动生成，创建后不可改 |
 | name | 公司名称，可编辑；全局未删除唯一 |
+| orgType | 组织类型：`TENDERER` 招标方 / `BIDDER` 投标方；系统组织为 `SYSTEM` |
 | status | 库内可为 `ACTIVE` / `DISABLED` / `DELETED`；列表与详情不返回已删 |
 | userCount | 组织下未删除用户数 |
 | projectCount | 组织下未删除项目数 |
@@ -717,7 +721,8 @@ Authorization: Bearer <accessToken>
 ```json
 {
   "name": "华能招标有限公司",
-  "city": "北京市"
+  "city": "北京市",
+  "orgType": "TENDERER"
 }
 ```
 
@@ -725,17 +730,20 @@ Authorization: Bearer <accessToken>
 |------|------|------|------|
 | name | string | 是 | 公司名称，全局唯一，最长 128；创建后可编辑 |
 | city | string | 是 | 所在城市，必须为 `GET /api/admin/cities` 返回的 `name`（精确匹配） |
+| orgType | string | 否 | 组织类型：`TENDERER` 招标方 / `BIDDER` 投标方；不传默认 `TENDERER` |
 
-**成功响应**：`data` 为新建组织摘要（含自动生成的 `code`，`status=ACTIVE`，`userCount=0`）。
+**成功响应**：`data` 为新建组织摘要（含自动生成的 `code`，`orgType`，`status=ACTIVE`，`userCount=0`）。
 
 **常见失败**
 
 | code | 说明 |
 |------|------|
-| 40000 | 名称/城市为空，或城市不在地级市词典中 |
+| 40000 | 名称/城市为空，城市不在地级市词典中，或 `orgType` 非法 |
 | 40900 | 公司名称已存在 |
 
 允许先建空组织（无账号）。
+
+创建账号时，账号角色需与组织类型一致：`TENDERER` 组织不能创建 `BIDDER` 账号，`BIDDER` 组织不能创建 `TENDERER` 账号。
 
 ---
 
@@ -859,11 +867,12 @@ Authorization: Bearer <accessToken>
 
 ---
 
-### 4.4.1 修改招标方账号资料
+### 4.4.1 修改组织业务账号资料
 
 `PUT /api/admin/orgs/{orgId}/users/{userId}/profile`
 
-平台管理员修改**指定招标方组织**下、角色含 `TENDERER` 的账号资料。  
+平台管理员修改**指定组织**下、与组织类型匹配的业务账号资料：
+`TENDERER` 组织仅可修改角色含 `TENDERER` 的账号，`BIDDER` 组织仅可修改角色含 `BIDDER` 的账号。  
 不改公司名称、城市、登录账号；系统组织账号不可走本接口。
 
 **请求体**
@@ -888,7 +897,7 @@ Authorization: Bearer <accessToken>
 
 | code | 说明 |
 |------|------|
-| 40000 | 参数不合法 / 用户不属于该组织 / 非招标方账号 / 系统组织 / 已删除账号 |
+| 40000 | 参数不合法 / 用户不属于该组织 / 账号角色与组织类型不匹配 / 系统组织 / 已删除账号 |
 | 40400 | 组织或用户不存在 |
 | 40900 | 手机号或邮箱已被占用 |
 
@@ -953,7 +962,7 @@ Authorization: Bearer <accessToken>
 - [ ] 角色多选提交时传完整 `roleCodes` 数组
 - [ ] 平台首页汇总：`GET /api/admin/dashboard`（组织数/管理员启停/审查成功失败/文档解析成功失败）
 - [ ] 平台方账号列表：`GET /api/admin/platform-admins` 分页；详情看创建时间/创建人/更新时间
-- [ ] 修改招标方账号资料：`PUT /api/admin/orgs/{orgId}/users/{userId}/profile`（姓名/手机/邮箱必填）
+- [ ] 修改组织业务账号资料：`PUT /api/admin/orgs/{orgId}/users/{userId}/profile`（姓名/手机/邮箱必填）
 - [ ] 创建平台管理员：`POST /api/admin/platform-admins`，只填 displayName / username / password
 - [ ] 创建用户密码：≥8 且含字母+数字
 - [ ] 组织：可编辑名称/城市；`code` 不可改；停用组织后不可再往该组织建用户

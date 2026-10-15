@@ -28,18 +28,24 @@ class HttpLlmPortTest {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         int port = server.getAddress().getPort();
         server.createContext("/chat/completions", exchange -> {
-            String content = "{"
-                    + "\"qualificationRequirements\":[{"
-                    + "\"id\":\"Q1\","
-                    + "\"title\":\"资质\","
-                    + "\"mainType\":\"资格要求\","
-                    + "\"subType\":\"资质证书\","
-                    + "\"content\":\"须具备二级资质\","
-                    + "\"bidSearch\":{\"queries\":[\"资质证书\",\"资质扫描件\"]},"
-                    + "\"evidence\":[{\"fragmentId\":11,\"page\":3,\"quote\":\"具备二级\"}]"
-                    + "}],"
-                    + "\"scoring\":{\"totalScore\":null,\"scoreSumMatches\":null,\"items\":[]}"
-                    + "}";
+            String request = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            String content;
+            if (request.contains("logicIssues") && request.contains("typos")) {
+                content = "{\"logicIssues\":[],\"typos\":[]}";
+            } else {
+                content = "{"
+                        + "\"qualificationRequirements\":[{"
+                        + "\"id\":\"Q1\","
+                        + "\"title\":\"资质\","
+                        + "\"mainType\":\"资格要求\","
+                        + "\"subType\":\"资质证书\","
+                        + "\"content\":\"须具备二级资质\","
+                        + "\"bidSearch\":{\"queries\":[\"资质证书\",\"资质扫描件\"]},"
+                        + "\"evidence\":[{\"fragmentId\":11,\"page\":3,\"quote\":\"具备二级\"}]"
+                        + "}],"
+                        + "\"scoring\":{\"totalScore\":null,\"scoreSumMatches\":null,\"items\":[]}"
+                        + "}";
+            }
             String body = "{\"choices\":[{\"message\":{\"content\":"
                     + new ObjectMapper().writeValueAsString(content)
                     + "}}]}";
@@ -239,6 +245,7 @@ class HttpLlmPortTest {
     @Test
     void parseTenderBasicInfoReadsFieldsAndEvidence() throws Exception {
         String json = "{"
+                + "\"tenderNo\":{\"value\":\"ZHCS-2024-001\",\"quote\":\"招标编号：ZHCS-2024-001\",\"chunkId\":10,\"pageNo\":1},"
                 + "\"tenderer\":{\"value\":\"采购人A\",\"quote\":\"采购人：采购人A\",\"chunkId\":11,\"pageNo\":1},"
                 + "\"agency\":{\"value\":\"代理B\",\"quote\":\"代理机构：代理B\",\"chunkId\":12,\"pageNo\":2},"
                 + "\"budgetAmount\":{\"value\":\"预算金额100万元\",\"quote\":\"预算金额100万元\",\"chunkId\":13,\"pageNo\":3},"
@@ -249,6 +256,8 @@ class HttpLlmPortTest {
                 + "\"projectOverview\":{\"value\":\"项目概况\",\"quote\":\"项目概况原文\",\"chunkId\":17,\"pageNo\":7}"
                 + "}";
         LlmPort.TenderBasicInfo info = llmPort.parseTenderBasicInfoFromContent(json);
+        assertEquals("ZHCS-2024-001", info.getTenderNo().getValue());
+        assertEquals(Long.valueOf(10L), info.getTenderNo().getChunkId());
         assertEquals("采购人A", info.getTenderer().getValue());
         assertEquals(Long.valueOf(11L), info.getTenderer().getChunkId());
         assertEquals("代理B", info.getAgency().getValue());
@@ -259,6 +268,57 @@ class HttpLlmPortTest {
         assertEquals("项目简介", info.getProjectIntro().getValue());
         assertEquals("项目背景", info.getProjectBackground().getValue());
         assertEquals("项目概况", info.getProjectOverview().getValue());
+    }
+
+    @Test
+    void parseTenderIssueScanReadsLogicIssuesAndTypos() throws Exception {
+        String json = "{"
+                + "\"logicIssues\":[{"
+                + "\"title\":\"业绩门槛与项目预算规模不匹配\","
+                + "\"severity\":\"MEDIUM\","
+                + "\"issueType\":\"THRESHOLD_INCONSISTENCY\","
+                + "\"problem\":\"预算为1280万元，业绩要求为5000万元。\","
+                + "\"suggestion\":\"调整为合理区间。\","
+                + "\"evidence\":["
+                + "{\"chunkId\":101,\"pageNo\":1,\"quote\":\"预算金额为人民币 1280 万元\"},"
+                + "{\"chunkId\":104,\"pageNo\":5,\"quote\":\"近三年需具有 5000 万元以上类似项目业绩\"}"
+                + "]"
+                + "}],"
+                + "\"typos\":[{"
+                + "\"wrongText\":\"解折\","
+                + "\"suggestedText\":\"解析\","
+                + "\"context\":\"解折失败，请重新解析\","
+                + "\"confidence\":\"HIGH\","
+                + "\"suggestion\":\"建议改为解析。\","
+                + "\"evidence\":[{\"chunkId\":105,\"pageNo\":6,\"quote\":\"解折失败，请重新解析\"}]"
+                + "}]"
+                + "}";
+
+        LlmPort.TenderIssueScanResult result = llmPort.parseTenderIssueScanFromContent(json);
+
+        assertEquals(1, result.getLogicIssues().size());
+        assertEquals("业绩门槛与项目预算规模不匹配", result.getLogicIssues().get(0).getTitle());
+        assertEquals("MEDIUM", result.getLogicIssues().get(0).getSeverity());
+        assertEquals("THRESHOLD_INCONSISTENCY", result.getLogicIssues().get(0).getIssueType());
+        assertEquals(2, result.getLogicIssues().get(0).getEvidence().size());
+        assertEquals(Long.valueOf(101L), result.getLogicIssues().get(0).getEvidence().get(0).getChunkId());
+        assertEquals(Integer.valueOf(1), result.getLogicIssues().get(0).getEvidence().get(0).getPageNo());
+        assertEquals("预算金额为人民币 1280 万元", result.getLogicIssues().get(0).getEvidence().get(0).getQuote());
+
+        assertEquals(1, result.getTypos().size());
+        assertEquals("解折", result.getTypos().get(0).getWrongText());
+        assertEquals("解析", result.getTypos().get(0).getSuggestedText());
+        assertEquals("HIGH", result.getTypos().get(0).getConfidence());
+        assertEquals(Long.valueOf(105L), result.getTypos().get(0).getEvidence().get(0).getChunkId());
+    }
+
+    @Test
+    void parseTenderIssueScanReadsEmptyArrays() throws Exception {
+        LlmPort.TenderIssueScanResult result =
+                llmPort.parseTenderIssueScanFromContent("{\"logicIssues\":[],\"typos\":[]}");
+
+        assertEquals(0, result.getLogicIssues().size());
+        assertEquals(0, result.getTypos().size());
     }
 
     @Test
@@ -273,6 +333,15 @@ class HttpLlmPortTest {
         assertEquals(1, result.getBidEvidence().size());
         assertEquals(Long.valueOf(99L), result.getBidEvidence().get(0).getFragmentId());
         assertEquals("摘录", result.getBidExcerpt());
+    }
+
+    @Test
+    void scanTenderIssuesReturnsRawContent() {
+        LlmPort.TenderIssueScanResult result = llmPort.scanTenderIssues("候选原文…");
+
+        assertEquals(0, result.getLogicIssues().size());
+        assertEquals(0, result.getTypos().size());
+        assertTrue(result.getRawContent() != null && result.getRawContent().contains("logicIssues"));
     }
 
     @Test

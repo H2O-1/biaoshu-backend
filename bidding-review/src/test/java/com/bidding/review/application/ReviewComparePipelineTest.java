@@ -10,9 +10,11 @@ import com.bidding.common.port.VectorRecallPort;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -101,7 +103,7 @@ class ReviewComparePipelineTest {
         compared.setJudgement("已响应");
         LlmPort.BidEvidence ev = new LlmPort.BidEvidence();
         ev.setFragmentId(800L);
-        ev.setPage(2);
+        ev.setPage(800);
         ev.setQuote("具备二级资质");
         List<LlmPort.BidEvidence> evidences = new ArrayList<>();
         evidences.add(ev);
@@ -118,6 +120,9 @@ class ReviewComparePipelineTest {
         assertEquals(1, result.getItems().size());
         assertEquals(ReviewPort.STATUS_MATCH, result.getItems().get(0).getStatus());
         assertEquals("具备二级资质", result.getItems().get(0).getBidExcerpt());
+        assertEquals(Integer.valueOf(2), result.getItems().get(0).getPageNo());
+        assertEquals("[{\"fragmentId\":800,\"page\":2,\"quote\":\"具备二级资质\"}]",
+                result.getItems().get(0).getBidEvidenceJson());
         verify(vectorRecallPort, times(2)).recall(any());
         verify(llmPort).compareRequirement(any(LlmPort.CompareRequest.class));
     }
@@ -334,6 +339,64 @@ class ReviewComparePipelineTest {
         req.setText("仅有正文");
         req.setBidSearchJson(null);
         assertEquals(0, pipeline.resolveRecallQueries(req).size());
+    }
+
+    @Test
+    void runSimulationUsesInternalBidPackageWithoutProjectFilter() {
+        stubPackage(88L, "模拟投标包");
+        ReviewComparePipeline pipeline = newPipeline();
+
+        RequirementChecklistPort.ItemDraft req = new RequirementChecklistPort.ItemDraft();
+        req.setMainType(ReviewPort.MAIN_SCORING);
+        req.setRequirementCode("S1");
+        req.setTitle("技术方案");
+        req.setText("技术方案满分10分");
+        req.setBidSearchJson("[\"技术方案\"]");
+        req.setScoreTotal(new BigDecimal("10.00"));
+
+        when(embeddingPort.embed(anyList())).thenReturn(List.of(new float[]{0.1f}));
+        when(vectorRecallPort.recall(any())).thenAnswer(invocation -> {
+            VectorRecallPort.RecallHit hit = new VectorRecallPort.RecallHit();
+            hit.setChunkId(8101L);
+            hit.setContent("技术方案覆盖总体架构、实施计划和运维保障。");
+            hit.setDocumentId(801L);
+            hit.setFileName("投标文件.pdf");
+            hit.setPackageId(88L);
+            hit.setPageNo(6);
+            return List.of(hit);
+        });
+        RerankPort.RerankHit r0 = new RerankPort.RerankHit();
+        r0.setIndex(0);
+        when(rerankPort.rerank(eq("技术方案满分10分"), anyList(), anyInt(), eq("bid-instruct")))
+                .thenReturn(List.of(r0));
+
+        LlmPort.CompareResult compared = new LlmPort.CompareResult();
+        compared.setRequirementId("S1");
+        compared.setTitle("技术方案");
+        compared.setReviewType("评分建议");
+        compared.setSuggestedScore(new BigDecimal("8.00"));
+        compared.setFullScore(new BigDecimal("10.00"));
+        compared.setJudgement("方案较完整。");
+        LlmPort.BidEvidence ev = new LlmPort.BidEvidence();
+        ev.setFragmentId(8101L);
+        ev.setPage(6);
+        ev.setQuote("技术方案覆盖总体架构、实施计划和运维保障");
+        compared.setBidEvidence(List.of(ev));
+        when(llmPort.compareRequirement(any(LlmPort.CompareRequest.class))).thenReturn(compared);
+
+        ReviewComparePipeline.PipelineResult result =
+                pipeline.runSimulation(2L, List.of(req), 88L, 30, 6, null);
+
+        ReviewPort.ItemDraft item = result.getItems().get(0);
+        assertEquals(Long.valueOf(88L), item.getPackageId());
+        assertEquals("S1", item.getRequirementCode());
+        assertEquals(new BigDecimal("8.00"), item.getSuggestedScore());
+        assertEquals(new BigDecimal("10.00"), item.getFullScore());
+        ArgumentCaptor<VectorRecallPort.RecallQuery> queryCaptor =
+                ArgumentCaptor.forClass(VectorRecallPort.RecallQuery.class);
+        verify(vectorRecallPort).recall(queryCaptor.capture());
+        assertEquals(0L, queryCaptor.getValue().getProjectId());
+        assertEquals(List.of(88L), queryCaptor.getValue().getPackageIds());
     }
 
     private ReviewComparePipeline newPipeline() {

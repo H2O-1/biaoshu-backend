@@ -102,11 +102,16 @@ public class JdbcCosineVectorRecallPort implements VectorRecallPort {
         sql.append("INNER JOIN biz_document_vector v ON v.chunk_id = c.id ");
         sql.append("INNER JOIN biz_document d ON d.id = c.document_id AND d.status <> 'DELETED' ");
         sql.append("INNER JOIN biz_package p ON p.id = c.package_id AND p.status <> 'DELETED' ");
-        sql.append("WHERE c.org_id = ? AND c.project_id = ? AND d.index_status = 'SUCCESS'");
+        sql.append("WHERE c.org_id = ? AND d.index_status = 'SUCCESS'");
 
         List<Object> args = new ArrayList<>();
         args.add(orgId);
-        args.add(projectId);
+        if (projectId > 0) {
+            sql.append(" AND c.project_id = ?");
+            args.add(projectId);
+        } else if (packageIds.isEmpty() && documentIds.isEmpty()) {
+            return new ArrayList<>();
+        }
 
         if (!packageIds.isEmpty()) {
             sql.append(" AND c.package_id IN (");

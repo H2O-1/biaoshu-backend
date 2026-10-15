@@ -19,6 +19,8 @@ public interface TenderAnalysisPort {
 
     String ITEM_QUALIFICATION = "QUALIFICATION";
     String ITEM_SCORING = "SCORING";
+    String ITEM_LOGIC_ISSUE = "LOGIC_ISSUE";
+    String ITEM_TYPO = "TYPO";
 
     /**
      * 创建解析中主记录。
@@ -30,6 +32,19 @@ public interface TenderAnalysisPort {
                         String name,
                         String documentIdsJson,
                         long createdBy);
+
+    /**
+     * 创建重试解析主记录。
+     *
+     * @return analysisId
+     */
+    long createRerunBuilding(long orgId,
+                             long packageId,
+                             String name,
+                             String documentIdsJson,
+                             long createdBy,
+                             long sourceAnalysisId,
+                             Instant originalCreatedAt);
 
     /**
      * 绑定对应异步任务 ID。
@@ -61,17 +76,22 @@ public interface TenderAnalysisPort {
     /**
      * 按组织分页查询历史记录。
      */
-    List<AnalysisSummary> listByOrg(long orgId, String keyword, int offset, int limit);
+    List<AnalysisSummary> listByOrg(long orgId, String keyword, String status, int offset, int limit);
 
     /**
      * 按组织统计历史记录数量。
      */
-    long countByOrg(long orgId, String keyword);
+    long countByOrg(long orgId, String keyword, String status);
 
     /**
      * 按组织查询主记录；不存在或不属于该组织返回 null。
      */
     AnalysisSummary findById(long orgId, long analysisId);
+
+    /**
+     * 按组织查询主记录；包含 OBSOLETE。
+     */
+    AnalysisSummary findAnyById(long orgId, long analysisId);
 
     /**
      * 按组织查询详情，含条目；不存在或不属于该组织返回 null。
@@ -80,6 +100,7 @@ public interface TenderAnalysisPort {
 
     /** 基础信息草稿。 */
     class BasicInfoDraft {
+        private String tenderNo;
         private String tenderer;
         private String agency;
         private String budgetAmountText;
@@ -90,6 +111,14 @@ public interface TenderAnalysisPort {
         private String projectOverview;
         private String evidenceJson;
         private String rawJson;
+
+        public String getTenderNo() {
+            return tenderNo;
+        }
+
+        public void setTenderNo(String tenderNo) {
+            this.tenderNo = tenderNo;
+        }
 
         public String getTenderer() {
             return tenderer;
@@ -302,6 +331,7 @@ public interface TenderAnalysisPort {
         private String status;
         private Long jobId;
         private String documentIdsJson;
+        private String tenderNo;
         private String tenderer;
         private String agency;
         private String budgetAmountText;
@@ -312,7 +342,11 @@ public interface TenderAnalysisPort {
         private String projectOverview;
         private String evidenceJson;
         private String errorMessage;
+        private int requirementCount;
+        private int issueCount;
         private long createdBy;
+        private Long sourceAnalysisId;
+        private Instant originalCreatedAt;
         private Instant createdAt;
         private Instant updatedAt;
 
@@ -370,6 +404,14 @@ public interface TenderAnalysisPort {
 
         public void setDocumentIdsJson(String documentIdsJson) {
             this.documentIdsJson = documentIdsJson;
+        }
+
+        public String getTenderNo() {
+            return tenderNo;
+        }
+
+        public void setTenderNo(String tenderNo) {
+            this.tenderNo = tenderNo;
         }
 
         public String getTenderer() {
@@ -452,12 +494,44 @@ public interface TenderAnalysisPort {
             this.errorMessage = errorMessage;
         }
 
+        public int getRequirementCount() {
+            return requirementCount;
+        }
+
+        public void setRequirementCount(int requirementCount) {
+            this.requirementCount = requirementCount;
+        }
+
+        public int getIssueCount() {
+            return issueCount;
+        }
+
+        public void setIssueCount(int issueCount) {
+            this.issueCount = issueCount;
+        }
+
         public long getCreatedBy() {
             return createdBy;
         }
 
         public void setCreatedBy(long createdBy) {
             this.createdBy = createdBy;
+        }
+
+        public Long getSourceAnalysisId() {
+            return sourceAnalysisId;
+        }
+
+        public void setSourceAnalysisId(Long sourceAnalysisId) {
+            this.sourceAnalysisId = sourceAnalysisId;
+        }
+
+        public Instant getOriginalCreatedAt() {
+            return originalCreatedAt;
+        }
+
+        public void setOriginalCreatedAt(Instant originalCreatedAt) {
+            this.originalCreatedAt = originalCreatedAt;
         }
 
         public Instant getCreatedAt() {

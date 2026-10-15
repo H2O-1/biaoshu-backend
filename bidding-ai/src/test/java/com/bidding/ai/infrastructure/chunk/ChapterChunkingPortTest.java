@@ -75,6 +75,22 @@ class ChapterChunkingPortTest {
     }
 
     @Test
+    void heuristicChapterTitleKeepsSourcePageNo() {
+        ChapterChunkingPort port = new ChapterChunkingPort(2000, 500, 50);
+        DocumentTextExtractPort.ExtractResult source = new DocumentTextExtractPort.ExtractResult();
+        source.setFullText("第一章 总则\n本项目要求合格投标人。\n第二章 工期\n交货期 90 天。");
+        List<DocumentTextExtractPort.PageText> pages = new ArrayList<>();
+        pages.add(page(7, "第一章 总则\n本项目要求合格投标人。"));
+        pages.add(page(12, "第二章 工期\n交货期 90 天。"));
+        source.setPages(pages);
+
+        List<ChunkingPort.ChunkDraft> drafts = port.chunk(source);
+
+        assertEquals(Integer.valueOf(7), drafts.get(0).getPageNo());
+        assertEquals(Integer.valueOf(12), drafts.get(1).getPageNo());
+    }
+
+    @Test
     void chineseNumberedHeadingIsRepeatedForSplitSectionChunks() {
         ChapterChunkingPort port = new ChapterChunkingPort(100, 50, 5);
         DocumentTextExtractPort.ExtractResult source = new DocumentTextExtractPort.ExtractResult();

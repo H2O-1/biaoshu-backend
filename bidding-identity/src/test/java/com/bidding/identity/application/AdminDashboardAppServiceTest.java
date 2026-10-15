@@ -59,6 +59,7 @@ class AdminDashboardAppServiceTest {
     @Test
     void getDashboardReturnsCounts() {
         when(orgRepository.countTendererOrgs()).thenReturn(12L);
+        when(orgRepository.countBidderOrgs()).thenReturn(5L);
         when(userRepository.countPlatformAdminsByStatus("ACTIVE")).thenReturn(3L);
         when(userRepository.countPlatformAdminsByStatus("DISABLED")).thenReturn(1L);
         when(reviewStatusCountPort.countByStatus("SUCCESS")).thenReturn(8L);
@@ -69,6 +70,7 @@ class AdminDashboardAppServiceTest {
         AdminDashboardAppService.DashboardSummary summary = adminDashboardAppService.getDashboard();
 
         assertEquals(12L, summary.getTendererOrgCount());
+        assertEquals(5L, summary.getBidderOrgCount());
         assertEquals(3L, summary.getPlatformAdminActiveCount());
         assertEquals(1L, summary.getPlatformAdminDisabledCount());
         assertEquals(8L, summary.getReviewSuccessCount());
@@ -77,6 +79,7 @@ class AdminDashboardAppServiceTest {
         assertEquals(5L, summary.getDocumentIndexFailedCount());
 
         verify(orgRepository).countTendererOrgs();
+        verify(orgRepository).countBidderOrgs();
         verify(userRepository).countPlatformAdminsByStatus("ACTIVE");
         verify(userRepository).countPlatformAdminsByStatus("DISABLED");
         verify(reviewStatusCountPort).countByStatus("SUCCESS");

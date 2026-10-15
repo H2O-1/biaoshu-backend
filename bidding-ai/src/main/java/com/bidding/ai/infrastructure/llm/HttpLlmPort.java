@@ -46,6 +46,9 @@ public class HttpLlmPort implements LlmPort {
     private static final String SYSTEM_TENDER_BASIC =
             "你是招标文件基础信息解析助手。只依据给定候选原文抽取，不得编造。只输出 JSON。";
 
+    private static final String SYSTEM_TENDER_ISSUE =
+            "你是招标文件文本质检助手。只依据给定招标原文片段识别逻辑问题和错别字，不输出法律风险。只输出 JSON。";
+
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
     private final String chatUrl;
@@ -189,6 +192,24 @@ public class HttpLlmPort implements LlmPort {
             return result;
         } catch (IOException ex) {
             throw new IllegalStateException("解析 LLM 招标基础信息结果失败: " + ex.getMessage(), ex);
+        }
+    }
+
+    @Override
+    public TenderIssueScanResult scanTenderIssues(String chunksText) {
+        if (apiKey.isEmpty()) {
+            throw new IllegalStateException("未配置 DASHSCOPE_API_KEY / bidding.llm.api-key");
+        }
+        String chunks = chunksText == null ? "" : chunksText;
+        String content = chatJsonContent(
+                SYSTEM_TENDER_ISSUE,
+                defaultTenderIssueScanPromptTemplate().replace("{{chunksText}}", chunks));
+        try {
+            TenderIssueScanResult result = parseTenderIssueScanFromContent(content);
+            result.setRawContent(content);
+            return result;
+        } catch (IOException ex) {
+            throw new IllegalStateException("解析 LLM 逻辑问题和错别字识别结果失败: " + ex.getMessage(), ex);
         }
     }
 
@@ -736,6 +757,7 @@ public class HttpLlmPort implements LlmPort {
             throw new IllegalStateException("招标基础信息 LLM JSON 须为对象");
         }
         TenderBasicInfo info = new TenderBasicInfo();
+        info.setTenderNo(parseFieldEvidence(node.get("tenderNo")));
         info.setTenderer(parseFieldEvidence(node.get("tenderer")));
         info.setAgency(parseFieldEvidence(node.get("agency")));
         info.setBudgetAmount(parseFieldEvidence(node.get("budgetAmount")));
@@ -744,6 +766,85 @@ public class HttpLlmPort implements LlmPort {
         info.setProjectBackground(parseFieldEvidence(node.get("projectBackground")));
         info.setProjectOverview(parseFieldEvidence(node.get("projectOverview")));
         return info;
+    }
+
+    TenderIssueScanResult parseTenderIssueScanFromContent(String trimmed) throws IOException {
+        JsonNode node = objectMapper.readTree(trimmed);
+        if (node == null || !node.isObject()) {
+            throw new IllegalStateException("逻辑问题和错别字识别 LLM JSON 须为对象");
+        }
+        JsonNode logicNode = node.get("logicIssues");
+        JsonNode typoNode = node.get("typos");
+        if (logicNode == null || !logicNode.isArray() || typoNode == null || !typoNode.isArray()) {
+            throw new IllegalStateException("逻辑问题和错别字识别 LLM JSON 须包含 logicIssues 和 typos 数组");
+        }
+
+        TenderIssueScanResult result = new TenderIssueScanResult();
+        List<LogicIssueCandidate> logicIssues = new ArrayList<>();
+        for (int i = 0; i < logicNode.size(); i++) {
+            LogicIssueCandidate item = parseOneLogicIssue(logicNode.get(i));
+            if (item != null) {
+                logicIssues.add(item);
+            }
+        }
+        result.setLogicIssues(logicIssues);
+
+        List<TypoCandidate> typos = new ArrayList<>();
+        for (int i = 0; i < typoNode.size(); i++) {
+            TypoCandidate item = parseOneTypo(typoNode.get(i));
+            if (item != null) {
+                typos.add(item);
+            }
+        }
+        result.setTypos(typos);
+        return result;
+    }
+
+    private LogicIssueCandidate parseOneLogicIssue(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return null;
+        }
+        LogicIssueCandidate item = new LogicIssueCandidate();
+        item.setTitle(textOf(node, "title"));
+        item.setSeverity(textOf(node, "severity"));
+        item.setIssueType(textOf(node, "issueType"));
+        item.setProblem(textOf(node, "problem"));
+        item.setSuggestion(textOf(node, "suggestion"));
+        item.setEvidence(parseIssueEvidence(node.get("evidence")));
+        return item;
+    }
+
+    private TypoCandidate parseOneTypo(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return null;
+        }
+        TypoCandidate item = new TypoCandidate();
+        item.setWrongText(textOf(node, "wrongText"));
+        item.setSuggestedText(textOf(node, "suggestedText"));
+        item.setContext(textOf(node, "context"));
+        item.setConfidence(textOf(node, "confidence"));
+        item.setSuggestion(textOf(node, "suggestion"));
+        item.setEvidence(parseIssueEvidence(node.get("evidence")));
+        return item;
+    }
+
+    private List<IssueEvidence> parseIssueEvidence(JsonNode node) {
+        List<IssueEvidence> result = new ArrayList<>();
+        if (node == null || !node.isArray()) {
+            return result;
+        }
+        for (int i = 0; i < node.size(); i++) {
+            JsonNode el = node.get(i);
+            if (el == null || !el.isObject()) {
+                continue;
+            }
+            IssueEvidence evidence = new IssueEvidence();
+            evidence.setChunkId(longOf(el, "chunkId"));
+            evidence.setPageNo(intOf(el, "pageNo"));
+            evidence.setQuote(textOf(el, "quote"));
+            result.add(evidence);
+        }
+        return result;
     }
 
     private FieldEvidence parseFieldEvidence(JsonNode node) {
@@ -1308,37 +1409,73 @@ public class HttpLlmPort implements LlmPort {
     }
 
     /**
-     * evidence 默认提示词（产物 D）：条目 + 相关候选原文 → 扁平 fragmentId/page/quote。
+     * evidence 默认提示词（产物 D）：条目 + 相关候选原文 → 扁平 fragmentId/quote。
      */
     private static String defaultEvidencePromptTemplate() {
         return "【任务】为每条已编号清单条目，从相关候选原文中摘录支撑该条的证据。\n"
                 + "【规则】fragmentId 必须等于输入中出现的 chunkId；quote 须是原文连续摘录（≤200字）；"
-                + "page 用候选段 pageNo，未知则 null；一条可多条证据；无对应原文则该 id 不输出；"
+                + "页码由系统根据 fragmentId 回填，不要输出 page/pageNo；一条可多条证据；无对应原文则该 id 不输出；"
                 + "不得编造、不得跨条目混用证据；id 必须与输入一致。\n"
                 + "【约束】只输出 JSON；输入为空则 {\"rows\":[]}。\n"
                 + "【清单条目】\n{{checklist_items}}\n"
                 + "【相关原文】\n{{related_chunks}}\n"
                 + "【输出外形】\n"
-                + "{\"rows\":[{\"id\":\"Q1\",\"fragmentId\":101,\"page\":12,\"quote\":\"...\"}]}";
+                + "{\"rows\":[{\"id\":\"Q1\",\"fragmentId\":101,\"quote\":\"...\"}]}";
     }
 
     private static String defaultTenderBasicPromptTemplate() {
         return "【任务】从候选招标原文中抽取招标基础信息。\n"
-                + "【字段】招标人 tenderer；招标代理 agency；预算金额 budgetAmount；"
+                + "【字段】招标编号 tenderNo；招标人 tenderer；招标代理 agency；预算金额 budgetAmount；"
                 + "投标截止时间 bidDeadline；项目简介 projectIntro；项目背景 projectBackground；项目概况 projectOverview。\n"
                 + "【规则】预算金额不拆分，按原文整体填 value；投标截止时间 text 填原文，"
                 + "iso 填 ISO-8601 UTC 时间（示例 2026-08-15T09:00:00Z），无法确定完整年月日时分则 iso=null；"
-                + "quote 必须是候选原文连续摘录；chunkId/pageNo 必须来自候选标签；字段未明确填 null。\n"
+                + "quote 必须是候选原文连续摘录；chunkId 必须来自候选标签；页码由系统根据 chunkId 回填，不要输出 pageNo；字段未明确填 null。\n"
                 + "【约束】只输出 JSON；不得编造；不要输出多余字段；不要用未知/无等占位文字。\n"
                 + "【候选原文】\n{{recalled_chunks}}\n"
                 + "【输出外形】\n"
-                + "{\"tenderer\":{\"value\":null,\"quote\":null,\"chunkId\":null,\"pageNo\":null},"
-                + "\"agency\":{\"value\":null,\"quote\":null,\"chunkId\":null,\"pageNo\":null},"
-                + "\"budgetAmount\":{\"value\":null,\"quote\":null,\"chunkId\":null,\"pageNo\":null},"
-                + "\"bidDeadline\":{\"text\":null,\"iso\":null,\"quote\":null,\"chunkId\":null,\"pageNo\":null},"
-                + "\"projectIntro\":{\"value\":null,\"quote\":null,\"chunkId\":null,\"pageNo\":null},"
-                + "\"projectBackground\":{\"value\":null,\"quote\":null,\"chunkId\":null,\"pageNo\":null},"
-                + "\"projectOverview\":{\"value\":null,\"quote\":null,\"chunkId\":null,\"pageNo\":null}}";
+                + "{\"tenderNo\":{\"value\":null,\"quote\":null,\"chunkId\":null},"
+                + "\"tenderer\":{\"value\":null,\"quote\":null,\"chunkId\":null},"
+                + "\"agency\":{\"value\":null,\"quote\":null,\"chunkId\":null},"
+                + "\"budgetAmount\":{\"value\":null,\"quote\":null,\"chunkId\":null},"
+                + "\"bidDeadline\":{\"text\":null,\"iso\":null,\"quote\":null,\"chunkId\":null},"
+                + "\"projectIntro\":{\"value\":null,\"quote\":null,\"chunkId\":null},"
+                + "\"projectBackground\":{\"value\":null,\"quote\":null,\"chunkId\":null},"
+                + "\"projectOverview\":{\"value\":null,\"quote\":null,\"chunkId\":null}}";
+    }
+
+    private static String defaultTenderIssueScanPromptTemplate() {
+        return "你是招标文件文本质检助手。请只根据用户提供的招标文件原文片段，识别两类问题：逻辑问题、错别字识别。\n"
+                + "重要规则：\n"
+                + "1. 只根据输入片段判断，不引用外部法律法规，不输出法律风险。\n"
+                + "2. 没有明确原文证据的问题不要输出。\n"
+                + "3. 不要编造 chunkId、原文摘录；页码由系统根据 chunkId 回填，evidence 不要输出 pageNo。\n"
+                + "4. 不要把公司名称、项目名称、人名、地名、证书名称、产品名称等专有名词轻易判为错别字。\n"
+                + "5. 不要把 OCR 断行、页眉页脚、空格、编号格式差异当作错别字。\n"
+                + "6. 没发现问题时返回空数组。\n"
+                + "7. 只返回 JSON 对象，不要 Markdown，不要解释文字。\n"
+                + "逻辑问题识别范围：\n"
+                + "- 同一批片段内金额、时间、数量、比例、分值、门槛前后不一致。\n"
+                + "- 条款之间存在明显矛盾。\n"
+                + "- 评分总分与分项加总明显不一致。\n"
+                + "- 投标截止时间、开标时间、保证金截止时间等时间安排明显冲突。\n"
+                + "- 同一项目名称、标段名称、文件名称、采购方式、评标方法前后明显不一致。\n"
+                + "- 资格门槛、业绩门槛、人员要求与同批片段中的项目规模信息明显不匹配时，可以作为逻辑问题候选输出。\n"
+                + "错别字识别范围：\n"
+                + "- 明显中文错别字。\n"
+                + "- 明显术语错误。\n"
+                + "- 明显多字、漏字、重复字。\n"
+                + "- 明显影响理解的文字错误。\n"
+                + "输出 JSON 格式必须严格如下：\n"
+                + "{\"logicIssues\":[{\"title\":\"简短问题标题\",\"severity\":\"HIGH|MEDIUM|LOW\","
+                + "\"issueType\":\"AMOUNT_INCONSISTENCY|TIME_CONFLICT|SCORE_SUM_MISMATCH|TERM_INCONSISTENCY|THRESHOLD_INCONSISTENCY|OTHER\","
+                + "\"problem\":\"说明问题是什么，只描述输入片段能支持的内容\","
+                + "\"suggestion\":\"修改建议；不确定时写空字符串\","
+                + "\"evidence\":[{\"chunkId\":123,\"quote\":\"必须逐字摘录输入片段中的关键原文\"}]}],"
+                + "\"typos\":[{\"wrongText\":\"疑似错误文字\",\"suggestedText\":\"建议文字\","
+                + "\"context\":\"包含错误文字的短上下文\",\"confidence\":\"HIGH|MEDIUM|LOW\","
+                + "\"suggestion\":\"修改建议；不确定时写空字符串\","
+                + "\"evidence\":[{\"chunkId\":123,\"quote\":\"必须逐字摘录输入片段中的关键原文\"}]}]}\n"
+                + "现在请扫描以下招标文件片段：\n{{chunksText}}";
     }
 
     private static String defaultReviewPromptTemplate() {
@@ -1365,10 +1502,11 @@ public class HttpLlmPort implements LlmPort {
                 + "资格无证据→status=无法判断；评分不设 status；"
                 + "评分无响应→suggestedScore=0 且 judgement 含「未检索到响应，按未响应计 0 分」；"
                 + "bidEvidence.quote 必须从【投标候选原文】逐字连续摘录，禁止改写、概括或补字；"
+                + "页码由系统根据 fragmentId 回填，bidEvidence 不要输出 page/pageNo；"
                 + "做不到则 status=无法判断，judgement 不得写「符合」；"
                 + "多处证据全部保留；不同条目证据不得混用；未明确字段填 null。\n"
                 + "【输出字段】requirementId,title,reviewType(响应性审查|废标风险|评分建议),"
-                + "status(仅资格),vetoRisk,judgement,bidEvidence([{fragmentId,page,quote}]),note,"
+                + "status(仅资格),vetoRisk,judgement,bidEvidence([{fragmentId,quote}]),note,"
                 + "suggestedScore,fullScore,deductionReason(仅评分且 fullScore 非 null)。\n"
                 + "【约束】只输出 JSON 本体；不编造；除无法判断外须有 bidEvidence。";
     }

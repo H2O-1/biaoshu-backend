@@ -104,6 +104,7 @@ class JobSseServiceTest {
 
     @Test
     void openStreamAcceptsAlreadySuccessWithoutThrowing() {
+        UserContext.set(new CurrentUser(10L, 2L, "bidder01", Set.of("BIDDER"), 0, false));
         // 无 Servlet 异步上下文时 SseEmitter.onCompletion 不一定回调，此处只校验鉴权读库与建连
         JobAppService.JobSummary done = baseSummary(JobPort.STATUS_SUCCESS, 100, "完成");
         when(jobAppService.getJob(55L)).thenReturn(done);

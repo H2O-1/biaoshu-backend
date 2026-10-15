@@ -23,7 +23,6 @@ bidding:
     type: memory
   # local 为单进程调试：API 进程内同时开启任务 Poller；
   # 生产部署由独立 bidding-worker 进程执行，API 保持默认关闭。
-  # 僵尸回收（bidding.recovery）为临时人工功能，此处同样默认关闭
   index:
     worker-enabled: true
   checklist:
@@ -32,5 +31,9 @@ bidding:
     worker-enabled: true
   tender-analysis:
     worker-enabled: true
+  bid-simulation-audit:
+    worker-enabled: true
   ai-review-pipeline:
     worker-enabled: true
+  expert-review:
+    deadline-worker-enabled: true

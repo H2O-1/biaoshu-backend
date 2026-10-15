@@ -18,7 +18,9 @@ import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -31,12 +33,14 @@ import java.util.Optional;
 public class TenderAnalysisJobExecutor {
 
     private static final Logger log = LoggerFactory.getLogger(TenderAnalysisJobExecutor.class);
+    private static final String USER_FRIENDLY_FAILURE_MESSAGE = "解析失败，请稍后重试";
 
     private final JobPort jobPort;
     private final DocumentAccessPort documentAccessPort;
     private final DocumentIndexStorePort documentIndexStorePort;
     private final LlmPort llmPort;
     private final ChecklistBuildPipeline checklistBuildPipeline;
+    private final TenderIssueScanPipeline tenderIssueScanPipeline;
     private final TenderAnalysisPort tenderAnalysisPort;
     private final ObjectMapper objectMapper;
 
@@ -45,6 +49,7 @@ public class TenderAnalysisJobExecutor {
                                      DocumentIndexStorePort documentIndexStorePort,
                                      LlmPort llmPort,
                                      ChecklistBuildPipeline checklistBuildPipeline,
+                                     TenderIssueScanPipeline tenderIssueScanPipeline,
                                      TenderAnalysisPort tenderAnalysisPort,
                                      ObjectMapper objectMapper) {
         this.jobPort = jobPort;
@@ -52,6 +57,7 @@ public class TenderAnalysisJobExecutor {
         this.documentIndexStorePort = documentIndexStorePort;
         this.llmPort = llmPort;
         this.checklistBuildPipeline = checklistBuildPipeline;
+        this.tenderIssueScanPipeline = tenderIssueScanPipeline;
         this.tenderAnalysisPort = tenderAnalysisPort;
         this.objectMapper = objectMapper;
     }
@@ -61,7 +67,7 @@ public class TenderAnalysisJobExecutor {
      */
     public boolean claimAndRunOnce(String workerId) {
         Optional<JobPort.JobRef> optional =
-                jobPort.claimNextPendingOrOwnedRunning(JobPort.TYPE_TENDER_ANALYSIS, workerId);
+                jobPort.claimNextRunnable(JobPort.TYPE_TENDER_ANALYSIS, workerId);
         if (optional.isEmpty()) {
             return false;
         }
@@ -107,15 +113,13 @@ public class TenderAnalysisJobExecutor {
             }
 
             if (failedDoc != null) {
-                fail(jobId, payload.analysisId, "文件索引失败: " + failedDoc.getFileName()
-                        + " (documentId=" + failedDoc.getId() + ")");
+                fail(jobId, payload.analysisId, "文件解析失败：" + failedDoc.getFileName());
                 return;
             }
 
             if (waiting > 0) {
                 int progress = 10 + Math.min(30, success * 30 / payload.documentIds.size());
-                jobPort.markRunningProgress(jobId, progress,
-                        "文件解析中 success=" + success + " waiting=" + waiting);
+                jobPort.markRunningProgress(jobId, progress, "文件解析中");
                 return;
             }
 
@@ -129,13 +133,15 @@ public class TenderAnalysisJobExecutor {
 
             LlmPort.TenderBasicInfoResult basicResult =
                     llmPort.extractTenderBasicInfo(formatChunks(chunks));
-            TenderAnalysisPort.BasicInfoDraft basicInfo = toBasicInfoDraft(basicResult);
+            TenderAnalysisPort.BasicInfoDraft basicInfo = toBasicInfoDraft(basicResult, chunks);
             ChecklistBuildPipeline.PipelineResult checklistResult =
                     checklistBuildPipeline.buildFromRankedChunks(
                             toRecallHits(chunks),
                             (progress, message) -> jobPort.markRunningProgress(jobId, progress, message));
             List<TenderAnalysisPort.ItemDraft> itemDrafts =
                     toTenderAnalysisItems(checklistResult.getItems());
+            jobPort.markRunningProgress(jobId, 80, "逻辑问题和错别字识别中");
+            itemDrafts.addAll(tenderIssueScanPipeline.scan(chunks));
             jobPort.markRunningProgress(jobId, 90, "结果保存中");
             if (!itemDrafts.isEmpty()) {
                 tenderAnalysisPort.insertItems(payload.analysisId, itemDrafts);
@@ -147,8 +153,7 @@ public class TenderAnalysisJobExecutor {
                     jobId, payload.analysisId, payload.documentIds.size(), chunks.size(), itemDrafts.size());
         } catch (Exception ex) {
             log.error("招标解析任务执行失败 jobId={} analysisId={}", jobId, payload.analysisId, ex);
-            String message = ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage();
-            fail(jobId, payload.analysisId, message);
+            fail(jobId, payload.analysisId, USER_FRIENDLY_FAILURE_MESSAGE);
         }
     }
 
@@ -190,10 +195,13 @@ public class TenderAnalysisJobExecutor {
         return result;
     }
 
-    private TenderAnalysisPort.BasicInfoDraft toBasicInfoDraft(LlmPort.TenderBasicInfoResult result) {
+    private TenderAnalysisPort.BasicInfoDraft toBasicInfoDraft(LlmPort.TenderBasicInfoResult result,
+                                                               List<DocumentIndexStorePort.ChunkView> chunks) {
         LlmPort.TenderBasicInfo info = result == null ? null : result.getInfo();
         TenderAnalysisPort.BasicInfoDraft draft = new TenderAnalysisPort.BasicInfoDraft();
+        Map<Long, Integer> pageNoByChunkId = pageNoByChunkId(chunks);
         if (info != null) {
+            draft.setTenderNo(valueOf(info.getTenderNo()));
             draft.setTenderer(valueOf(info.getTenderer()));
             draft.setAgency(valueOf(info.getAgency()));
             draft.setBudgetAmountText(valueOf(info.getBudgetAmount()));
@@ -202,7 +210,7 @@ public class TenderAnalysisJobExecutor {
             draft.setProjectIntro(valueOf(info.getProjectIntro()));
             draft.setProjectBackground(valueOf(info.getProjectBackground()));
             draft.setProjectOverview(valueOf(info.getProjectOverview()));
-            draft.setEvidenceJson(buildBasicEvidenceJson(info));
+            draft.setEvidenceJson(buildBasicEvidenceJson(info, pageNoByChunkId));
         } else {
             draft.setEvidenceJson("[]");
         }
@@ -210,25 +218,42 @@ public class TenderAnalysisJobExecutor {
         return draft;
     }
 
-    private String buildBasicEvidenceJson(LlmPort.TenderBasicInfo info) {
+    private Map<Long, Integer> pageNoByChunkId(List<DocumentIndexStorePort.ChunkView> chunks) {
+        Map<Long, Integer> result = new LinkedHashMap<>();
+        if (chunks == null) {
+            return result;
+        }
+        for (int i = 0; i < chunks.size(); i++) {
+            DocumentIndexStorePort.ChunkView chunk = chunks.get(i);
+            if (chunk != null) {
+                result.put(chunk.getChunkId(), chunk.getPageNo());
+            }
+        }
+        return result;
+    }
+
+    private String buildBasicEvidenceJson(LlmPort.TenderBasicInfo info, Map<Long, Integer> pageNoByChunkId) {
         ArrayNode array = objectMapper.createArrayNode();
-        appendEvidence(array, "tenderer", info.getTenderer());
-        appendEvidence(array, "agency", info.getAgency());
-        appendEvidence(array, "budgetAmount", info.getBudgetAmount());
-        appendDeadlineEvidence(array, "bidDeadline", info.getBidDeadline());
-        appendEvidence(array, "projectIntro", info.getProjectIntro());
-        appendEvidence(array, "projectBackground", info.getProjectBackground());
-        appendEvidence(array, "projectOverview", info.getProjectOverview());
+        appendEvidence(array, "tenderNo", info.getTenderNo(), pageNoByChunkId);
+        appendEvidence(array, "tenderer", info.getTenderer(), pageNoByChunkId);
+        appendEvidence(array, "agency", info.getAgency(), pageNoByChunkId);
+        appendEvidence(array, "budgetAmount", info.getBudgetAmount(), pageNoByChunkId);
+        appendDeadlineEvidence(array, "bidDeadline", info.getBidDeadline(), pageNoByChunkId);
+        appendEvidence(array, "projectIntro", info.getProjectIntro(), pageNoByChunkId);
+        appendEvidence(array, "projectBackground", info.getProjectBackground(), pageNoByChunkId);
+        appendEvidence(array, "projectOverview", info.getProjectOverview(), pageNoByChunkId);
         return array.toString();
     }
 
-    private void appendEvidence(ArrayNode array, String field, LlmPort.FieldEvidence evidence) {
+    private void appendEvidence(ArrayNode array, String field, LlmPort.FieldEvidence evidence,
+                                Map<Long, Integer> pageNoByChunkId) {
         if (evidence == null) {
             return;
         }
         String value = valueOf(evidence);
         String quote = trimToNull(evidence.getQuote());
-        if (value == null && quote == null && evidence.getChunkId() == null && evidence.getPageNo() == null) {
+        Integer pageNo = pageNoByChunkId.get(evidence.getChunkId());
+        if (value == null && quote == null && evidence.getChunkId() == null) {
             return;
         }
         ObjectNode node = array.addObject();
@@ -236,16 +261,18 @@ public class TenderAnalysisJobExecutor {
         putNullable(node, "value", value);
         putNullable(node, "quote", quote);
         putNullable(node, "chunkId", evidence.getChunkId());
-        putNullable(node, "pageNo", evidence.getPageNo());
+        putNullable(node, "pageNo", pageNo);
     }
 
-    private void appendDeadlineEvidence(ArrayNode array, String field, LlmPort.DeadlineEvidence evidence) {
+    private void appendDeadlineEvidence(ArrayNode array, String field, LlmPort.DeadlineEvidence evidence,
+                                        Map<Long, Integer> pageNoByChunkId) {
         if (evidence == null) {
             return;
         }
         String text = deadlineTextOf(evidence);
         String quote = trimToNull(evidence.getQuote());
-        if (text == null && quote == null && evidence.getChunkId() == null && evidence.getPageNo() == null) {
+        Integer pageNo = pageNoByChunkId.get(evidence.getChunkId());
+        if (text == null && quote == null && evidence.getChunkId() == null) {
             return;
         }
         ObjectNode node = array.addObject();
@@ -253,7 +280,7 @@ public class TenderAnalysisJobExecutor {
         putNullable(node, "value", text);
         putNullable(node, "quote", quote);
         putNullable(node, "chunkId", evidence.getChunkId());
-        putNullable(node, "pageNo", evidence.getPageNo());
+        putNullable(node, "pageNo", pageNo);
     }
 
     private static String valueOf(LlmPort.FieldEvidence evidence) {

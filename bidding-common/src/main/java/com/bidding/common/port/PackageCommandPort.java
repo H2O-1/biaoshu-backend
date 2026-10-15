@@ -18,6 +18,16 @@ public interface PackageCommandPort {
                                     long createdBy);
 
     /**
+     * 创建未绑定项目的投标包。
+     * preferredName 若与同组织未删除投标包重名，则自动改为 {@code 原名_副本} / {@code 原名_副本2}…
+     *
+     * @return 新标包 id
+     */
+    long createUnboundBidPackage(long orgId,
+                                 String preferredName,
+                                 long createdBy);
+
+    /**
      * 在指定项目下新建已绑定的投标包。
      * preferredName 若与同组织未删除投标包重名，则自动改为 {@code 原名_副本} / {@code 原名_副本2}…
      *

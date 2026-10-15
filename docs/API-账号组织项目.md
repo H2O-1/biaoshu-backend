@@ -237,6 +237,7 @@ Authorization: Bearer <accessToken>
   "message": "ok",
   "data": {
     "tendererOrgCount": 12,
+    "bidderOrgCount": 5,
     "platformAdminActiveCount": 3,
     "platformAdminDisabledCount": 1,
     "reviewSuccessCount": 8,
@@ -250,6 +251,7 @@ Authorization: Bearer <accessToken>
 | 字段 | 说明 |
 |------|------|
 | tendererOrgCount | 招标方组织总数（排除系统组织与已删除） |
+| bidderOrgCount | 投标方组织总数（排除系统组织与已删除） |
 | platformAdminActiveCount | 正常平台管理员账号数（含超管；`ACTIVE`） |
 | platformAdminDisabledCount | 已停用平台管理员账号数（含超管；`DISABLED`） |
 | reviewSuccessCount | AI 审查成功数（`biz_review.status=SUCCESS`，含历史版本行） |
@@ -678,6 +680,7 @@ Authorization: Bearer <accessToken>
         "code": "ORG_A1B2C3D4E5F6",
         "name": "华能招标有限公司",
         "city": "北京市",
+        "orgType": "TENDERER",
         "status": "ACTIVE",
         "userCount": 0,
         "projectCount": 0,
@@ -702,6 +705,7 @@ Authorization: Bearer <accessToken>
 | 字段 | 说明 |
 |------|------|
 | total | 当前筛选（keyword/name + city + status）下的条数 |
+| items[].orgType | 组织类型：`TENDERER` 招标方 / `BIDDER` 投标方；系统组织为 `SYSTEM` |
 | activeCount | 全量正常组织数（不受筛选影响） |
 | disabledCount | 全量停用组织数（不受筛选影响） |
 | pendingConfigCount | 全量待配置：未删除且下属无未删除账号的组织数（不受筛选影响） |
@@ -722,7 +726,8 @@ Authorization: Bearer <accessToken>
 ```json
 {
   "name": "华能招标有限公司",
-  "city": "北京市"
+  "city": "北京市",
+  "orgType": "TENDERER"
 }
 ```
 
@@ -730,17 +735,20 @@ Authorization: Bearer <accessToken>
 |------|------|------|------|
 | name | string | 是 | 公司名称，全局唯一，最长 128；创建后可编辑 |
 | city | string | 是 | 所在城市，必须为 `GET /api/admin/cities` 返回的 `name`（精确匹配） |
+| orgType | string | 否 | 组织类型：`TENDERER` 招标方 / `BIDDER` 投标方；不传默认 `TENDERER` |
 
-**成功响应**：`data` 为新建组织摘要（含自动生成的 `code`，`status=ACTIVE`，`userCount=0`）。
+**成功响应**：`data` 为新建组织摘要（含自动生成的 `code`，`orgType`，`status=ACTIVE`，`userCount=0`）。
 
 **常见失败**
 
 | code | 说明 |
 |------|------|
-| 40000 | 名称/城市为空，或城市不在地级市词典中 |
+| 40000 | 名称/城市为空，城市不在地级市词典中，或 `orgType` 非法 |
 | 40900 | 公司名称已存在 |
 
 允许先建空组织（无账号）。
+
+创建账号时，账号角色需与组织类型一致：`TENDERER` 组织不能创建 `BIDDER` 账号，`BIDDER` 组织不能创建 `TENDERER` 账号。
 
 ---
 
@@ -864,11 +872,12 @@ Authorization: Bearer <accessToken>
 
 ---
 
-### 4.4.1 修改招标方账号资料
+### 4.4.1 修改组织业务账号资料
 
 `PUT /api/admin/orgs/{orgId}/users/{userId}/profile`
 
-平台管理员修改**指定招标方组织**下、角色含 `TENDERER` 的账号资料。  
+平台管理员修改**指定组织**下、与组织类型匹配的业务账号资料：
+`TENDERER` 组织仅可修改角色含 `TENDERER` 的账号，`BIDDER` 组织仅可修改角色含 `BIDDER` 的账号。  
 不改公司名称、城市、登录账号；系统组织账号不可走本接口。
 
 **请求体**
@@ -893,7 +902,7 @@ Authorization: Bearer <accessToken>
 
 | code | 说明 |
 |------|------|
-| 40000 | 参数不合法 / 用户不属于该组织 / 非招标方账号 / 系统组织 / 已删除账号 |
+| 40000 | 参数不合法 / 用户不属于该组织 / 账号角色与组织类型不匹配 / 系统组织 / 已删除账号 |
 | 40400 | 组织或用户不存在 |
 | 40900 | 手机号或邮箱已被占用 |
 
@@ -978,7 +987,9 @@ Authorization: Bearer <accessToken>
 | `NEED_BID_FILES` | 待补充投标文件 | 招标已齐；投标文件数=0（0 不算齐），或存在投标文件 `indexStatus`≠`SUCCESS` |
 | `READY_FOR_AI_REVIEW` | 待AI审查 | 两侧文件均已解析成功，且无进行中审查、最新审查非 SUCCESS/FAILED（含无审查、或已 `OBSOLETE`） |
 | `AI_REVIEWING` | AI审查中 | 存在 REVIEW 任务 `PENDING`/`RUNNING`，或审查行 `BUILDING` |
-| `AI_REVIEW_SUCCESS` | AI审查完成 | 最新 `biz_review.status=SUCCESS` |
+| `EXPERT_REVIEWING` | 专家评审中 | 最新 AI 审查为 `SUCCESS`，且最新已推送专家评审为 `RUNNING` |
+| `EXPERT_REVIEW_SUCCESS` | 专家评审完成 | 最新 AI 审查为 `SUCCESS`，且最新已推送专家评审为 `SUCCESS` |
+| `AI_REVIEW_SUCCESS` | AI审查完成 | 最新 `biz_review.status=SUCCESS`，且未推送专家评审 |
 | `AI_REVIEW_FAILED` | AI审查失败 | 最新 `biz_review.status=FAILED` |
 
 > 不做单独的「待AI重新审查」状态码：项目下**上传 / 复制 / 删除**任一招标或投标文件时，若建清单/审查/一键审查进行中 → `40900`；否则将相关产物标为 `OBSOLETE`（**招标**：清单+审查；**仅投标**：只作废审查，清单可复用）。`OBSOLETE` 记录保留，详情仍可按 id 查看。文件解析齐后 `workflowStatus` 回到 `READY_FOR_AI_REVIEW`（或待补文件）；重新发起仍用一键审查。删投标包时，仅包内有文件才同理作废审查；空投标包删除不影响审查状态。
@@ -1002,6 +1013,11 @@ Authorization: Bearer <accessToken>
         "status": "ACTIVE",
         "workflowStatus": "READY_FOR_AI_REVIEW",
         "workflowMessage": "待AI审查",
+        "aiReviewJobId": null,
+        "expertReviewId": null,
+        "expertReviewStatus": null,
+        "expertCount": null,
+        "submittedExpertCount": null,
         "createdBy": 10,
         "createdAt": "2026-07-21T08:00:00Z",
         "updatedAt": "2026-07-21T08:00:00Z",
@@ -1028,6 +1044,10 @@ Authorization: Bearer <accessToken>
 | workflowStatus | 派生业务进度（见上表） |
 | workflowMessage | 面向页面展示的进度文案；招标文件解析失败时为 `{招标单位名称}招标文件解析失败` |
 | aiReviewJobId | 最新一键 AI 审查总任务 id；无则为 null；可 `GET /api/jobs/{aiReviewJobId}` 续查 |
+| expertReviewId | 最新已推送专家评审 id；未推送为 `null` |
+| expertReviewStatus | 最新已推送专家评审状态：`RUNNING` / `SUCCESS`；未推送为 `null` |
+| expertCount | 专家总人数；未推送为 `null` |
+| submittedExpertCount | 已提交专家人数；未推送为 `null` |
 | tenderPackageId | 已绑招标包 ID；无则为 null |
 | tenderPackageCount | 已绑招标包数量（通常 0/1） |
 | tenderFileCount | 招标包下未删除文件数（「N 个文件」） |
@@ -1177,7 +1197,9 @@ Authorization: Bearer <accessToken>
 `DELETE /api/projects/{projectId}`
 
 `status` → `DELETED`，之后不可再查。  
-已绑定的招标包**仍占着**（不可再绑到新项目、不可删）；释放规则以后另定。
+已绑定的招标包**仍占着**（不可再绑到新项目、不可删）。  
+项目下已绑定的 `BID` 投标包会同步软删，并级联逻辑删除包内文件，释放投标公司名称占用。
+若项目已进入专家评审，删除项目会同步清理专家评审：专家评审主记录和成员标记为 `DELETED`，对应临时专家账号物理删除，专家端不可继续查看、保存或提交该项目评审任务。
 
 **成功响应**
 
@@ -1288,9 +1310,9 @@ Authorization: Bearer <accessToken>
 ### 项目
 - 仅 `TENDERER`；平台管理员无招标方角色 → **403**。
 - `orgId` 一律取登录态，前端不可跨组织指定；跨组织资源统一 **404**（防探测）。
-- 创建项目必须绑一个本组织**未占用**招标包；绑完后招标包不可删、不可再绑；删项目不释放招标包占用（现行规则）。
+- 创建项目必须绑一个本组织**未占用**招标包；绑完后招标包不可删、不可再绑；删项目不释放招标包占用（现行规则），但项目下 `BID` 投标包会同步软删并释放投标公司名称。
 - 绑包时同步回写该包内已上传文件的 `project_id`（支持先上传后创建项目）。
 - 停用项目仍可改基本信息；已删项目不可查。
 - `agency` / `projectType` / `leaderName` 创建与更新均可空；空白存 `null`；更新时传空白会清空。
 - 列表/详情派生：`mainTenderFileName`（`fileType=招标文件`）、`bidPackageCount` / `bidPackageUploadedCount` / `bidFileCount`。
-- `workflowStatus` 为派生字段（不落库）：待补充招标/投标（含解析中、解析失败）、待AI审查、AI审查中/完成/失败；与 `status` 启停分离。项目下上传/复制/删除招标或投标文件会作废相关审查（改招标另作废清单）；删除有文件的投标包同理作废审查，删除空投标包不影响审查状态；`OBSOLETE` 详情仍可查看；解析齐后回到待审查或待补文件。
+- `workflowStatus` 为派生字段（不落库）：待补充招标/投标（含解析中、解析失败）、待AI审查、AI审查中/完成/失败、专家评审中/完成；与 `status` 启停分离。项目下上传/复制/删除招标或投标文件会作废相关审查（改招标另作废清单）；删除有文件的投标包同理作废审查，删除空投标包不影响审查状态；`OBSOLETE` 详情仍可查看；解析齐后回到待审查或待补文件。

@@ -81,5 +81,7 @@ public interface PackageRepository {
 
     List<BizPackage> searchByProjectIdAndType(long projectId, String type, int offset, int limit);
 
+    List<BizPackage> listByProjectIdAndType(long projectId, String type);
+
     long countByProjectIdAndType(long projectId, String type);
 }

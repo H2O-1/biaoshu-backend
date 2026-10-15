@@ -1,8 +1,15 @@
 package com.bidding.ai.infrastructure.extract;
 
+import com.bidding.ai.infrastructure.ocr.OcrProperties;
+import com.bidding.common.port.DocumentOcrPort;
 import com.bidding.common.port.DocumentTextExtractPort;
+import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDResources;
+import org.apache.pdfbox.pdmodel.graphics.PDXObject;
+import org.apache.pdfbox.pdmodel.graphics.form.PDFormXObject;
+import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.apache.pdfbox.pdmodel.interactive.action.PDAction;
 import org.apache.pdfbox.pdmodel.interactive.action.PDActionGoTo;
 import org.apache.pdfbox.pdmodel.interactive.documentnavigation.destination.PDDestination;
@@ -13,6 +20,7 @@ import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlin
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.poi.openxml4j.util.ZipSecureFile;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.stereotype.Component;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
@@ -22,19 +30,30 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 
 /**
  * PDF（PDFBox）+ Word docx（POI）文本抽取。
  * PDF 尽量读取 Outline；Word 用标题样式生成伪目录。
  */
 @Component
+@EnableConfigurationProperties(OcrProperties.class)
 public class PdfWordTextExtractPort implements DocumentTextExtractPort {
 
     private static final String WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    private static final int LARGE_IMAGE_MIN_AREA = 8000;
+
+    private final Optional<DocumentOcrPort> documentOcrPort;
+    private final OcrProperties ocrProperties;
 
     static {
         // 招标 docx 常含高度压缩的 EMF/WMF 图，默认 MIN_INFLATE_RATIO=0.01 会误判 zip bomb
         ZipSecureFile.setMinInflateRatio(0.001d);
+    }
+
+    public PdfWordTextExtractPort(Optional<DocumentOcrPort> documentOcrPort, OcrProperties ocrProperties) {
+        this.documentOcrPort = documentOcrPort == null ? Optional.empty() : documentOcrPort;
+        this.ocrProperties = ocrProperties == null ? new OcrProperties() : ocrProperties;
     }
 
     @Override
@@ -59,7 +78,17 @@ public class PdfWordTextExtractPort implements DocumentTextExtractPort {
     }
 
     private ExtractResult extractPdf(InputStream content) {
-        try (PDDocument document = PDDocument.load(content)) {
+        try {
+            byte[] pdfBytes = content.readAllBytes();
+            try (PDDocument document = PDDocument.load(pdfBytes)) {
+                return extractPdf(pdfBytes, document);
+            }
+        } catch (IOException ex) {
+            throw new IllegalStateException("解析 PDF 失败: " + ex.getMessage(), ex);
+        }
+    }
+
+    private ExtractResult extractPdf(byte[] pdfBytes, PDDocument document) throws IOException {
             if (document.isEncrypted()) {
                 throw new IllegalStateException("PDF 已加密，无法抽取文本");
             }
@@ -67,6 +96,10 @@ public class PdfWordTextExtractPort implements DocumentTextExtractPort {
             PDFTextStripper stripper = new PDFTextStripper();
             List<PageText> pages = new ArrayList<>();
             StringBuilder full = new StringBuilder();
+            int totalNativeChars = 0;
+            boolean hasSparsePage = false;
+            boolean hasLargeImagePage = false;
+            int minPageChars = minPageChars();
 
             for (int page = 1; page <= pageCount; page++) {
                 stripper.setStartPage(page);
@@ -80,6 +113,14 @@ public class PdfWordTextExtractPort implements DocumentTextExtractPort {
                 pt.setPageNo(page);
                 pt.setText(pageText);
                 pages.add(pt);
+                int charCount = countTextChars(pageText);
+                totalNativeChars += charCount;
+                if (charCount < minPageChars) {
+                    hasSparsePage = true;
+                }
+                if (hasLargeImage(document.getPage(page - 1))) {
+                    hasLargeImagePage = true;
+                }
                 if (!pageText.isEmpty()) {
                     if (full.length() > 0) {
                         full.append('\n');
@@ -88,17 +129,98 @@ public class PdfWordTextExtractPort implements DocumentTextExtractPort {
                 }
             }
 
+            if (shouldInvokePdfOcr(totalNativeChars, hasSparsePage, hasLargeImagePage)) {
+                return extractPdfByOcr(pdfBytes, readPdfOutline(document));
+            }
+
             ExtractResult result = new ExtractResult();
             result.setFullText(full.toString());
             result.setPages(pages);
             result.setOutline(readPdfOutline(document));
             if (result.isBlank()) {
-                result.setWarning("未能抽取到文本，可能是扫描件（本期不支持 OCR）");
+                result.setWarning("未能从文件抽取到文本，扫描版 PDF 需启用 OCR 服务");
             }
             return result;
-        } catch (IOException ex) {
-            throw new IllegalStateException("解析 PDF 失败: " + ex.getMessage(), ex);
+    }
+
+    private boolean shouldInvokePdfOcr(int totalNativeChars, boolean hasSparsePage, boolean hasLargeImagePage) {
+        if (!ocrProperties.isEnabled()) {
+            return false;
         }
+        return totalNativeChars < minTotalChars()
+                || hasSparsePage
+                || hasLargeImagePage;
+    }
+
+    private ExtractResult extractPdfByOcr(byte[] pdfBytes, List<OutlineItem> outline) {
+        DocumentOcrPort ocrPort = documentOcrPort.orElseThrow(
+                () -> new IllegalStateException("OCR 服务未注册，无法识别扫描版 PDF"));
+        DocumentOcrPort.OcrPdfResult ocrResult = ocrPort.ocrPdf(pdfBytes, false);
+        List<PageText> pages = new ArrayList<>();
+        StringBuilder full = new StringBuilder();
+        for (DocumentOcrPort.OcrPageResult page : ocrResult.getPages()) {
+            String pageText = page.getText() == null ? "" : page.getText().trim();
+            PageText item = page(page.getPageNo(), pageText);
+            pages.add(item);
+            if (!pageText.isEmpty()) {
+                if (full.length() > 0) {
+                    full.append('\n');
+                }
+                full.append(pageText);
+            }
+        }
+        if (full.length() == 0) {
+            throw new IllegalStateException("文档 OCR 未识别到有效文本");
+        }
+        ExtractResult result = new ExtractResult();
+        result.setFullText(full.toString());
+        result.setPages(pages);
+        result.setOutline(outline);
+        return result;
+    }
+
+    private boolean hasLargeImage(PDPage page) throws IOException {
+        if (page == null) {
+            return false;
+        }
+        return hasLargeImage(page.getResources(), 0);
+    }
+
+    private boolean hasLargeImage(PDResources resources, int depth) throws IOException {
+        if (resources == null || depth > 4) {
+            return false;
+        }
+        for (COSName name : resources.getXObjectNames()) {
+            PDXObject object = resources.getXObject(name);
+            if (object instanceof PDImageXObject) {
+                PDImageXObject image = (PDImageXObject) object;
+                long area = (long) image.getWidth() * image.getHeight();
+                if (area >= LARGE_IMAGE_MIN_AREA) {
+                    return true;
+                }
+            } else if (object instanceof PDFormXObject) {
+                PDFormXObject form = (PDFormXObject) object;
+                if (hasLargeImage(form.getResources(), depth + 1)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private int minTotalChars() {
+        return ocrProperties.getMinTotalChars() < 1 ? 50 : ocrProperties.getMinTotalChars();
+    }
+
+    private int minPageChars() {
+        return ocrProperties.getMinPageChars() < 1 ? 30 : ocrProperties.getMinPageChars();
+    }
+
+    private static int countTextChars(String text) {
+        if (text == null || text.isBlank()) {
+            return 0;
+        }
+        return text.replaceAll("\\s+", "").length();
     }
 
     private List<OutlineItem> readPdfOutline(PDDocument document) {

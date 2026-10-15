@@ -4,9 +4,12 @@ import com.bidding.common.api.PageResult;
 import com.bidding.common.error.BizException;
 import com.bidding.common.error.ErrorCode;
 import com.bidding.common.port.BidPackageReviewSummaryPort;
+import com.bidding.common.port.DocumentCascadePort;
 import com.bidding.common.port.DocumentCountPort;
 import com.bidding.common.port.DocumentProjectBindPort;
 import com.bidding.common.port.OrgLookupPort;
+import com.bidding.common.port.ProjectArtifactInvalidationPort;
+import com.bidding.common.port.ProjectExpertReviewProgressPort;
 import com.bidding.common.port.ProjectReviewProgressPort;
 import com.bidding.common.port.ReviewPort;
 import com.bidding.common.security.CurrentUser;
@@ -55,6 +58,10 @@ public class ProjectAppService {
     public static final String WORKFLOW_AI_REVIEW_SUCCESS = "AI_REVIEW_SUCCESS";
     /** AI审查失败 */
     public static final String WORKFLOW_AI_REVIEW_FAILED = "AI_REVIEW_FAILED";
+    /** 专家评审中 */
+    public static final String WORKFLOW_EXPERT_REVIEWING = "EXPERT_REVIEWING";
+    /** 专家评审完成 */
+    public static final String WORKFLOW_EXPERT_REVIEW_SUCCESS = "EXPERT_REVIEW_SUCCESS";
 
     /** 主招标文件业务类型（前端上传 fileType；业务约定每项目至多一份） */
     public static final String FILE_TYPE_MAIN_TENDER = "招标文件";
@@ -73,26 +80,35 @@ public class ProjectAppService {
 
     private final ProjectRepository projectRepository;
     private final PackageRepository packageRepository;
+    private final DocumentCascadePort documentCascadePort;
     private final DocumentCountPort documentCountPort;
     private final DocumentProjectBindPort documentProjectBindPort;
     private final OrgLookupPort orgLookupPort;
     private final ProjectReviewProgressPort projectReviewProgressPort;
+    private final ProjectExpertReviewProgressPort projectExpertReviewProgressPort;
     private final BidPackageReviewSummaryPort bidPackageReviewSummaryPort;
+    private final ProjectArtifactInvalidationPort projectArtifactInvalidationPort;
 
     public ProjectAppService(ProjectRepository projectRepository,
                              PackageRepository packageRepository,
+                             DocumentCascadePort documentCascadePort,
                              DocumentCountPort documentCountPort,
                              DocumentProjectBindPort documentProjectBindPort,
                              OrgLookupPort orgLookupPort,
                              ProjectReviewProgressPort projectReviewProgressPort,
-                             BidPackageReviewSummaryPort bidPackageReviewSummaryPort) {
+                             ProjectExpertReviewProgressPort projectExpertReviewProgressPort,
+                             BidPackageReviewSummaryPort bidPackageReviewSummaryPort,
+                             ProjectArtifactInvalidationPort projectArtifactInvalidationPort) {
         this.projectRepository = projectRepository;
         this.packageRepository = packageRepository;
+        this.documentCascadePort = documentCascadePort;
         this.documentCountPort = documentCountPort;
         this.documentProjectBindPort = documentProjectBindPort;
         this.orgLookupPort = orgLookupPort;
         this.projectReviewProgressPort = projectReviewProgressPort;
+        this.projectExpertReviewProgressPort = projectExpertReviewProgressPort;
         this.bidPackageReviewSummaryPort = bidPackageReviewSummaryPort;
+        this.projectArtifactInvalidationPort = projectArtifactInvalidationPort;
     }
 
     /**
@@ -279,7 +295,7 @@ public class ProjectAppService {
     /**
      * 逻辑删除项目。
      * 已绑定的招标包仍占着（不可再绑、不可删），释放规则以后再定。
-     * 已绑定的投标包仍挂着 project_id；删投标包本身可直接删。
+     * 已绑定的投标包随项目软删，释放投标公司名称占用。
      */
     @Transactional
     public void delete(long projectId) {
@@ -288,7 +304,19 @@ public class ProjectAppService {
         if (project.isDeleted()) {
             return;
         }
+        projectArtifactInvalidationPort.deleteExpertReviewsByProjectId(project.getOrgId(), projectId);
+        softDeleteBidPackages(projectId);
         projectRepository.updateStatus(projectId, STATUS_DELETED);
+    }
+
+    private void softDeleteBidPackages(long projectId) {
+        List<BizPackage> bidPackages = packageRepository.listByProjectIdAndType(
+                projectId, PackageAppService.TYPE_BID);
+        for (int i = 0; i < bidPackages.size(); i++) {
+            BizPackage bidPackage = bidPackages.get(i);
+            documentCascadePort.softDeleteAllActiveByPackageId(bidPackage.getId());
+            packageRepository.updateStatus(bidPackage.getId(), STATUS_DELETED);
+        }
     }
 
     /**
@@ -430,12 +458,13 @@ public class ProjectAppService {
         summary.setBidFileCount(documentCountPort.countActiveByProjectIdAndPackageType(
                 project.getId(), PackageAppService.TYPE_BID));
 
-        String workflowStatus = resolveWorkflowStatus(project.getId());
-        summary.setWorkflowStatus(workflowStatus);
+        WorkflowResolution workflow = resolveWorkflow(project.getOrgId(), project.getId());
+        summary.setWorkflowStatus(workflow.getStatus());
         summary.setWorkflowMessage(resolveWorkflowMessage(
-                workflowStatus, tendererOrgName, tenderPackageIndexStatus));
+                workflow.getStatus(), tendererOrgName, tenderPackageIndexStatus));
         summary.setAiReviewJobId(
                 projectReviewProgressPort.findLatestAiReviewPipelineJobId(project.getId()));
+        fillExpertReviewProgress(summary, workflow.getExpertReview());
         return summary;
     }
 
@@ -464,6 +493,12 @@ public class ProjectAppService {
         if (WORKFLOW_AI_REVIEW_FAILED.equals(workflowStatus)) {
             return "AI审查失败";
         }
+        if (WORKFLOW_EXPERT_REVIEWING.equals(workflowStatus)) {
+            return "专家评审中";
+        }
+        if (WORKFLOW_EXPERT_REVIEW_SUCCESS.equals(workflowStatus)) {
+            return "专家评审完成";
+        }
         return null;
     }
 
@@ -483,13 +518,17 @@ public class ProjectAppService {
      *   <li>两侧文件齐且均解析成功后：看审查任务 / 最新审查结果</li>
      * </ul>
      */
-    String resolveWorkflowStatus(long projectId) {
+    String resolveWorkflowStatus(long orgId, long projectId) {
+        return resolveWorkflow(orgId, projectId).getStatus();
+    }
+
+    private WorkflowResolution resolveWorkflow(long orgId, long projectId) {
         long tenderFiles = documentCountPort.countActiveByProjectIdAndPackageType(
                 projectId, PackageAppService.TYPE_TENDER);
         long tenderNotReady = documentCountPort.countActiveNotSuccessIndexByProjectIdAndPackageType(
                 projectId, PackageAppService.TYPE_TENDER);
         if (tenderFiles < 1 || tenderNotReady > 0) {
-            return WORKFLOW_NEED_TENDER_FILES;
+            return new WorkflowResolution(WORKFLOW_NEED_TENDER_FILES, null);
         }
 
         long bidFiles = documentCountPort.countActiveByProjectIdAndPackageType(
@@ -497,22 +536,43 @@ public class ProjectAppService {
         long bidNotReady = documentCountPort.countActiveNotSuccessIndexByProjectIdAndPackageType(
                 projectId, PackageAppService.TYPE_BID);
         if (bidFiles < 1 || bidNotReady > 0) {
-            return WORKFLOW_NEED_BID_FILES;
+            return new WorkflowResolution(WORKFLOW_NEED_BID_FILES, null);
         }
 
         if (projectReviewProgressPort.hasInProgressReview(projectId)) {
-            return WORKFLOW_AI_REVIEWING;
+            return new WorkflowResolution(WORKFLOW_AI_REVIEWING, null);
         }
 
         String latest = projectReviewProgressPort.findLatestReviewStatus(projectId);
         if (ReviewPort.STATUS_SUCCESS.equals(latest)) {
-            return WORKFLOW_AI_REVIEW_SUCCESS;
+            ProjectExpertReviewProgressPort.Summary expertReview =
+                    projectExpertReviewProgressPort.findLatestActiveByProject(orgId, projectId);
+            if (expertReview != null
+                    && ProjectExpertReviewProgressPort.STATUS_RUNNING.equals(expertReview.getStatus())) {
+                return new WorkflowResolution(WORKFLOW_EXPERT_REVIEWING, expertReview);
+            }
+            if (expertReview != null
+                    && ProjectExpertReviewProgressPort.STATUS_SUCCESS.equals(expertReview.getStatus())) {
+                return new WorkflowResolution(WORKFLOW_EXPERT_REVIEW_SUCCESS, expertReview);
+            }
+            return new WorkflowResolution(WORKFLOW_AI_REVIEW_SUCCESS, null);
         }
         if (ReviewPort.STATUS_FAILED.equals(latest)) {
-            return WORKFLOW_AI_REVIEW_FAILED;
+            return new WorkflowResolution(WORKFLOW_AI_REVIEW_FAILED, null);
         }
         // BUILDING 已在 hasInProgressReview 覆盖；无审查或其它 → 待审查
-        return WORKFLOW_READY_FOR_AI_REVIEW;
+        return new WorkflowResolution(WORKFLOW_READY_FOR_AI_REVIEW, null);
+    }
+
+    private void fillExpertReviewProgress(ProjectSummary summary,
+                                          ProjectExpertReviewProgressPort.Summary expertReview) {
+        if (expertReview == null) {
+            return;
+        }
+        summary.setExpertReviewId(expertReview.getReviewId());
+        summary.setExpertReviewStatus(expertReview.getStatus());
+        summary.setExpertCount(expertReview.getExpertCount());
+        summary.setSubmittedExpertCount(expertReview.getSubmittedExpertCount());
     }
 
     /**
@@ -692,11 +752,14 @@ public class ProjectAppService {
                 && !WORKFLOW_READY_FOR_AI_REVIEW.equals(normalized)
                 && !WORKFLOW_AI_REVIEWING.equals(normalized)
                 && !WORKFLOW_AI_REVIEW_SUCCESS.equals(normalized)
-                && !WORKFLOW_AI_REVIEW_FAILED.equals(normalized)) {
+                && !WORKFLOW_AI_REVIEW_FAILED.equals(normalized)
+                && !WORKFLOW_EXPERT_REVIEWING.equals(normalized)
+                && !WORKFLOW_EXPERT_REVIEW_SUCCESS.equals(normalized)) {
             throw new BizException(ErrorCode.BAD_REQUEST,
                     "workflowStatus 仅支持 NEED_TENDER_FILES / NEED_BID_FILES / "
                             + "READY_FOR_AI_REVIEW / AI_REVIEWING / "
-                            + "AI_REVIEW_SUCCESS / AI_REVIEW_FAILED");
+                            + "AI_REVIEW_SUCCESS / AI_REVIEW_FAILED / "
+                            + "EXPERT_REVIEWING / EXPERT_REVIEW_SUCCESS");
         }
         return normalized;
     }
@@ -710,6 +773,24 @@ public class ProjectAppService {
             throw new BizException(ErrorCode.BAD_REQUEST, "status 仅支持 ACTIVE 或 DISABLED");
         }
         return normalized;
+    }
+
+    private static class WorkflowResolution {
+        private final String status;
+        private final ProjectExpertReviewProgressPort.Summary expertReview;
+
+        WorkflowResolution(String status, ProjectExpertReviewProgressPort.Summary expertReview) {
+            this.status = status;
+            this.expertReview = expertReview;
+        }
+
+        String getStatus() {
+            return status;
+        }
+
+        ProjectExpertReviewProgressPort.Summary getExpertReview() {
+            return expertReview;
+        }
     }
 
     /** 项目摘要 */
@@ -747,6 +828,14 @@ public class ProjectAppService {
          * 前端可据此继续轮询 GET /api/jobs/{aiReviewJobId}。
          */
         private Long aiReviewJobId;
+        /** 最新已推送专家评审 id；未推送为 null。 */
+        private Long expertReviewId;
+        /** 最新已推送专家评审状态：RUNNING / SUCCESS；未推送为 null。 */
+        private String expertReviewStatus;
+        /** 专家总人数；未推送为 null。 */
+        private Integer expertCount;
+        /** 已提交专家人数；未推送为 null。 */
+        private Integer submittedExpertCount;
         /**
          * 仅详情填充：已绑招标包摘要（含 indexStatus）；列表接口为 null。
          */
@@ -922,6 +1011,38 @@ public class ProjectAppService {
 
         public void setAiReviewJobId(Long aiReviewJobId) {
             this.aiReviewJobId = aiReviewJobId;
+        }
+
+        public Long getExpertReviewId() {
+            return expertReviewId;
+        }
+
+        public void setExpertReviewId(Long expertReviewId) {
+            this.expertReviewId = expertReviewId;
+        }
+
+        public String getExpertReviewStatus() {
+            return expertReviewStatus;
+        }
+
+        public void setExpertReviewStatus(String expertReviewStatus) {
+            this.expertReviewStatus = expertReviewStatus;
+        }
+
+        public Integer getExpertCount() {
+            return expertCount;
+        }
+
+        public void setExpertCount(Integer expertCount) {
+            this.expertCount = expertCount;
+        }
+
+        public Integer getSubmittedExpertCount() {
+            return submittedExpertCount;
+        }
+
+        public void setSubmittedExpertCount(Integer submittedExpertCount) {
+            this.submittedExpertCount = submittedExpertCount;
         }
 
         public PackageAppService.PackageSummary getTenderPackage() {

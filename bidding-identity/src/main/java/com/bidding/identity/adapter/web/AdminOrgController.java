@@ -49,7 +49,8 @@ public class AdminOrgController {
     @PostMapping
     public ApiResponse<AdminOrgAppService.OrgSummary> createOrg(
             @Valid @RequestBody CreateOrgRequest request) {
-        return ApiResponse.ok(adminOrgAppService.createOrg(request.getName(), request.getCity()));
+        return ApiResponse.ok(adminOrgAppService.createOrg(
+                request.getName(), request.getCity(), request.getOrgType()));
     }
 
     @GetMapping("/{orgId}")
@@ -81,14 +82,14 @@ public class AdminOrgController {
     }
 
     /**
-     * 修改指定组织下招标方账号的负责人姓名、手机号、邮箱。
+     * 修改指定组织下业务账号的负责人姓名、手机号、邮箱。
      */
     @PutMapping("/{orgId}/users/{userId}/profile")
-    public ApiResponse<AdminUserAppService.UserSummary> updateTendererProfile(
+    public ApiResponse<AdminUserAppService.UserSummary> updateBusinessUserProfile(
             @PathVariable("orgId") long orgId,
             @PathVariable("userId") long userId,
-            @Valid @RequestBody UpdateTendererProfileRequest request) {
-        return ApiResponse.ok(adminUserAppService.updateTendererProfile(
+            @Valid @RequestBody UpdateBusinessUserProfileRequest request) {
+        return ApiResponse.ok(adminUserAppService.updateOrgBusinessUserProfile(
                 orgId,
                 userId,
                 request.getDisplayName(),
@@ -122,6 +123,9 @@ public class AdminOrgController {
         @Size(max = 64)
         private String city;
 
+        @Size(max = 32)
+        private String orgType;
+
         public String getName() {
             return name;
         }
@@ -136,6 +140,14 @@ public class AdminOrgController {
 
         public void setCity(String city) {
             this.city = city;
+        }
+
+        public String getOrgType() {
+            return orgType;
+        }
+
+        public void setOrgType(String orgType) {
+            this.orgType = orgType;
         }
     }
 
@@ -165,7 +177,7 @@ public class AdminOrgController {
         }
     }
 
-    public static class UpdateTendererProfileRequest {
+    public static class UpdateBusinessUserProfileRequest {
         @NotBlank
         @Size(max = 128)
         private String displayName;

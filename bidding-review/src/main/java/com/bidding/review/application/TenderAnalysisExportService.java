@@ -1,0 +1,406 @@
+package com.bidding.review.application;
+
+import com.bidding.common.error.BizException;
+import com.bidding.common.error.ErrorCode;
+import com.bidding.common.port.DocumentAccessPort;
+import com.bidding.common.port.TenderAnalysisPort;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.CellStyle;
+import org.apache.poi.ss.usermodel.Font;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * 招标解析结果导出。
+ */
+@Service
+public class TenderAnalysisExportService {
+
+    private static final ZoneId EXPORT_ZONE = ZoneId.of("Asia/Shanghai");
+    private static final DateTimeFormatter TIME_FORMATTER =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(EXPORT_ZONE);
+
+    private final TenderAnalysisAppService tenderAnalysisAppService;
+    private final DocumentAccessPort documentAccessPort;
+    private final ObjectMapper objectMapper;
+
+    public TenderAnalysisExportService(TenderAnalysisAppService tenderAnalysisAppService,
+                                       DocumentAccessPort documentAccessPort,
+                                       ObjectMapper objectMapper) {
+        this.tenderAnalysisAppService = tenderAnalysisAppService;
+        this.documentAccessPort = documentAccessPort;
+        this.objectMapper = objectMapper;
+    }
+
+    @Transactional(readOnly = true)
+    public ExportFile exportAnalysis(long analysisId) {
+        TenderAnalysisPort.AnalysisDetail detail = tenderAnalysisAppService.get(analysisId);
+        if (!TenderAnalysisPort.STATUS_SUCCESS.equals(detail.getStatus())) {
+            throw new BizException(ErrorCode.CONFLICT, "招标解析未成功，不能导出");
+        }
+
+        try (Workbook workbook = new XSSFWorkbook();
+             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            CellStyle headerStyle = headerStyle(workbook);
+            writeOverview(workbook, headerStyle, detail);
+            writeDocuments(workbook, headerStyle, detail);
+            writeBasicInfo(workbook, headerStyle, detail);
+            writeItems(workbook, headerStyle, "资格要求", TenderAnalysisPort.ITEM_QUALIFICATION, detail);
+            writeItems(workbook, headerStyle, "评分标准", TenderAnalysisPort.ITEM_SCORING, detail);
+            writeItems(workbook, headerStyle, "逻辑问题", TenderAnalysisPort.ITEM_LOGIC_ISSUE, detail);
+            writeItems(workbook, headerStyle, "错别字", TenderAnalysisPort.ITEM_TYPO, detail);
+            workbook.write(out);
+            return new ExportFile(fileName(detail), out.toByteArray());
+        } catch (IOException ex) {
+            throw new BizException(ErrorCode.INTERNAL, "生成招标解析结果失败");
+        }
+    }
+
+    private void writeOverview(Workbook workbook,
+                               CellStyle headerStyle,
+                               TenderAnalysisPort.AnalysisDetail detail) {
+        Sheet sheet = workbook.createSheet("概览");
+        int rowIndex = 0;
+        rowIndex = keyValue(sheet, rowIndex, "解析ID", detail.getId());
+        rowIndex = keyValue(sheet, rowIndex, "任务名称", text(detail.getName()));
+        rowIndex = keyValue(sheet, rowIndex, "状态", text(detail.getStatus()));
+        rowIndex = keyValue(sheet, rowIndex, "标包ID", detail.getPackageId());
+        rowIndex = keyValue(sheet, rowIndex, "文件数量", parseLongArray(detail.getDocumentIdsJson()).size());
+        rowIndex = keyValue(sheet, rowIndex, "资格要求数量", countItems(detail, TenderAnalysisPort.ITEM_QUALIFICATION));
+        rowIndex = keyValue(sheet, rowIndex, "评分标准数量", countItems(detail, TenderAnalysisPort.ITEM_SCORING));
+        rowIndex = keyValue(sheet, rowIndex, "逻辑问题数量", countItems(detail, TenderAnalysisPort.ITEM_LOGIC_ISSUE));
+        rowIndex = keyValue(sheet, rowIndex, "错别字数量", countItems(detail, TenderAnalysisPort.ITEM_TYPO));
+        rowIndex = keyValue(sheet, rowIndex, "创建时间", formatTime(detail.getCreatedAt()));
+        keyValue(sheet, rowIndex, "更新时间", formatTime(detail.getUpdatedAt()));
+        applyHeader(sheet.getRow(0), headerStyle);
+        autoSize(sheet, 2);
+    }
+
+    private void writeDocuments(Workbook workbook,
+                                CellStyle headerStyle,
+                                TenderAnalysisPort.AnalysisDetail detail) {
+        Sheet sheet = workbook.createSheet("源文件");
+        header(sheet, headerStyle, "文档ID", "标包ID", "文件名", "扩展名", "索引状态");
+        int rowIndex = 1;
+        for (DocumentAccessPort.DocumentRef doc : documentAccessPort.listActiveByPackageId(detail.getPackageId())) {
+            if (doc.getOrgId() != detail.getOrgId()) {
+                continue;
+            }
+            Row row = sheet.createRow(rowIndex++);
+            cell(row, 0, doc.getId());
+            cell(row, 1, doc.getPackageId());
+            cell(row, 2, doc.getFileName());
+            cell(row, 3, doc.getFileExt());
+            cell(row, 4, doc.getIndexStatus());
+        }
+        autoSize(sheet, 5);
+    }
+
+    private void writeBasicInfo(Workbook workbook,
+                                CellStyle headerStyle,
+                                TenderAnalysisPort.AnalysisDetail detail) {
+        Sheet sheet = workbook.createSheet("基础信息");
+        header(sheet, headerStyle, "字段", "值", "页码", "chunkId", "原文片段");
+        int rowIndex = 1;
+        rowIndex = basicInfoRow(sheet, rowIndex, "招标编号", detail.getTenderNo(), detail.getEvidenceJson(), "tenderNo");
+        rowIndex = basicInfoRow(sheet, rowIndex, "招标人", detail.getTenderer(), detail.getEvidenceJson(), "tenderer");
+        rowIndex = basicInfoRow(sheet, rowIndex, "招标代理", detail.getAgency(), detail.getEvidenceJson(), "agency");
+        rowIndex = basicInfoRow(sheet, rowIndex, "预算金额", detail.getBudgetAmountText(),
+                detail.getEvidenceJson(), "budgetAmountText");
+        rowIndex = basicInfoRow(sheet, rowIndex, "投标截止时间", detail.getBidDeadlineText(),
+                detail.getEvidenceJson(), "bidDeadlineText");
+        rowIndex = basicInfoRow(sheet, rowIndex, "项目简介", detail.getProjectIntro(),
+                detail.getEvidenceJson(), "projectIntro");
+        rowIndex = basicInfoRow(sheet, rowIndex, "项目背景", detail.getProjectBackground(),
+                detail.getEvidenceJson(), "projectBackground");
+        basicInfoRow(sheet, rowIndex, "项目概况", detail.getProjectOverview(),
+                detail.getEvidenceJson(), "projectOverview");
+        autoSize(sheet, 5);
+    }
+
+    private int basicInfoRow(Sheet sheet,
+                             int rowIndex,
+                             String label,
+                             String value,
+                             String evidenceJson,
+                             String evidenceField) {
+        JsonNode evidence = findEvidenceByField(evidenceJson, evidenceField);
+        Row row = sheet.createRow(rowIndex);
+        cell(row, 0, label);
+        cell(row, 1, value);
+        cell(row, 2, integerText(evidence, "pageNo"));
+        cell(row, 3, longText(evidence, "chunkId"));
+        cell(row, 4, textOf(evidence, "quote"));
+        return rowIndex + 1;
+    }
+
+    private void writeItems(Workbook workbook,
+                            CellStyle headerStyle,
+                            String sheetName,
+                            String itemType,
+                            TenderAnalysisPort.AnalysisDetail detail) {
+        Sheet sheet = workbook.createSheet(sheetName);
+        if (TenderAnalysisPort.ITEM_SCORING.equals(itemType)) {
+            header(sheet, headerStyle, "编号", "标题", "内容", "满分", "分项合计一致", "分类",
+                    "页码", "chunkIds", "原文片段");
+        } else if (TenderAnalysisPort.ITEM_LOGIC_ISSUE.equals(itemType)) {
+            header(sheet, headerStyle, "编号", "标题", "内容", "严重程度", "问题类型", "修改建议",
+                    "页码", "chunkIds", "原文片段");
+        } else if (TenderAnalysisPort.ITEM_TYPO.equals(itemType)) {
+            header(sheet, headerStyle, "编号", "错误文本", "建议文本", "置信度", "修改建议",
+                    "页码", "chunkIds", "原文片段");
+        } else {
+            header(sheet, headerStyle, "编号", "标题", "内容", "分类", "页码", "chunkIds", "原文片段");
+        }
+
+        int rowIndex = 1;
+        for (TenderAnalysisPort.ItemView item : detail.getItems()) {
+            if (!itemType.equals(item.getItemType())) {
+                continue;
+            }
+            JsonNode evidence = firstEvidence(item.getEvidenceJson());
+            Row row = sheet.createRow(rowIndex++);
+            cell(row, 0, item.getRequirementCode());
+            if (TenderAnalysisPort.ITEM_SCORING.equals(itemType)) {
+                cell(row, 1, item.getTitle());
+                cell(row, 2, item.getContent());
+                cell(row, 3, item.getScoreTotal());
+                cell(row, 4, boolText(item.getScoreSumMatches()));
+                cell(row, 5, item.getSubType());
+                cell(row, 6, pageNo(item, evidence));
+                cell(row, 7, joinLongs(parseLongArray(item.getChunkIdsJson())));
+                cell(row, 8, excerpt(item, evidence));
+            } else if (TenderAnalysisPort.ITEM_LOGIC_ISSUE.equals(itemType)) {
+                cell(row, 1, item.getTitle());
+                cell(row, 2, item.getContent());
+                cell(row, 3, textOf(evidence, "severity"));
+                cell(row, 4, textOf(evidence, "issueType"));
+                cell(row, 5, textOf(evidence, "suggestion"));
+                cell(row, 6, pageNo(item, evidence));
+                cell(row, 7, joinLongs(parseLongArray(item.getChunkIdsJson())));
+                cell(row, 8, excerpt(item, evidence));
+            } else if (TenderAnalysisPort.ITEM_TYPO.equals(itemType)) {
+                cell(row, 1, textOf(evidence, "wrongText"));
+                cell(row, 2, textOf(evidence, "suggestedText"));
+                cell(row, 3, textOf(evidence, "confidence"));
+                cell(row, 4, textOf(evidence, "suggestion"));
+                cell(row, 5, pageNo(item, evidence));
+                cell(row, 6, joinLongs(parseLongArray(item.getChunkIdsJson())));
+                cell(row, 7, excerpt(item, evidence));
+            } else {
+                cell(row, 1, item.getTitle());
+                cell(row, 2, item.getContent());
+                cell(row, 3, item.getSubType());
+                cell(row, 4, pageNo(item, evidence));
+                cell(row, 5, joinLongs(parseLongArray(item.getChunkIdsJson())));
+                cell(row, 6, excerpt(item, evidence));
+            }
+        }
+        autoSize(sheet, TenderAnalysisPort.ITEM_SCORING.equals(itemType)
+                || TenderAnalysisPort.ITEM_LOGIC_ISSUE.equals(itemType) ? 9
+                : TenderAnalysisPort.ITEM_TYPO.equals(itemType) ? 8 : 7);
+    }
+
+    private int countItems(TenderAnalysisPort.AnalysisDetail detail, String itemType) {
+        int count = 0;
+        for (TenderAnalysisPort.ItemView item : detail.getItems()) {
+            if (itemType.equals(item.getItemType())) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private JsonNode findEvidenceByField(String evidenceJson, String field) {
+        for (JsonNode node : parseArray(evidenceJson, "解析基础信息证据 JSON 不合法")) {
+            if (field.equals(textOf(node, "field"))) {
+                return node;
+            }
+        }
+        return null;
+    }
+
+    private JsonNode firstEvidence(String evidenceJson) {
+        JsonNode array = parseArray(evidenceJson, "解析条目证据 JSON 不合法");
+        if (array.isEmpty()) {
+            return null;
+        }
+        JsonNode first = array.get(0);
+        return first != null && first.isObject() ? first : null;
+    }
+
+    private JsonNode parseArray(String json, String errorMessage) {
+        if (json == null || json.isBlank()) {
+            return objectMapper.createArrayNode();
+        }
+        try {
+            JsonNode node = objectMapper.readTree(json);
+            if (node != null && node.isArray()) {
+                return node;
+            }
+        } catch (IOException ex) {
+            throw new BizException(ErrorCode.INTERNAL, errorMessage);
+        }
+        throw new BizException(ErrorCode.INTERNAL, errorMessage);
+    }
+
+    private List<Long> parseLongArray(String json) {
+        JsonNode array = parseArray(json, "解析文档 ID JSON 不合法");
+        List<Long> result = new ArrayList<>();
+        for (JsonNode node : array) {
+            if (!node.canConvertToLong()) {
+                throw new BizException(ErrorCode.INTERNAL, "解析文档 ID JSON 不合法");
+            }
+            result.add(node.asLong());
+        }
+        return result;
+    }
+
+    private String pageNo(TenderAnalysisPort.ItemView item, JsonNode evidence) {
+        if (item.getPageNo() != null) {
+            return item.getPageNo().toString();
+        }
+        return integerText(evidence, "pageNo");
+    }
+
+    private String excerpt(TenderAnalysisPort.ItemView item, JsonNode evidence) {
+        String excerpt = text(item.getSourceExcerpt());
+        return excerpt.isEmpty() ? textOf(evidence, "quote") : excerpt;
+    }
+
+    private String textOf(JsonNode node, String field) {
+        if (node == null || field == null) {
+            return "";
+        }
+        JsonNode value = node.get(field);
+        if (value == null || value.isNull()) {
+            return "";
+        }
+        return value.asText("").trim();
+    }
+
+    private String integerText(JsonNode node, String field) {
+        String value = textOf(node, field);
+        return value;
+    }
+
+    private String longText(JsonNode node, String field) {
+        String value = textOf(node, field);
+        return value;
+    }
+
+    private String joinLongs(List<Long> ids) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < ids.size(); i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            sb.append(ids.get(i));
+        }
+        return sb.toString();
+    }
+
+    private String boolText(Boolean value) {
+        if (value == null) {
+            return "";
+        }
+        return value ? "是" : "否";
+    }
+
+    private int keyValue(Sheet sheet, int rowIndex, String key, Object value) {
+        Row row = sheet.createRow(rowIndex);
+        cell(row, 0, key);
+        cell(row, 1, value);
+        return rowIndex + 1;
+    }
+
+    private void header(Sheet sheet, CellStyle headerStyle, String... values) {
+        Row row = sheet.createRow(0);
+        for (int i = 0; i < values.length; i++) {
+            cell(row, i, values[i]);
+        }
+        applyHeader(row, headerStyle);
+    }
+
+    private void applyHeader(Row row, CellStyle headerStyle) {
+        for (Cell cell : row) {
+            cell.setCellStyle(headerStyle);
+        }
+    }
+
+    private CellStyle headerStyle(Workbook workbook) {
+        Font font = workbook.createFont();
+        font.setBold(true);
+        CellStyle style = workbook.createCellStyle();
+        style.setFont(font);
+        return style;
+    }
+
+    private void cell(Row row, int index, Object value) {
+        Cell cell = row.createCell(index);
+        if (value == null) {
+            cell.setBlank();
+        } else if (value instanceof BigDecimal decimal) {
+            cell.setCellValue(decimal.doubleValue());
+        } else if (value instanceof Number number) {
+            cell.setCellValue(number.doubleValue());
+        } else {
+            cell.setCellValue(value.toString());
+        }
+    }
+
+    private void autoSize(Sheet sheet, int columnCount) {
+        for (int i = 0; i < columnCount; i++) {
+            sheet.autoSizeColumn(i);
+        }
+    }
+
+    private String formatTime(Instant instant) {
+        return instant == null ? "" : TIME_FORMATTER.format(instant);
+    }
+
+    private String fileName(TenderAnalysisPort.AnalysisDetail detail) {
+        String name = text(detail.getName()).replaceAll("[\\\\/:*?\"<>|]", "_");
+        if (name.isEmpty()) {
+            name = "tender-analysis-" + detail.getId();
+        }
+        return name + "-招标解析结果.xlsx";
+    }
+
+    private String text(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    public static class ExportFile {
+        private final String fileName;
+        private final byte[] content;
+
+        public ExportFile(String fileName, byte[] content) {
+            this.fileName = fileName;
+            this.content = content;
+        }
+
+        public String getFileName() {
+            return fileName;
+        }
+
+        public byte[] getContent() {
+            return content;
+        }
+    }
+}

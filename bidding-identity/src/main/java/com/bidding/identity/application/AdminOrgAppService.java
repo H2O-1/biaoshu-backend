@@ -36,6 +36,9 @@ public class AdminOrgAppService {
     private static final String STATUS_ACTIVE = "ACTIVE";
     private static final String STATUS_DISABLED = "DISABLED";
     private static final String STATUS_DELETED = "DELETED";
+    public static final String ORG_TYPE_SYSTEM = "SYSTEM";
+    public static final String ORG_TYPE_TENDERER = "TENDERER";
+    public static final String ORG_TYPE_BIDDER = "BIDDER";
     private static final String PACKAGE_TYPE_TENDER = "TENDER";
     private static final String PACKAGE_TYPE_BID = "BID";
     private static final String INDEX_SUCCESS = "SUCCESS";
@@ -73,11 +76,11 @@ public class AdminOrgAppService {
     }
 
     /**
-     * 创建组织。组织类型当前固定为招标方业务场景，不单独存类型字段。
+     * 创建组织。一个组织固定为招标方或投标方。
      * 允许先建空组织（无账号）。
      */
     @Transactional
-    public OrgSummary createOrg(String name, String city) {
+    public OrgSummary createOrg(String name, String city, String orgType) {
         CurrentUser operator = checkPlatformAdmin();
 
         String safeName = normalizeName(name);
@@ -85,11 +88,16 @@ public class AdminOrgAppService {
             throw new BizException(ErrorCode.CONFLICT, "公司名称已存在");
         }
         String safeCity = normalizeCity(city);
+        String safeOrgType = normalizeOrgType(orgType);
         String code = generateUniqueCode();
 
         long orgId = orgRepository.insert(
-                code, safeName, safeCity, STATUS_ACTIVE, operator.getUserId());
+                code, safeName, safeCity, safeOrgType, STATUS_ACTIVE, operator.getUserId());
         return toSummary(requireOrg(orgId));
+    }
+
+    public OrgSummary createOrg(String name, String city) {
+        return createOrg(name, city, ORG_TYPE_TENDERER);
     }
 
     /**
@@ -160,6 +168,7 @@ public class AdminOrgAppService {
         detail.setCode(summary.getCode());
         detail.setName(summary.getName());
         detail.setCity(summary.getCity());
+        detail.setOrgType(summary.getOrgType());
         detail.setStatus(summary.getStatus());
         detail.setUserCount(summary.getUserCount());
         detail.setProjectCount(summary.getProjectCount());
@@ -286,6 +295,7 @@ public class AdminOrgAppService {
         summary.setCode(org.getCode());
         summary.setName(org.getName());
         summary.setCity(org.getCity());
+        summary.setOrgType(org.getOrgType());
         summary.setStatus(org.getStatus());
         summary.setUserCount(orgRepository.countUsersByOrgId(orgId));
         summary.setProjectCount(projectCountPort.countByOrgId(orgId));
@@ -382,6 +392,17 @@ public class AdminOrgAppService {
         return normalized;
     }
 
+    private String normalizeOrgType(String orgType) {
+        if (orgType == null || orgType.trim().isEmpty()) {
+            return ORG_TYPE_TENDERER;
+        }
+        String normalized = orgType.trim().toUpperCase(Locale.ROOT);
+        if (!ORG_TYPE_TENDERER.equals(normalized) && !ORG_TYPE_BIDDER.equals(normalized)) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "orgType 仅支持 TENDERER 或 BIDDER");
+        }
+        return normalized;
+    }
+
     private String normalizeActiveOrDisabled(String status) {
         if (status == null || status.trim().isEmpty()) {
             throw new BizException(ErrorCode.BAD_REQUEST, "status 不能为空");
@@ -410,6 +431,7 @@ public class AdminOrgAppService {
         private String code;
         private String name;
         private String city;
+        private String orgType;
         private String status;
         private long userCount;
         private long projectCount;
@@ -450,6 +472,14 @@ public class AdminOrgAppService {
 
         public void setCity(String city) {
             this.city = city;
+        }
+
+        public String getOrgType() {
+            return orgType;
+        }
+
+        public void setOrgType(String orgType) {
+            this.orgType = orgType;
         }
 
         public String getStatus() {
