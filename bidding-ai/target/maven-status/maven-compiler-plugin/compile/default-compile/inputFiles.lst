@@ -1,8 +1,0 @@
-D:\Work\bidding-architecture\backend\bidding-ai\src\main\java\com\bidding\ai\infrastructure\chunk\ChapterChunkingPort.java
-D:\Work\bidding-architecture\backend\bidding-ai\src\main\java\com\bidding\ai\infrastructure\embedding\HttpEmbeddingPort.java
-D:\Work\bidding-architecture\backend\bidding-ai\src\main\java\com\bidding\ai\infrastructure\extract\PdfWordTextExtractPort.java
-D:\Work\bidding-architecture\backend\bidding-ai\src\main\java\com\bidding\ai\infrastructure\fake\FakeChunkingPort.java
-D:\Work\bidding-architecture\backend\bidding-ai\src\main\java\com\bidding\ai\infrastructure\fake\FakeEmbeddingPort.java
-D:\Work\bidding-architecture\backend\bidding-ai\src\main\java\com\bidding\ai\infrastructure\llm\HttpLlmPort.java
-D:\Work\bidding-architecture\backend\bidding-ai\src\main\java\com\bidding\ai\infrastructure\rerank\HttpRerankPort.java
-D:\Work\bidding-architecture\backend\bidding-ai\src\main\java\com\bidding\ai\package-info.java
